@@ -3,6 +3,7 @@ erDiagram
     monthly_attendances ||--o{ approval_events : "状態遷移の証跡"
     employees ||--o{ time_clock_correction_requests : "申請する"
     time_clock_correction_requests ||--|{ time_clock_correction_items : "訂正内容"
+    time_clock_events ||--o{ time_clock_correction_items : "取消対象"
 
     monthly_attendances {
         uuid id PK
@@ -10,6 +11,7 @@ erDiagram
         date target_month "月初日。employee_id との組で一意"
         varchar status "DRAFT / SUBMITTED / APPROVED / CLOSED"
         timestamptz submitted_at "提出日時"
+        uuid submitted_by FK "提出者。代理提出なら人事"
         uuid approved_by FK "承認者"
         timestamptz approved_at "承認日時"
         uuid closed_by FK "締めた人事"
@@ -19,6 +21,7 @@ erDiagram
     approval_events {
         uuid id PK
         uuid monthly_attendance_id FK
+        varchar event_kind "SUBMIT / PROXY_SUBMIT / APPROVE / REJECT / CLOSE / REVOKE_APPROVAL / REVERT_BY_CORRECTION"
         varchar from_status "遷移元"
         varchar to_status "遷移先"
         uuid actor_id FK "実行者"
@@ -29,7 +32,7 @@ erDiagram
         uuid id PK
         uuid employee_id FK
         date work_date "訂正対象の勤務日"
-        varchar status "SUBMITTED / APPROVED / REJECTED"
+        varchar status "SUBMITTED / APPROVED / REJECTED / CANCELED"
         varchar reason "申請理由。必須"
         timestamptz requested_at
         uuid decided_by FK "承認・却下した人"
@@ -42,7 +45,8 @@ erDiagram
         uuid request_id FK
         int sequence_no "適用順"
         varchar action "REVOKE / ADD"
-        uuid target_event_id "REVOKE のとき対象打刻"
+        date work_date "取消対象の参照に必要。パーティションキー"
+        uuid target_event_id FK "REVOKE のとき対象打刻"
         varchar event_type "ADD のとき打刻種別"
         timestamptz occurred_at "ADD のとき打刻時刻"
     }
