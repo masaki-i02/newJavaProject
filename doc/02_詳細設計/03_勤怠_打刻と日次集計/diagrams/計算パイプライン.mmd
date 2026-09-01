@@ -1,20 +1,18 @@
 flowchart TB
     E["打刻イベント列<br/>ClockIn / BreakStart / BreakEnd / ClockOut"]
-    S1["① 状態機械で畳み込む<br/>TimeClockSequence"]
+    S1["① 状態機械で畳み込む<br/>TimeClockSequence<br/>（ここで秒を分へそろえる）"]
     R["実労働区間のリスト<br/>List&lt;TimeRange&gt;<br/>（休憩を除いた区間）"]
     S2["② 割増属性の無い区間へ変換<br/>List&lt;WorkSlice&gt;"]
-    D{"暦日区分は?"}
-    RN["NightWorkRule<br/>深夜帯で分割し NIGHT を付与"]
-    RO["DailyOvertimeRule<br/>累積時間の境界で分割し<br/>残業区分を付与"]
-    RH["LegalHolidayWorkRule<br/>全区間に LEGAL_HOLIDAY を付与"]
-    A["③ 集計<br/>DailyAttendance"]
+    B["③ CalendarDayBoundaryRule<br/>暦日境界で分割する（属性は付けない）"]
+    RN["④ NightWorkRule<br/>深夜帯で分割し NIGHT を付与"]
+    RH["⑤ LegalHolidayWorkRule<br/>暦日が法定休日の区間に<br/>LEGAL_HOLIDAY を付与"]
+    D{"労働時間制度は?"}
+    RO["⑥ DailyOvertimeRule<br/>累積時間の境界で分割し残業区分を付与<br/>法定休日の区間は累積に数えない"]
+    SKIP["日次では残業を判定しない<br/>（BR-05 月次で清算する）"]
+    A["⑦ 集計<br/>DailyAttendance"]
 
-    E --> S1 --> R --> S2 --> D
-    D -- "所定労働日" --> RN
-    D -- "所定休日<br/>（所定労働時間 0 として扱う）" --> RN
-    D -- "法定休日" --> RN
-    RN --> RO2{"暦日区分は?"}
-    RO2 -- "所定労働日 / 所定休日" --> RO
-    RO2 -- "法定休日" --> RH
+    E --> S1 --> R --> S2 --> B --> RN --> RH --> D
+    D -- "固定時間制" --> RO
+    D -- "フレックス" --> SKIP
     RO --> A
-    RH --> A
+    SKIP --> A

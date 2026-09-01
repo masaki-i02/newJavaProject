@@ -10,7 +10,7 @@
 | 領域 | 技術 |
 | --- | --- |
 | バックエンド | Java 21 / Spring Boot 4.1 / Spring Data JPA / Spring Security |
-| データベース | PostgreSQL 17 / Flyway |
+| データベース | PostgreSQL 16 / Flyway |
 | フロントエンド | React / TypeScript / Vite |
 | ビルド | Gradle (Kotlin DSL) / npm |
 | テスト | JUnit 5 / AssertJ / Testcontainers / ArchUnit / Vitest |

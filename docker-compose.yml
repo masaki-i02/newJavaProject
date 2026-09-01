@@ -6,7 +6,7 @@
 # 本番相当のコンテナ化はマイルストーン M3 で扱う。
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     container_name: kintai-db
     environment:
       POSTGRES_DB: kintai

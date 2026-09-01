@@ -34,7 +34,7 @@ classDiagram
         splitAt(LocalDateTime) List~WorkSlice~
     }
     class PremiumType {
-        <<enum>>
+        <<enum · shared>>
         OVERTIME_WITHIN_STATUTORY
         OVERTIME_BEYOND_STATUTORY
         NIGHT
@@ -45,9 +45,10 @@ classDiagram
         <<sealed interface>>
         apply(List~WorkSlice~) List~WorkSlice~
     }
+    class CalendarDayBoundaryRule { <<record>> }
     class NightWorkRule { <<record>> }
-    class DailyOvertimeRule { <<record>> }
     class LegalHolidayWorkRule { <<record>> }
+    class DailyOvertimeRule { <<record>> }
     class DailyAttendance {
         <<record>>
         LocalDate workDate
@@ -55,7 +56,8 @@ classDiagram
         List~WorkSlice~ slices
         Duration workingTime
         Duration breakTime
-        Duration withinScheduledTime
+        WorkingTimeSystemType workingTimeSystem
+        Duration baseTime
         Duration overtimeWithinStatutoryTime
         Duration overtimeBeyondStatutoryTime
         Duration nightTime
@@ -63,7 +65,17 @@ classDiagram
     }
     class DailyAttendanceCalculator {
         <<domain service>>
-        calculate(LocalDate, DayType, TimeClockSequence) DailyAttendance
+        calculate(LocalDate, TimeClockSequence, WorkRule, CompanyCalendar) DailyAttendance
+    }
+    class WorkRule {
+        <<record · workrule>>
+        WorkingTimeSystem workingTimeSystem
+        NightWindow nightWindow
+        Duration statutoryDailyWorkingTime
+    }
+    class CompanyCalendar {
+        <<domain service · workrule>>
+        dayTypeOf(LocalDate) DayType
     }
 
     TimeClockEvent <|.. ClockIn
@@ -74,10 +86,13 @@ classDiagram
     TimeClockSequence --> TimeRange
     WorkSlice --> TimeRange
     WorkSlice --> PremiumType
+    AttendanceRule <|.. CalendarDayBoundaryRule
     AttendanceRule <|.. NightWorkRule
-    AttendanceRule <|.. DailyOvertimeRule
     AttendanceRule <|.. LegalHolidayWorkRule
+    AttendanceRule <|.. DailyOvertimeRule
+    LegalHolidayWorkRule ..> CompanyCalendar
     AttendanceRule ..> WorkSlice
     DailyAttendance --> WorkSlice
     DailyAttendanceCalculator ..> AttendanceRule
     DailyAttendanceCalculator ..> DailyAttendance
+    DailyAttendanceCalculator ..> WorkRule
