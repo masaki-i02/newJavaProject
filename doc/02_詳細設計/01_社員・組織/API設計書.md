@@ -3,10 +3,10 @@
 | 項目 | 内容 |
 | --- | --- |
 | 文書番号 | KNT-DES-103 |
-| 版 | 0.2 |
+| 版 | 0.3 |
 | 対象パッケージ | `jp.co.sample.kintai.employee.presentation` |
 | 関連文書 | [ドメインモデル設計書](ドメインモデル設計書.md) / [DB設計書](DB設計書.md) |
-| 改訂 | 0.2（2026-09-01）設計レビューの指摘を反映 |
+| 改訂 | 0.2（2026-09-01）設計レビューの指摘を反映<br>0.3（2026-09-01）レビュー第 2 回。承認者の導出理由を部署ごとの `reason` に細分化 |
 
 ---
 
@@ -288,33 +288,42 @@
   "month": "2026-04",
   "basisDate": "2026-04-01",
   "approver": {
+    "kind": "INDIVIDUAL",
     "id": "0195b000-0000-7000-8000-000000000002",
     "name": "佐藤 花子",
     "department": { "code": "S1", "name": "第一営業部" }
   },
-  "resolvedFrom": "PARENT_NO_MANAGER",
   "path": [
-    { "code": "S1A", "name": "第一営業課", "skippedBecause": "NO_MANAGER" },
-    { "code": "S1",  "name": "第一営業部", "skippedBecause": null }
+    { "code": "S1A", "name": "第一営業課", "reason": "NO_MANAGER" },
+    { "code": "S1",  "name": "第一営業部", "reason": "NONE" }
   ]
 }
 ```
 
-`resolvedFrom` は承認者がどう決まったかを示す。
+`kind` は承認者の種類、`path` の各要素の `reason` は
+**その部署でなぜ承認者が決まらなかったか**を示す。
 
-| 値 | 意味 |
+| `kind` | 意味 |
 | --- | --- |
-| `OWN_DEPARTMENT` | 所属部署の長 |
-| `PARENT_NO_MANAGER` | 所属部署に長が未設定のため遡った |
-| `PARENT_SELF_APPROVAL_AVOIDED` | **部署長が本人だったため遡った** |
-| `PARENT_MANAGER_RETIRED` | 部署長が承認時点で退職済みのため遡った |
-| `PARENT_DEPARTMENT_ABOLISHED` | 部署が廃止済みのため遡った |
-| `HR_FALLBACK` | **根まで遡っても得られず、人事担当が承認者となる** |
-| `NONE` | 対象月に所属が無い（`approver` は `null`） |
+| `INDIVIDUAL` | 個人が承認する |
+| `HUMAN_RESOURCES` | **根まで遡っても得られず、人事担当が承認する**（`id` は `null`） |
+| `NONE` | 対象月に所属が無い（入社前・退職後。この月には月次勤怠が存在しない） |
 
-**遡った経路（`path`）も返す。**
+| `reason` | 意味 |
+| --- | --- |
+| `NONE` | **この部署で承認者が決まった** |
+| `NO_MANAGER` | 長が未設定のため遡った |
+| `SELF_APPROVAL_AVOIDED` | **部署長が本人だったため遡った** |
+| `MANAGER_RETIRED` | 部署長が承認時点で退職済みのため遡った |
+| `DEPARTMENT_ABOLISHED` | 部署が廃止済みのため遡った |
+
+**理由を単一の値ではなく、部署ごとに返す。**
+自部署は長が未設定・親では本人、のように経路上に複数の理由が混在する。
+単一の `resolvedFrom` では「長が未設定なのか本人だったのか」を区別できても、
+**どの部署でそれが起きたかを表せない。**
+
 「なぜこの人が承認者なのか」は運用中に必ず問い合わせが来る。
-`PARENT_DEPARTMENT` のような粗い値では、長が未設定なのか本人だったのかを区別できない。
+**この経路そのものが、その問い合わせに対する答えになる。**
 
 パラメータを `date` ではなく `month` にしているのは、
 **BR-11 の基準日が「対象月の初日、ただし月中に所属開始があればその日」という
