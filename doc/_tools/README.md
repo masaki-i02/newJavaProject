@@ -22,7 +22,7 @@ npm run render
 
 ```
 doc/02_詳細設計/03_勤怠/diagrams/ドメインモデル.mmd
-  → doc/02_詳細設計/03_勤怠/images/ドメインモデル.png
+  → doc/02_詳細設計/03_勤怠_打刻と日次集計/images/ドメインモデル.png
 ```
 
 Markdown からは相対パスで参照する。
