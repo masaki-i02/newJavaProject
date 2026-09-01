@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    actor E as 社員
+    participant A as approval
+    participant T as attendance
+    actor M as 承認者
+
+    E->>A: 訂正を申請<br/>（取り消す打刻 / 追加する打刻 / 理由）
+    A->>A: 対象月が締め済みでないか検証
+    A->>T: 訂正後の打刻列が状態機械として妥当か検証
+    T-->>A: 検証結果
+    A-->>E: 申請を受理（SUBMITTED）
+
+    M->>A: 承認
+    A->>T: 取消行を追記（REVOCATION）
+    A->>T: 新しい打刻を追記（ENTRY）
+    A->>T: 日次勤怠を再計算
+    A->>A: 月次勤怠を下書きへ戻す
+    A-->>M: 承認完了
+
+    Note over A,T: 打刻は追記のみ。<br/>元の打刻は履歴として残る（BR-09）
