@@ -4,7 +4,7 @@
 
 | ディレクトリ | 内容 | 技術 |
 | --- | --- | --- |
-| `backend/` | バックエンド | Java 21 / Spring Boot / Gradle (Kotlin DSL) / PostgreSQL |
+| `backend/` | バックエンド | Java 21 / Spring Boot 4.1 / Gradle (Kotlin DSL) / PostgreSQL |
 | `frontend/` | フロントエンド | React / TypeScript / Vite |
 
 ## backend の生成条件
@@ -15,11 +15,12 @@
 | --- | --- |
 | Project | Gradle - Kotlin |
 | Language | Java |
-| Spring Boot | 3.5.x |
+| Spring Boot | 4.1.1（SNAPSHOT / M 版は選ばない） |
 | Group | `jp.co.sample` |
-| Artifact / Name | `kintai` |
+| Artifact | `kintai` |
 | Package name | `jp.co.sample.kintai` |
 | Packaging | Jar |
+| Configuration | YAML |
 | Java | 21 |
 
 **Dependencies**
