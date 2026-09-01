@@ -1,0 +1,15 @@
+flowchart TD
+    approval["approval<br/>申請・承認・締め"]
+    attendance["attendance<br/>打刻・労働時間の集計"]
+    workrule["workrule<br/>就業規則・カレンダー"]
+    employee["employee<br/>社員・組織"]
+    shared["shared<br/>共通の型"]
+
+    approval --> attendance
+    approval --> employee
+    attendance --> workrule
+    attendance --> employee
+    approval --> shared
+    attendance --> shared
+    workrule --> shared
+    employee --> shared

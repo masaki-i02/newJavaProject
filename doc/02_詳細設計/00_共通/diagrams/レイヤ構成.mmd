@@ -1,0 +1,9 @@
+flowchart TB
+    P["presentation<br/>REST コントローラ / DTO"]
+    A["application<br/>ユースケース / トランザクション境界"]
+    D["domain<br/>業務ルール / ポート定義"]
+    I["infrastructure<br/>JPA エンティティ / ポート実装"]
+
+    P --> A
+    A --> D
+    I -. "ポートを実装" .-> D

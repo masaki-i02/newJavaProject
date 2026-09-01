@@ -1,0 +1,9 @@
+flowchart LR
+    U["利用者<br/>ブラウザ"]
+    F["フロントエンド<br/>React + TypeScript"]
+    B["バックエンド<br/>Spring Boot 4.1 / Java 21"]
+    D[("PostgreSQL 17")]
+
+    U --> F
+    F -- "REST / JSON" --> B
+    B -- "JDBC" --> D

@@ -1,0 +1,10 @@
+{
+  "theme": "neutral",
+  "themeVariables": {
+    "fontFamily": "Noto Sans JP, Hiragino Sans, Yu Gothic, sans-serif",
+    "fontSize": "15px"
+  },
+  "er": { "layoutDirection": "TB", "entityPadding": 14 },
+  "flowchart": { "curve": "basis", "padding": 12 },
+  "sequence": { "actorFontSize": 15, "noteFontSize": 14, "messageFontSize": 14 }
+}

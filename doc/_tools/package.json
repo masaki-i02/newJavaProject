@@ -1,0 +1,13 @@
+{
+  "name": "kintai-doc-tools",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "設計書に埋め込む図を Mermaid から PNG へ変換するツール",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2"
+  }
+}
