@@ -9,7 +9,18 @@ bin/
 # ビルド成果物の jar は除外する。ただし Gradle Wrapper は
 # 「clone したら誰でも同じ Gradle でビルドできる」ための必須ファイルなのでコミットする
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+# スラッシュを含むパターンはこの .gitignore のある階層を基準に解釈されるため、
+# サブディレクトリのプロジェクトにも効くよう ** で始める
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# build / bin / out という名前の Java パッケージを作った場合に、
+# ソースまで巻き込んで無視してしまうのを防ぐ
+!**/src/main/**/build/
+!**/src/test/**/build/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+!**/src/main/**/out/
+!**/src/test/**/out/
 
 # ===== Node / フロントエンド =====
 node_modules/
@@ -20,12 +31,14 @@ npm-debug.log*
 yarn-error.log*
 
 # ===== IDE =====
-# Eclipse（プロジェクト設定は環境依存のため共有しない）
+# Eclipse / Spring Tools（プロジェクト設定は環境依存のため共有しない）
 .settings/
 .classpath
 .project
 .apt_generated/
 .factorypath
+.springBeans
+.sts4-cache/
 # IntelliJ IDEA
 .idea/
 *.iml
@@ -49,3 +62,7 @@ Thumbs.db
 .env
 .env.local
 *-local.yml
+
+# ===== Spring Initializr の生成物 =====
+# 使わないため追跡しない
+HELP.md

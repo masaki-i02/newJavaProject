@@ -1,0 +1,16 @@
+# 改行コードをリポジトリ内で LF に統一する（.editorconfig と対になる設定）。
+# Windows と macOS / Linux の混在環境でも、差分に改行コードの変更が混ざらないようにする。
+* text=auto eol=lf
+
+# Windows のバッチファイルは CRLF でないと正しく動作しないため、ここだけ例外とする
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# バイナリとして扱い、改行変換も差分表示も行わない
+*.jar binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
