@@ -1,0 +1,75 @@
+classDiagram
+    direction TB
+
+    class WorkRule {
+        <<record>>
+        WorkRuleId id
+        String name
+        DateRange validPeriod
+        WorkingTimeSystem workingTimeSystem
+        Duration statutoryDailyWorkingTime
+        Duration statutoryWeeklyWorkingTime
+        NightWindow nightWindow
+        PremiumRates premiumRates
+    }
+
+    class WorkingTimeSystem {
+        <<sealed interface>>
+        scheduledWorkingTimeOn(DayType) Duration
+    }
+    class FixedTimeSystem {
+        <<record>>
+        LocalTime scheduledStart
+        LocalTime scheduledEnd
+        Duration scheduledBreak
+        scheduledWorkingTime() Duration
+    }
+    class FlextimeSystem {
+        <<record>>
+        TimeOfDayRange flexibleTime
+        TimeOfDayRange coreTime
+        Duration standardDailyWorkingTime
+        flexibleMorning() TimeOfDayRange
+        flexibleEvening() TimeOfDayRange
+        scheduledTotalWorkingTime(int) Duration
+    }
+
+    class PremiumRates {
+        <<record>>
+        BigDecimal overtimeBeyondStatutory
+        BigDecimal night
+        BigDecimal legalHoliday
+        multiplierFor(Set~PremiumType~) BigDecimal
+    }
+    class NightWindow {
+        <<record>>
+        LocalTime start
+        LocalTime end
+        crossesMidnight() boolean
+        intervalsOverlapping(TimeRange) List~TimeRange~
+    }
+    class DayType {
+        <<enum>>
+        WORKDAY
+        LEGAL_HOLIDAY
+        NON_LEGAL_HOLIDAY
+    }
+    class CompanyCalendar {
+        <<domain service>>
+        dayTypeOf(LocalDate) DayType
+        workdayCountIn(YearMonth) int
+    }
+    class WorkRuleAssignment {
+        <<record>>
+        EmployeeId employeeId
+        WorkRuleId workRuleId
+        DateRange period
+    }
+
+    WorkingTimeSystem <|.. FixedTimeSystem
+    WorkingTimeSystem <|.. FlextimeSystem
+    WorkRule --> WorkingTimeSystem
+    WorkRule --> PremiumRates
+    WorkRule --> NightWindow
+    CompanyCalendar --> DayType
+    WorkRuleAssignment --> WorkRule

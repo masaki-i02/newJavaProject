@@ -1,0 +1,39 @@
+erDiagram
+    work_rules ||--o{ work_rule_assignments : "社員へ適用"
+    employees ||--o{ work_rule_assignments : ""
+
+    work_rules {
+        uuid id PK
+        varchar name "規則名"
+        varchar working_time_system "FIXED / FLEX"
+        date valid_from "適用開始"
+        date valid_to "NULL は無期限"
+        time scheduled_start "FIXED のみ"
+        time scheduled_end "FIXED のみ"
+        int scheduled_break_minutes "FIXED のみ"
+        time core_start "FLEX のみ"
+        time core_end "FLEX のみ"
+        time flexible_start "FLEX のみ"
+        time flexible_end "FLEX のみ"
+        int standard_daily_minutes "FLEX のみ"
+        int statutory_daily_minutes "既定 480"
+        int statutory_weekly_minutes "既定 2400"
+        time night_start "既定 22:00"
+        time night_end "既定 05:00"
+        numeric rate_overtime "0.250 以上"
+        numeric rate_night "0.250 以上"
+        numeric rate_legal_holiday "0.350 以上"
+        bigint version "楽観ロック"
+    }
+    work_rule_assignments {
+        uuid id PK
+        uuid employee_id FK
+        uuid work_rule_id FK
+        date valid_from "適用開始"
+        date valid_to "NULL は無期限"
+    }
+    company_calendars {
+        date calendar_date PK
+        varchar day_type "WORKDAY / LEGAL_HOLIDAY / NON_LEGAL_HOLIDAY"
+        varchar name "祝日名など"
+    }
