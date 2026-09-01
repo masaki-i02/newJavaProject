@@ -1,0 +1,41 @@
+flowchart TB
+    L["SC-01 ログイン"]
+
+    subgraph 一般社員
+        H["SC-02 打刻（ホーム）"]
+        M["SC-03 自分の月次勤怠"]
+        C["SC-04 打刻訂正の申請"]
+    end
+
+    subgraph 承認者
+        PA["SC-05 承認待ち一覧"]
+        SM["SC-06 部下の月次勤怠"]
+        PC["SC-07 訂正申請の審査"]
+    end
+
+    subgraph 人事
+        CL["SC-08 月次締め"]
+        AL["SC-09 36協定アラート"]
+        WR["SC-10 就業規則"]
+        CA["SC-11 会社カレンダー"]
+    end
+
+    subgraph 管理者
+        EL["SC-12 社員一覧"]
+        EE["SC-13 社員の登録・編集"]
+        OR["SC-14 組織図"]
+    end
+
+    L --> H
+    H --> M
+    M --> C
+    H -.-> PA
+    PA --> SM
+    PA --> PC
+    H -.-> CL
+    CL --> AL
+    H -.-> EL
+    EL --> EE
+    EL --> OR
+    H -.-> WR
+    WR --> CA

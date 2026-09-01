@@ -1,13 +1,20 @@
 erDiagram
-    work_rules ||--o{ work_rule_assignments : "社員へ適用"
+    work_rule_series ||--o{ work_rules : "改定のたびに版が増える"
+    work_rule_series ||--o{ work_rule_assignments : "社員へ適用（版ではなく系列を指す）"
     employees ||--o{ work_rule_assignments : ""
 
+    work_rule_series {
+        uuid id PK
+        varchar name UK "標準勤務 / フレックス勤務"
+        date abolished_on "NULL は現役"
+        bigint version "楽観ロック"
+    }
     work_rules {
         uuid id PK
-        varchar name "規則名"
+        uuid series_id FK
         varchar working_time_system "FIXED / FLEX"
-        date valid_from "適用開始"
-        date valid_to "NULL は無期限"
+        date valid_from "この版の開始"
+        date valid_to "NULL は無期限。半開区間の上限"
         time scheduled_start "FIXED のみ"
         time scheduled_end "FIXED のみ"
         int scheduled_break_minutes "FIXED のみ"
@@ -16,24 +23,26 @@ erDiagram
         time flexible_start "FLEX のみ"
         time flexible_end "FLEX のみ"
         int standard_daily_minutes "FLEX のみ"
-        int statutory_daily_minutes "既定 480"
-        int statutory_weekly_minutes "既定 2400"
-        time night_start "既定 22:00"
-        time night_end "既定 05:00"
+        int scheduled_working_minutes "生成列。所定労働時間"
+        int statutory_daily_minutes "既定 480。上限 480"
+        int statutory_weekly_minutes "既定 2400。上限 2400"
+        time night_start "22:00 または 23:00"
+        time night_end "05:00 または 06:00"
         numeric rate_overtime "0.250 以上"
         numeric rate_night "0.250 以上"
         numeric rate_legal_holiday "0.350 以上"
-        bigint version "楽観ロック"
     }
     work_rule_assignments {
         uuid id PK
         uuid employee_id FK
-        uuid work_rule_id FK
-        date valid_from "適用開始"
-        date valid_to "NULL は無期限"
+        uuid work_rule_series_id FK
+        date valid_from "月初日または入社日"
+        date valid_to "NULL は無期限。半開区間の上限"
+        bigint version "楽観ロック"
     }
     company_calendars {
         date calendar_date PK
         varchar day_type "WORKDAY / LEGAL_HOLIDAY / NON_LEGAL_HOLIDAY"
         varchar name "祝日名など"
+        bigint version "楽観ロック"
     }

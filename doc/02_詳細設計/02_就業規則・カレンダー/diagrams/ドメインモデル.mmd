@@ -1,10 +1,18 @@
 classDiagram
     direction TB
 
+    class WorkRuleSeries {
+        <<record>>
+        WorkRuleSeriesId id
+        String name
+        Optional~LocalDate~ abolishedOn
+        activePeriod() DateRange
+    }
+
     class WorkRule {
         <<record>>
         WorkRuleId id
-        String name
+        WorkRuleSeriesId seriesId
         DateRange validPeriod
         WorkingTimeSystem workingTimeSystem
         Duration statutoryDailyWorkingTime
@@ -15,7 +23,6 @@ classDiagram
 
     class WorkingTimeSystem {
         <<sealed interface>>
-        scheduledWorkingTimeOn(DayType) Duration
     }
     class FixedTimeSystem {
         <<record>>
@@ -57,19 +64,33 @@ classDiagram
     class CompanyCalendar {
         <<domain service>>
         dayTypeOf(LocalDate) DayType
-        workdayCountIn(YearMonth) int
+        workdayCountIn(DateRange) int
     }
     class WorkRuleAssignment {
         <<record>>
         EmployeeId employeeId
-        WorkRuleId workRuleId
+        WorkRuleSeriesId seriesId
         DateRange period
+    }
+    class PremiumType {
+        <<enum · shared>>
+        OVERTIME_WITHIN_STATUTORY
+        OVERTIME_BEYOND_STATUTORY
+        NIGHT
+        LEGAL_HOLIDAY
+    }
+    class MonthClosureQuery {
+        <<port · shared>>
+        isClosed(EmployeeId, YearMonth) boolean
+        acceptsChanges(EmployeeId, YearMonth) boolean
     }
 
     WorkingTimeSystem <|.. FixedTimeSystem
     WorkingTimeSystem <|.. FlextimeSystem
+    WorkRuleSeries "1" --> "*" WorkRule : 版
     WorkRule --> WorkingTimeSystem
     WorkRule --> PremiumRates
     WorkRule --> NightWindow
+    PremiumRates ..> PremiumType
     CompanyCalendar --> DayType
-    WorkRuleAssignment --> WorkRule
+    WorkRuleAssignment --> WorkRuleSeries : 系列を指す
