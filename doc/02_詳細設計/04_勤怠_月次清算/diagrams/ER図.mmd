@@ -1,34 +1,42 @@
 erDiagram
     employees ||--o{ monthly_settlements : ""
-    work_rules ||--o{ monthly_settlements : "計算に使った規則"
+    work_rule_series ||--o{ monthly_settlements : "計算に使った規則の系列"
     monthly_settlements ||--o{ weekly_overtimes : "週40時間超の内訳"
 
     monthly_settlements {
         uuid id PK
         uuid employee_id FK
         date target_month "月初日。employee_id との組で一意"
-        uuid work_rule_id FK
+        date period_from "清算期間の開始。暦月 ∩ 在籍期間"
+        date period_to_exclusive "清算期間の終了。半開区間"
+        uuid work_rule_series_id FK
         varchar working_time_system "FIXED / FLEX"
         int working_minutes "実労働の合計"
         int legal_holiday_minutes "法定休日労働"
         int target_working_minutes "対象労働時間 = 実労働 − 法定休日"
         int scheduled_total_minutes "所定総労働時間"
-        int statutory_total_limit_minutes "法定労働時間の総枠"
+        int statutory_total_limit_minutes "総枠 = 清算期間の暦日数 ÷ 7 × 40h"
         int daily_overtime_minutes "日次で確定した法定外残業"
         int weekly_overtime_minutes "週40時間超"
         int overtime_minutes "時間外労働の合計"
         int shortage_minutes "不足時間"
         int night_minutes "深夜"
         int core_time_absence_minutes "コアタイム不在"
-        boolean exceeds_monthly_agreement_limit "月45時間超"
-        timestamptz calculated_at
-        bigint version
+        int annual_agreement_subject_before_minutes "当月より前の年度累計"
+        int monthly_agreement_limit_minutes "45時間 = 2700"
+        int annual_agreement_limit_minutes "360時間 = 21600"
+        boolean exceeds_monthly_agreement_limit "月45時間超。CHECK で式を守る"
+        boolean exceeds_annual_agreement_limit "年360時間超。CHECK で式を守る"
+        timestamptz calculated_at "最終計算日時"
+        bigint version "楽観ロック"
+        timestamptz created_at
+        timestamptz updated_at
     }
     weekly_overtimes {
         uuid id PK
         uuid monthly_settlement_id FK
         date week_start "週の起算日（日曜）"
-        date week_end "週の末日"
+        date week_end_exclusive "週の終了。半開区間なので起算日+7"
         int statutory_inside_minutes "週の法定内労働時間"
         int overtime_minutes "40時間を超えた分"
     }

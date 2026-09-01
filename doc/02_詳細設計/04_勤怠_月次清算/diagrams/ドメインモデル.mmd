@@ -1,0 +1,77 @@
+classDiagram
+    direction TB
+
+    class SettlementPeriod {
+        <<record>>
+        YearMonth month
+        DateRange period
+        of(YearMonth, DateRange) SettlementPeriod
+        days() long
+    }
+    class MonthlySettlement {
+        <<record>>
+        EmployeeId employeeId
+        SettlementPeriod period
+        WorkingTimeSystem workingTimeSystem
+        Duration workingTime
+        Duration legalHolidayTime
+        Duration targetWorkingTime
+        Duration scheduledTotalTime
+        Duration statutoryTotalLimit
+        Duration dailyOvertimeTime
+        Duration weeklyOvertimeTime
+        Duration overtimeTime
+        Duration shortageTime
+        Duration nightTime
+        Duration coreTimeAbsenceTime
+    }
+    class WeeklyOvertime {
+        <<record>>
+        LocalDate weekStart
+        LocalDate weekEndExclusive
+        Duration statutoryInsideTime
+        Duration overtimeTime
+    }
+    class AgreementUsage {
+        <<record>>
+        Duration overtimeMinutes
+        Duration legalHolidayMinutes
+        Duration monthlyLimit
+        Duration annualLimit
+        Duration annualUsedBefore
+        subjectTime() Duration
+        exceedsMonthly() boolean
+        exceedsAnnual() boolean
+    }
+    class DailyAttendance {
+        <<record · attendance>>
+        Duration workingTime
+        Duration legalHolidayTime
+        Duration overtimeBeyondStatutoryTime
+    }
+    class WorkingTimeSystem {
+        <<sealed interface · workrule>>
+    }
+    class FixedTimeSystem { <<record · workrule>> }
+    class FlextimeSystem {
+        <<record · workrule>>
+        scheduledTotalWorkingTime(int) Duration
+    }
+    class CompanyCalendar {
+        <<domain service · workrule>>
+        workdayCountIn(DateRange) int
+    }
+    class MonthClosureQuery {
+        <<port · shared>>
+        isClosed(EmployeeId, YearMonth) boolean
+        acceptsChanges(EmployeeId, YearMonth) boolean
+    }
+
+    WorkingTimeSystem <|.. FixedTimeSystem
+    WorkingTimeSystem <|.. FlextimeSystem
+    MonthlySettlement --> SettlementPeriod
+    MonthlySettlement --> WeeklyOvertime
+    MonthlySettlement --> AgreementUsage
+    MonthlySettlement --> WorkingTimeSystem
+    MonthlySettlement ..> DailyAttendance : 合計する
+    MonthlySettlement ..> CompanyCalendar : 所定労働日数
