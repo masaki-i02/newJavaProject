@@ -1,0 +1,29 @@
+# ローカル開発用のミドルウェア。
+#
+#   docker compose up -d
+#
+# アプリケーション本体はコンテナ化せず、IDE / CLI から起動する。
+# 本番相当のコンテナ化はマイルストーン M3 で扱う。
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: kintai-db
+    environment:
+      POSTGRES_DB: kintai
+      POSTGRES_USER: kintai
+      POSTGRES_PASSWORD: kintai
+      # 照合順序を固定しないと環境によってソート結果が変わるため明示する
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      TZ: Asia/Tokyo
+    ports:
+      - "5432:5432"
+    volumes:
+      - kintai-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kintai -d kintai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kintai-pgdata:

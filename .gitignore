@@ -1,0 +1,51 @@
+# ===== Java / Gradle =====
+.gradle/
+build/
+out/
+bin/
+*.class
+*.war
+
+# ビルド成果物の jar は除外する。ただし Gradle Wrapper は
+# 「clone したら誰でも同じ Gradle でビルドできる」ための必須ファイルなのでコミットする
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== Node / フロントエンド =====
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ===== IDE =====
+# Eclipse（プロジェクト設定は環境依存のため共有しない）
+.settings/
+.classpath
+.project
+.apt_generated/
+.factorypath
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+# VS Code（共有したい設定だけ個別に許可する）
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ===== ログ =====
+*.log
+logs/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== ローカル環境設定 =====
+# 認証情報を含むためコミットしない
+.env
+.env.local
+*-local.yml
