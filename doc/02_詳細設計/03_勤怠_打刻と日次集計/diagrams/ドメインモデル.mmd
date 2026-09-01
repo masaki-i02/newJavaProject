@@ -1,0 +1,83 @@
+classDiagram
+    direction TB
+
+    class TimeClockEvent {
+        <<sealed interface>>
+        LocalDateTime occurredAt
+        type() TimeClockEventType
+    }
+    class ClockIn { <<record>> }
+    class ClockOut { <<record>> }
+    class BreakStart { <<record>> }
+    class BreakEnd { <<record>> }
+
+    class TimeClockSequence {
+        1 日分の打刻列
+        validateTransitions() void
+        isClosed() boolean
+        toWorkedRanges() List~TimeRange~
+        attendanceSpan() Optional~TimeRange~
+    }
+    class TimeRange {
+        <<record>>
+        LocalDateTime start
+        LocalDateTime end
+        duration() Duration
+        intersect(TimeRange) Optional~TimeRange~
+        splitAt(LocalDateTime) List~TimeRange~
+    }
+    class WorkSlice {
+        <<record>>
+        TimeRange range
+        Set~PremiumType~ premiums
+        with(PremiumType) WorkSlice
+        splitAt(LocalDateTime) List~WorkSlice~
+    }
+    class PremiumType {
+        <<enum>>
+        OVERTIME_WITHIN_STATUTORY
+        OVERTIME_BEYOND_STATUTORY
+        NIGHT
+        LEGAL_HOLIDAY
+        partitionsWorkingTime() boolean
+    }
+    class AttendanceRule {
+        <<sealed interface>>
+        apply(List~WorkSlice~) List~WorkSlice~
+    }
+    class NightWorkRule { <<record>> }
+    class DailyOvertimeRule { <<record>> }
+    class LegalHolidayWorkRule { <<record>> }
+    class DailyAttendance {
+        <<record>>
+        LocalDate workDate
+        DayType dayType
+        List~WorkSlice~ slices
+        Duration workingTime
+        Duration breakTime
+        Duration withinScheduledTime
+        Duration overtimeWithinStatutoryTime
+        Duration overtimeBeyondStatutoryTime
+        Duration nightTime
+        Duration legalHolidayTime
+    }
+    class DailyAttendanceCalculator {
+        <<domain service>>
+        calculate(LocalDate, DayType, TimeClockSequence) DailyAttendance
+    }
+
+    TimeClockEvent <|.. ClockIn
+    TimeClockEvent <|.. ClockOut
+    TimeClockEvent <|.. BreakStart
+    TimeClockEvent <|.. BreakEnd
+    TimeClockSequence --> TimeClockEvent
+    TimeClockSequence --> TimeRange
+    WorkSlice --> TimeRange
+    WorkSlice --> PremiumType
+    AttendanceRule <|.. NightWorkRule
+    AttendanceRule <|.. DailyOvertimeRule
+    AttendanceRule <|.. LegalHolidayWorkRule
+    AttendanceRule ..> WorkSlice
+    DailyAttendance --> WorkSlice
+    DailyAttendanceCalculator ..> AttendanceRule
+    DailyAttendanceCalculator ..> DailyAttendance

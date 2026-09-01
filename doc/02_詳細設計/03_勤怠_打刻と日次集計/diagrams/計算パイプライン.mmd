@@ -1,0 +1,20 @@
+flowchart TB
+    E["打刻イベント列<br/>ClockIn / BreakStart / BreakEnd / ClockOut"]
+    S1["① 状態機械で畳み込む<br/>TimeClockSequence"]
+    R["実労働区間のリスト<br/>List&lt;TimeRange&gt;<br/>（休憩を除いた区間）"]
+    S2["② 割増属性の無い区間へ変換<br/>List&lt;WorkSlice&gt;"]
+    D{"暦日区分は?"}
+    RN["NightWorkRule<br/>深夜帯で分割し NIGHT を付与"]
+    RO["DailyOvertimeRule<br/>累積時間の境界で分割し<br/>残業区分を付与"]
+    RH["LegalHolidayWorkRule<br/>全区間に LEGAL_HOLIDAY を付与"]
+    A["③ 集計<br/>DailyAttendance"]
+
+    E --> S1 --> R --> S2 --> D
+    D -- "所定労働日" --> RN
+    D -- "所定休日<br/>（所定労働時間 0 として扱う）" --> RN
+    D -- "法定休日" --> RN
+    RN --> RO2{"暦日区分は?"}
+    RO2 -- "所定労働日 / 所定休日" --> RO
+    RO2 -- "法定休日" --> RH
+    RO --> A
+    RH --> A

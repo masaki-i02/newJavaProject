@@ -1,0 +1,16 @@
+stateDiagram-v2
+    direction LR
+    [*] --> 未出勤
+    未出勤 --> 勤務中 : 出勤
+    勤務中 --> 休憩中 : 休憩開始
+    休憩中 --> 勤務中 : 休憩終了
+    勤務中 --> 退勤済 : 退勤
+    退勤済 --> [*]
+
+    note right of 休憩中
+        休憩中の退勤打刻は拒否する。
+        sealed interface により
+        この遷移表の switch は
+        網羅性がコンパイラに
+        保証される。
+    end note

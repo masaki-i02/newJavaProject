@@ -9,42 +9,52 @@ erDiagram
 
     employees {
         uuid id PK
-        varchar employee_number UK "社員番号"
+        varchar employee_number "在籍者の間で一意。認証IDを兼ねる"
         varchar name "氏名"
-        varchar email UK "小文字で一意"
-        varchar employment_type "FULL_TIME / PART_TIME / CONTRACT"
+        varchar email "在籍者の間で小文字一意"
         date hired_on "入社日"
         date retired_on "NULL は在籍中"
         bigint version "楽観ロック"
+        timestamptz created_at "DB の now()"
+        timestamptz updated_at "トリガで自動更新"
     }
     employee_credentials {
-        uuid employee_id PK "employees への FK でもある"
-        varchar password_hash "BCrypt"
+        uuid employee_id PK "employees への FK"
+        varchar password_hash "BCrypt 60文字。形式を CHECK"
         timestamptz password_changed_at "最終変更日時"
-        boolean locked "ロック状態"
     }
     employee_roles {
-        uuid employee_id PK "employees への FK でもある"
-        varchar role PK "EMPLOYEE / APPROVER / HR / ADMIN"
+        uuid employee_id PK "employees への FK"
+        varchar role PK "EMPLOYEE / HR / ADMIN"
+        timestamptz granted_at "付与日時"
     }
     departments {
         uuid id PK
-        varchar code UK "部署コード"
+        varchar code "現存部署の間で一意"
         varchar name "部署名"
-        uuid parent_id FK "NULL はルート"
+        uuid parent_id FK "NULL はルート。循環はトリガで拒否"
         date abolished_on "NULL は現存"
+        bigint version "楽観ロック"
+        timestamptz created_at ""
+        timestamptz updated_at ""
     }
     assignments {
         uuid id PK
         uuid employee_id FK "社員"
         uuid department_id FK "配属先"
         date valid_from "適用開始日"
-        date valid_to "NULL は無期限"
+        date valid_to "NULL は無期限。半開区間"
+        bigint version "楽観ロック"
+        timestamptz created_at ""
+        timestamptz updated_at ""
     }
     managerships {
         uuid id PK
         uuid department_id FK "対象部署"
-        uuid employee_id FK "部署長"
+        uuid employee_id FK "部署長。兼任可"
         date valid_from "就任日"
         date valid_to "NULL は現任"
+        bigint version "楽観ロック"
+        timestamptz created_at ""
+        timestamptz updated_at ""
     }

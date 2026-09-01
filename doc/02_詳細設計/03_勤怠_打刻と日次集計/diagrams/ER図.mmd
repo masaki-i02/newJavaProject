@@ -1,0 +1,44 @@
+erDiagram
+    employees ||--o{ time_clock_events : "打刻する"
+    time_clock_events ||--o| time_clock_events : "取り消す"
+    employees ||--o{ daily_attendances : ""
+    work_rules ||--o{ daily_attendances : "計算に使った規則"
+    daily_attendances ||--o{ daily_attendance_slices : "内訳"
+
+    time_clock_events {
+        uuid id "work_date との複合主キー"
+        date work_date "パーティションキー"
+        uuid employee_id FK
+        varchar entry_type "ENTRY / REVOCATION"
+        varchar event_type "CLOCK_IN / CLOCK_OUT / BREAK_START / BREAK_END"
+        timestamptz occurred_at "打刻時刻"
+        varchar source "WEB / MOBILE / IC_CARD / IMPORT / ADMIN"
+        uuid revokes_event_id "REVOCATION のとき取消対象"
+        varchar reason "訂正理由"
+        timestamptz created_at "追記のみ。更新も削除もしない"
+    }
+    daily_attendances {
+        uuid id PK
+        uuid employee_id FK
+        date work_date "employee_id との組で一意"
+        varchar day_type "WORKDAY / LEGAL_HOLIDAY / NON_LEGAL_HOLIDAY"
+        uuid work_rule_id FK
+        int working_minutes "実労働"
+        int break_minutes "休憩"
+        int within_scheduled_minutes "所定内"
+        int overtime_within_statutory_minutes "法定内残業"
+        int overtime_beyond_statutory_minutes "法定外残業"
+        int night_minutes "深夜。重複計上"
+        int legal_holiday_minutes "法定休日労働"
+        boolean break_requirement_satisfied "法定休憩を満たすか"
+        timestamptz calculated_at "最終計算日時"
+        bigint version "楽観ロック"
+    }
+    daily_attendance_slices {
+        uuid id PK
+        uuid daily_attendance_id FK
+        int sequence_no "並び順"
+        timestamptz started_at
+        timestamptz ended_at
+        text_array premiums "割増属性の集合"
+    }

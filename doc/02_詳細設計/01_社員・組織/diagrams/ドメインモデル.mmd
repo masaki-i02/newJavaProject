@@ -1,26 +1,17 @@
 classDiagram
     direction TB
 
-    class EmployeeId {
-        <<value>>
-        UUID value
-    }
     class Employee {
         <<record>>
         EmployeeId id
         EmployeeNumber number
         String name
         Email email
-        EmploymentType employmentType
         LocalDate hiredOn
         LocalDate retiredOn
+        Set~Role~ roles
+        activePeriod() DateRange
         isActiveOn(LocalDate) boolean
-    }
-    class EmploymentType {
-        <<enum>>
-        FULL_TIME
-        PART_TIME
-        CONTRACT
     }
     class Role {
         <<enum>>
@@ -29,17 +20,15 @@ classDiagram
         HR
         ADMIN
     }
-    class DepartmentId {
-        <<value>>
-        UUID value
-    }
     class Department {
         <<record>>
         DepartmentId id
         DepartmentCode code
         String name
         DepartmentId parentId
+        LocalDate abolishedOn
         isRoot() boolean
+        isActiveOn(LocalDate) boolean
     }
     class Assignment {
         <<record>>
@@ -62,22 +51,23 @@ classDiagram
     }
     class OrganizationChart {
         <<domain service>>
+        事実の導出のみを担う
         departmentOf(EmployeeId, LocalDate) Optional~Department~
-        managerOf(EmployeeId, LocalDate) Optional~EmployeeId~
-        ancestorsOf(DepartmentId) List~Department~
+        selfAndAncestorsOf(DepartmentId) List~Department~
+        managerOf(DepartmentId, LocalDate) Optional~Managership~
+    }
+    class ApproverPolicy {
+        <<approval コンテキスト>>
+        BR-11 の業務ルールを適用
+        resolve(EmployeeId, YearMonth) Approver
     }
 
-    Employee --> EmployeeId
-    Employee --> EmploymentType
-    Employee "1" --> "*" Role
-    Department --> DepartmentId
-    Department --> "0..1" DepartmentId : parentId
-    Assignment --> EmployeeId
-    Assignment --> DepartmentId
+    Employee "1" --> "1..*" Role
+    Employee ..> DateRange : activePeriod
+    Department --> "0..1" Department : parentId
     Assignment --> DateRange
-    Managership --> DepartmentId
-    Managership --> EmployeeId
     Managership --> DateRange
     OrganizationChart ..> Assignment
     OrganizationChart ..> Managership
     OrganizationChart ..> Department
+    ApproverPolicy ..> OrganizationChart : 使う
