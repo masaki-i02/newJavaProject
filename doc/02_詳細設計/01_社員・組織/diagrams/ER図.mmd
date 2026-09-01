@@ -1,0 +1,50 @@
+erDiagram
+    employees ||--o{ assignments : "所属する"
+    employees ||--o{ employee_roles : "ロールを持つ"
+    employees ||--o| employee_credentials : "認証情報"
+    employees ||--o{ managerships : "部署長を務める"
+    departments ||--o{ assignments : ""
+    departments ||--o{ managerships : ""
+    departments ||--o{ departments : "親子"
+
+    employees {
+        uuid id PK
+        varchar employee_number UK "社員番号"
+        varchar name "氏名"
+        varchar email UK "小文字で一意"
+        varchar employment_type "FULL_TIME / PART_TIME / CONTRACT"
+        date hired_on "入社日"
+        date retired_on "NULL は在籍中"
+        bigint version "楽観ロック"
+    }
+    employee_credentials {
+        uuid employee_id PK "employees への FK でもある"
+        varchar password_hash "BCrypt"
+        timestamptz password_changed_at "最終変更日時"
+        boolean locked "ロック状態"
+    }
+    employee_roles {
+        uuid employee_id PK "employees への FK でもある"
+        varchar role PK "EMPLOYEE / APPROVER / HR / ADMIN"
+    }
+    departments {
+        uuid id PK
+        varchar code UK "部署コード"
+        varchar name "部署名"
+        uuid parent_id FK "NULL はルート"
+        date abolished_on "NULL は現存"
+    }
+    assignments {
+        uuid id PK
+        uuid employee_id FK "社員"
+        uuid department_id FK "配属先"
+        date valid_from "適用開始日"
+        date valid_to "NULL は無期限"
+    }
+    managerships {
+        uuid id PK
+        uuid department_id FK "対象部署"
+        uuid employee_id FK "部署長"
+        date valid_from "就任日"
+        date valid_to "NULL は現任"
+    }
