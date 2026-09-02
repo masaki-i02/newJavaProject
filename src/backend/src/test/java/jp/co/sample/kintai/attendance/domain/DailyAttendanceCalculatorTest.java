@@ -218,16 +218,25 @@ class DailyAttendanceCalculatorTest {
         }
 
         @Test
-        @DisplayName("UT-ATT-25 深夜帯の端点（22:00 は含み、05:00 は含まない）")
-        void nightBoundaries() {
-            var justBefore = calculate(MON, Punches.on("2026-04-06")
+        @DisplayName("UT-ATT-25 深夜帯の開始（22:00 ちょうどまでは深夜でない）")
+        void nightStartsAtTwentyTwo() {
+            var result = calculate(MON, Punches.on("2026-04-06")
                     .in("21:00").out("22:00"), fixedRule());
-            assertThat(justBefore.nightTime()).as("22:00 まではまだ深夜でない").isZero();
 
-            var atFive = calculate(MON, Punches.on("2026-04-06")
-                    .in("2026-04-07T04:00").out("2026-04-07T06:00"), fixedRule());
-            assertThat(atFive.nightTime()).as("04:00–05:00 の 1 時間だけ")
+            assertThat(result.nightTime()).isZero();
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(1));
+        }
+
+        /** 端点は 1 メソッドに同居させない。前半で落ちると後半が実行されないため。 */
+        @Test
+        @DisplayName("UT-ATT-25 深夜帯の終了（05:00 は含まない）")
+        void nightEndsAtFive() {
+            var result = calculate(TUE, Punches.on("2026-04-07")
+                    .in("04:00").out("06:00"), fixedRule());
+
+            assertThat(result.nightTime()).as("04:00–05:00 の 1 時間だけ")
                     .isEqualTo(Duration.ofHours(1));
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(2));
         }
     }
 
@@ -289,18 +298,158 @@ class DailyAttendanceCalculatorTest {
             assertBreakdownSumsToWorkingTime(result);
         }
 
-        /** 区間ごとに丸めると合計がずれる。丸めは区間へ変換するときの 1 回だけ。 */
+        /**
+         * 休憩打刻の丸めの向き。
+         * <strong>休憩開始は切り上げ（労働を長く）、休憩終了は切り捨て（労働を長く）。</strong>
+         * どちらかを逆にすると労働時間が短くなり、賃金の過少払いになる。
+         */
         @Test
-        @DisplayName("UT-ATT-23 秒を含む勤務を細切れにしても、分割後の合計が分割前と一致する")
-        void splittingPreservesTheTotal() {
+        @DisplayName("UT-ATT-22 休憩打刻も労働時間が長くなる側へそろえる")
+        void breakPunchesAlsoRoundInFavourOfTheEmployee() {
+            var result = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00")
+                    .breakFrom("2026-04-06T12:00:30")   // 切り上げ → 12:01 まで労働
+                    .breakTo("2026-04-06T13:00:30")     // 切り捨て → 13:00 から労働
+                    .out("18:00"), fixedRule());
+
+            assertThat(result.workingTime())
+                    .as("09:00–12:01 の 181 分 + 13:00–18:00 の 300 分")
+                    .isEqualTo(Duration.ofMinutes(481));
+            assertThat(result.breakTime()).isEqualTo(Duration.ofMinutes(59));
+        }
+
+        @Test
+        @DisplayName("UT-ATT-23 秒を含む勤務の集計値（絶対値で固定する）")
+        void secondsAreRoundedOnceWithAbsoluteValues() {
             var result = calculate(TUE, Punches.on("2026-04-07")
                     .in("2026-04-07T13:00:30").breakFrom("2026-04-07T18:00:20")
                     .breakTo("2026-04-07T19:00:40").out("2026-04-08T03:00:10"), fixedRule());
 
-            Duration sliced = result.slices().stream()
-                    .map(WorkSlice::duration).reduce(Duration.ZERO, Duration::plus);
-            assertThat(sliced).isEqualTo(result.workingTime());
-            assertBreakdownSumsToWorkingTime(result);
+            // [13:00, 18:01) の 301 分 + [19:00, 03:01) の 481 分
+            assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(782));
+            assertThat(result.breakTime()).isEqualTo(Duration.ofMinutes(59));
+            assertThat(result.baseTime()).isEqualTo(Duration.ofMinutes(480));
+            assertThat(result.overtimeBeyondStatutoryTime()).isEqualTo(Duration.ofMinutes(302));
+            assertThat(result.nightTime())
+                    .as("22:00–翌 03:01 の 301 分")
+                    .isEqualTo(Duration.ofMinutes(301));
+        }
+
+        /**
+         * <strong>レビューで見つかった実バグ。</strong>
+         *
+         * <p>休憩開始を切り上げ、休憩終了を切り捨てるので、
+         * 1 分未満の休憩では「休憩開始 &gt; 休憩終了」となり区間が重なる。
+         * 重なった分が両方の区間に計上され、
+         * <strong>実労働が拘束時間を超え、休憩が負になる。</strong>
+         */
+        @Test
+        @DisplayName("UT-ATT-27 1 分未満の休憩でも区間が重ならない（労働時間の二重計上を防ぐ）")
+        void shortBreakDoesNotCreateOverlappingRanges() {
+            var result = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00:00").breakFrom("2026-04-06T12:00:30")
+                    .breakTo("2026-04-06T12:00:50").out("18:00"), fixedRule());
+
+            assertThat(result.workingTime())
+                    .as("拘束時間 9 時間を超えてはならない")
+                    .isEqualTo(Duration.ofHours(9));
+            assertThat(result.breakTime())
+                    .as("休憩が負になってはならない")
+                    .isEqualTo(Duration.ZERO);
+            assertThat(result.overtimeBeyondStatutoryTime()).isEqualTo(Duration.ofHours(1));
+        }
+
+        @Test
+        @DisplayName("UT-ATT-27 短い休憩が複数あっても実労働は拘束時間を超えない")
+        void manyShortBreaksStayWithinTheSpan() {
+            var result = calculate(MON, Punches.on("2026-04-06")
+                    .in("2026-04-06T09:00:34")
+                    .breakFrom("2026-04-06T09:49:34").breakTo("2026-04-06T09:49:42")
+                    .breakFrom("2026-04-06T10:45:06").breakTo("2026-04-06T10:45:16")
+                    .breakFrom("2026-04-06T12:30:26").breakTo("2026-04-06T12:30:55")
+                    .out("2026-04-06T14:11:30"), fixedRule());
+
+            assertThat(result.workingTime()).isLessThanOrEqualTo(Duration.ofMinutes(312));
+            assertThat(result.breakTime()).isGreaterThanOrEqualTo(Duration.ZERO);
+        }
+    }
+
+    @Nested
+    @DisplayName("拘束時間の取り方")
+    class AttendanceSpan {
+
+        /**
+         * <strong>レビューで見つかった欠陥。</strong>
+         * 出勤直後の休憩は先頭の区間を長さ 0 にするため、実労働区間から
+         * 出勤打刻の時刻が失われる。拘束時間を実労働区間から求めると休憩が消える。
+         */
+        @Test
+        @DisplayName("UT-ATT-28 出勤直後に休憩を取っても休憩時間が計上される")
+        void breakRightAfterClockIn() {
+            var result = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("09:00").breakTo("10:00").out("17:30"), fixedRule());
+
+            assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(450));
+            assertThat(result.breakTime()).isEqualTo(Duration.ofHours(1));
+            assertThat(result.breakRequirementSatisfied())
+                    .as("休憩 1 時間を取っているので満たしている")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("UT-ATT-28 退勤直前に休憩を取っても休憩時間が計上される")
+        void breakRightBeforeClockOut() {
+            var result = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("16:30").breakTo("17:30").out("17:30"), fixedRule());
+
+            assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(450));
+            assertThat(result.breakTime()).isEqualTo(Duration.ofHours(1));
+            assertThat(result.breakRequirementSatisfied()).isTrue();
+        }
+
+        /** 休憩の時間帯を変えただけで BR-08 の判定が反転してはいけない。 */
+        @Test
+        @DisplayName("UT-ATT-28 休憩の時間帯を変えても、実労働と休憩は変わらない")
+        void breakPositionDoesNotChangeTheTotals() {
+            var early = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("09:00").breakTo("10:00").out("17:30"), fixedRule());
+            var middle = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("12:00").breakTo("13:00").out("17:30"), fixedRule());
+            var late = calculate(MON, Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("16:30").breakTo("17:30").out("17:30"), fixedRule());
+
+            assertThat(early.workingTime()).isEqualTo(middle.workingTime())
+                    .isEqualTo(late.workingTime());
+            assertThat(early.breakTime()).isEqualTo(middle.breakTime())
+                    .isEqualTo(late.breakTime());
+        }
+    }
+
+    @Nested
+    @DisplayName("勤務日と打刻の整合（BR-03）")
+    class WorkDateConsistency {
+
+        /**
+         * 所定労働時間は勤務日の区分から決まり、法定休日の判定は区間の暦日から決まる。
+         * <strong>2 つの日付がずれると、所定内 8 時間が「法定内残業 8 時間」に化ける。</strong>
+         */
+        @Test
+        @DisplayName("UT-ATT-29 勤務日と出勤打刻の日付が違うと例外")
+        void workDateMustMatchTheClockIn() {
+            assertThatThrownBy(() -> calculate(MON, Punches.on("2026-04-07")
+                    .in("09:00").out("20:00"), fixedRule()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("勤務日と出勤打刻の日付が一致しません");
+        }
+
+        @Test
+        @DisplayName("UT-ATT-29 日をまたぐ勤務では、出勤日が勤務日であれば通る")
+        void overnightWorkKeepsTheClockInDate() {
+            var result = calculate(TUE, Punches.on("2026-04-07")
+                    .in("22:00").out("2026-04-08T03:00"), fixedRule());
+
+            assertThat(result.workDate()).isEqualTo(TUE);
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(5));
         }
     }
 

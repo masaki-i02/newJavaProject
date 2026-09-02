@@ -40,7 +40,22 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
         if (workDate == null || dayType == null || workingTimeSystem == null || slices == null) {
             throw new IllegalArgumentException("日次勤怠の項目に null は許されません");
         }
+        // Duration も検査する。落とすと「内訳の合計が一致しない」という
+        // 別の例外に化けたり、意味の伝わらない NPE になる
+        requireNonNull(workingTime, "実労働時間");
+        requireNonNull(breakTime, "休憩時間");
+        requireNonNull(baseTime, "基本時間");
+        requireNonNull(overtimeWithinStatutoryTime, "法定内残業");
+        requireNonNull(overtimeBeyondStatutoryTime, "法定外残業");
+        requireNonNull(nightTime, "深夜労働時間");
+        requireNonNull(legalHolidayTime, "法定休日労働時間");
         slices = List.copyOf(slices);
+
+        // ★ 休憩が負になるのは、実労働区間が重なっている証拠である
+        if (breakTime.isNegative()) {
+            throw new IllegalStateException(
+                    "休憩時間が負になっています（実労働区間が重なっている可能性）: " + breakTime);
+        }
 
         // ★ 排他的な 4 区分の合計は必ず実労働時間に一致する。深夜は重ね掛けなので含めない
         Duration breakdown = baseTime
@@ -81,6 +96,12 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
             throw new IllegalStateException(
                     "深夜労働時間が実労働時間を超えています: 深夜 %s / 実労働 %s"
                             .formatted(nightTime, workingTime));
+        }
+    }
+
+    private static void requireNonNull(Duration value, String label) {
+        if (value == null) {
+            throw new IllegalArgumentException("%sに null は許されません".formatted(label));
         }
     }
 

@@ -41,6 +41,8 @@ public class DailyAttendanceCalculator {
         }
 
         List<TimeRange> worked = punches.toWorkedRanges();
+        TimeRange span = punches.attendanceSpan().orElseThrow();
+        requireWorkDateMatchesPunches(workDate, span);
         List<WorkSlice> slices = worked.stream().map(WorkSlice::plain).toList();
         for (AttendanceRule rule : rulesFor(workRule, workDayType)) {
             slices = rule.apply(slices);
@@ -49,7 +51,7 @@ public class DailyAttendanceCalculator {
         Duration workingTime = sum(slices, slice -> true);
         return new DailyAttendance(workDate, workDayType, systemType, slices,
                 workingTime,
-                breakTimeOf(worked),
+                breakTimeOf(span, worked),
                 sum(slices, slice -> slice.premiums().stream()
                         .noneMatch(PremiumType::partitionsWorkingTime)),
                 sum(slices, slice -> slice.has(PremiumType.OVERTIME_WITHIN_STATUTORY)),
@@ -93,13 +95,31 @@ public class DailyAttendanceCalculator {
         };
     }
 
-    /** 休憩時間。拘束時間から実労働区間の合計を引く。 */
-    private static Duration breakTimeOf(List<TimeRange> worked) {
-        if (worked.isEmpty()) {
-            return Duration.ZERO;
+    /**
+     * 勤務日が打刻と一致していることを確かめる（BR-03）。
+     *
+     * <p>所定労働時間は勤務日の区分から決まり、法定休日の判定は区間の暦日から決まる。
+     * <strong>2 つの日付がずれると、所定だけが別の日のものになる。</strong>
+     * 所定内 8 時間が「法定内残業 8 時間」に化けるといった誤りが起きる。
+     */
+    private static void requireWorkDateMatchesPunches(LocalDate workDate, TimeRange span) {
+        LocalDate punchedOn = span.start().toLocalDate();
+        if (!punchedOn.equals(workDate)) {
+            throw new IllegalArgumentException(
+                    "勤務日と出勤打刻の日付が一致しません: 勤務日 %s / 出勤 %s"
+                            .formatted(workDate, punchedOn));
         }
-        TimeRange span = new TimeRange(worked.get(0).start(),
-                worked.get(worked.size() - 1).end());
+    }
+
+    /**
+     * 休憩時間。拘束時間から実労働区間の合計を引く。
+     *
+     * <p><strong>拘束時間は実労働区間からは求められない。</strong>
+     * 出勤直後や退勤直前に休憩を取ると、その区間が長さ 0 になって捨てられ、
+     * 出退勤の打刻時刻が失われる。同じ勤務でも休憩の時間帯を変えるだけで
+     * BR-08 の判定が反転してしまう。
+     */
+    private static Duration breakTimeOf(TimeRange span, List<TimeRange> worked) {
         Duration workedTotal = worked.stream()
                 .map(TimeRange::duration)
                 .reduce(Duration.ZERO, Duration::plus);
