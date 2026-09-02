@@ -194,7 +194,29 @@ CREATE TABLE daily_attendance_slices (
               + CASE WHEN 'OVERTIME_BEYOND_STATUTORY' = ANY (premiums) THEN 1 ELSE 0 END
               + CASE WHEN 'LEGAL_HOLIDAY'              = ANY (premiums) THEN 1 ELSE 0 END) <= 1),
 
-    CONSTRAINT daily_attendance_slices_order_uk UNIQUE (daily_attendance_id, sequence_no)
+    CONSTRAINT daily_attendance_slices_order_uk UNIQUE (daily_attendance_id, sequence_no),
+
+    -- calendar_date は「その区間が属する暦日」。開始時刻から一意に決まる。
+    -- 固定オフセットを使うのは、CHECK 制約の式が IMMUTABLE でなければならないため。
+    -- timestamptz AT TIME ZONE '<ゾーン名>' は STABLE（ゾーン定義が変わりうる）だが、
+    -- AT TIME ZONE INTERVAL は IMMUTABLE。日本標準時に夏時間は無いので +09:00 で厳密に等しい
+    CONSTRAINT daily_attendance_slices_calendar_date_check
+        CHECK (calendar_date = (started_at AT TIME ZONE INTERVAL '+09:00')::date),
+
+    -- 区間は暦日境界で分割されるので、1 区間が 2 つの暦日にまたがることはない。
+    -- 半開区間なので、終了が翌日 0:00 ちょうどになるのは正当
+    CONSTRAINT daily_attendance_slices_single_day_check
+        CHECK ((ended_at AT TIME ZONE INTERVAL '+09:00')
+                   <= (calendar_date + 1)::timestamp),
+
+    -- ★ 同じ日の内訳どうしが重ならない。
+    --   重なると、その分が両方の区間に計上されて労働時間が二重になる
+    --   （CLAUDE.md 落とし穴 32）。ドメインの不変条件を DB でも表現する
+    CONSTRAINT daily_attendance_slices_no_overlap
+        EXCLUDE USING gist (
+            daily_attendance_id WITH =,
+            tstzrange(started_at, ended_at) WITH &&
+        )
 );
 
 CREATE OR REPLACE FUNCTION daily_attendances_touch() RETURNS trigger AS $$

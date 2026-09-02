@@ -71,7 +71,7 @@ class WorkRuleTest {
          * 288 件が通っていた。適法な規則を登録できなくする欠陥がすり抜けていた。
          */
         @Test
-        @DisplayName("UT-WR-12b 所定ちょうど 6 時間なら休憩 0 分でも登録できる")
+        @DisplayName("UT-WR-21 所定ちょうど 6 時間なら休憩 0 分でも登録できる")
         void exactlySixHoursNeedsNoBreak() {
             assertThat(new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(15, 0),
                     Duration.ZERO).scheduledWorkingTime())
@@ -79,7 +79,7 @@ class WorkRuleTest {
         }
 
         @Test
-        @DisplayName("UT-WR-12c 所定 6 時間 1 分で休憩 44 分は登録できない")
+        @DisplayName("UT-WR-22 所定 6 時間 1 分で休憩 44 分は登録できない")
         void justOverSixHoursNeeds45Minutes() {
             assertThatThrownBy(() -> new FixedTimeSystem(
                     LocalTime.of(9, 0), LocalTime.of(15, 45), Duration.ofMinutes(44)))
@@ -88,7 +88,7 @@ class WorkRuleTest {
         }
 
         @Test
-        @DisplayName("UT-WR-12d 所定ちょうど 8 時間なら休憩 45 分で登録できる")
+        @DisplayName("UT-WR-23 所定ちょうど 8 時間なら休憩 45 分で登録できる")
         void exactlyEightHoursNeeds45Minutes() {
             assertThat(new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(17, 45),
                     Duration.ofMinutes(45)).scheduledWorkingTime())
@@ -102,7 +102,7 @@ class WorkRuleTest {
          * public record であるこの型は単体で不正な値を保持できる。
          */
         @Test
-        @DisplayName("UT-WR-12e 所定 8 時間 1 分で休憩 45 分は登録できない")
+        @DisplayName("UT-WR-24 所定 8 時間 1 分で休憩 45 分は登録できない")
         void justOverEightHoursNeeds60Minutes() {
             assertThatThrownBy(() -> new FixedTimeSystem(
                     LocalTime.of(9, 0), LocalTime.of(17, 46), Duration.ofMinutes(45)))
@@ -111,7 +111,7 @@ class WorkRuleTest {
         }
 
         @Test
-        @DisplayName("UT-WR-12f 所定 10 時間 15 分で休憩 45 分は単体でも登録できない")
+        @DisplayName("UT-WR-25 所定 10 時間 15 分で休憩 45 分は単体でも登録できない")
         void longScheduleNeeds60Minutes() {
             assertThatThrownBy(() -> new FixedTimeSystem(
                     LocalTime.of(9, 0), LocalTime.of(20, 0), Duration.ofMinutes(45)))
@@ -287,7 +287,7 @@ class WorkRuleTest {
          * フレックス規則が作れてしまう（落とし穴 15 の主題そのもの）。
          */
         @Test
-        @DisplayName("UT-WR-11b フレックスでも所定が法定を超える規則は生成できない")
+        @DisplayName("UT-WR-20 フレックスでも所定が法定を超える規則は生成できない")
         void flexScheduledExceedsStatutory() {
             assertThatThrownBy(() -> new WorkRule(
                     new WorkRuleId(UUID.randomUUID()), new WorkRuleSeriesId(UUID.randomUUID()),

@@ -327,7 +327,29 @@ CREATE TABLE daily_attendance_slices (
               + CASE WHEN 'OVERTIME_BEYOND_STATUTORY' = ANY (premiums) THEN 1 ELSE 0 END
               + CASE WHEN 'LEGAL_HOLIDAY'              = ANY (premiums) THEN 1 ELSE 0 END) <= 1),
 
-    CONSTRAINT daily_attendance_slices_order_uk UNIQUE (daily_attendance_id, sequence_no)
+    CONSTRAINT daily_attendance_slices_order_uk UNIQUE (daily_attendance_id, sequence_no),
+
+    -- calendar_date は「その区間が属する暦日」。開始時刻から一意に決まる。
+    -- 固定オフセットを使うのは、CHECK 制約の式が IMMUTABLE でなければならないため。
+    -- timestamptz AT TIME ZONE '<ゾーン名>' は STABLE（ゾーン定義が変わりうる）だが、
+    -- AT TIME ZONE INTERVAL は IMMUTABLE。日本標準時に夏時間は無いので +09:00 で厳密に等しい
+    CONSTRAINT daily_attendance_slices_calendar_date_check
+        CHECK (calendar_date = (started_at AT TIME ZONE INTERVAL '+09:00')::date),
+
+    -- 区間は暦日境界で分割されるので、1 区間が 2 つの暦日にまたがることはない。
+    -- 半開区間なので、終了が翌日 0:00 ちょうどになるのは正当
+    CONSTRAINT daily_attendance_slices_single_day_check
+        CHECK ((ended_at AT TIME ZONE INTERVAL '+09:00')
+                   <= (calendar_date + 1)::timestamp),
+
+    -- ★ 同じ日の内訳どうしが重ならない。
+    --   重なると、その分が両方の区間に計上されて労働時間が二重になる
+    --   （CLAUDE.md 落とし穴 32）。ドメインの不変条件を DB でも表現する
+    CONSTRAINT daily_attendance_slices_no_overlap
+        EXCLUDE USING gist (
+            daily_attendance_id WITH =,
+            tstzrange(started_at, ended_at) WITH &&
+        )
 );
 ```
 
@@ -342,6 +364,20 @@ CREATE TABLE daily_attendance_slices (
 `calendar_date` は **その区間が属する暦日**である。
 区間は暦日境界で分割されるので、1 区間が 2 つの暦日にまたがることはない。
 法定休日労働がどの暦日のものかを、データだけで説明できるようにする。
+
+**`calendar_date` は開始時刻から導けるのに、列として持つ。**
+法定休日労働の判定に使う値を、問い合わせのたびに時刻から計算し直したくないためである。
+ただし導出できる値を二重に持つ以上、**食い違いを DB で禁じなければ意味がない。**
+`daily_attendance_slices_calendar_date_check` がそれを保証する。
+これが無いと `calendar_date = 2030-12-25` / `started_at = 2026-04-07 09:00` という
+まったく無関係な組を保存でき、集計は開始時刻で、法定休日の判定は `calendar_date` で
+行われて結果が食い違う。
+
+**区間の重なりは `EXCLUDE` で物理的に禁じる。**
+ドメイン（`DailyAttendance` の compact constructor）が同じ不変条件を守っているが、
+それはアプリケーションを通った場合だけである。
+DB を直接触る運用や、将来の一括投入で破れる。
+重なった区間はその分が両方に計上され、**労働時間が二重になる**（落とし穴 32）。
 
 > **`daily_attendance_slices_parent_idx` は置かない。**
 > `daily_attendance_slices_order_uk` が生成する
@@ -503,6 +539,12 @@ ORDER BY a.work_date, s.sequence_no;
 | IT-ATT-20 | 有効な打刻の取得クエリが取消済みを除外する | 4.1 が正しい結果を返す | 済 |
 | IT-ATT-21 | **金曜が未退勤で月曜に出勤した状態** | 4.2 が金曜を返す | 済 |
 | IT-ATT-22 | **再計算で `calculated_at` が更新される** | トリガにより現在時刻になる | 済 |
+| IT-ATT-23 | **`calendar_date` が開始時刻の暦日と食い違う内訳** | `daily_attendance_slices_calendar_date_check` で拒否 | 済 |
+| IT-ATT-24 | **暦日をまたぐ内訳の区間** | `daily_attendance_slices_single_day_check` で拒否 | 済 |
+| IT-ATT-25 | **終了が翌日 0:00 ちょうどの区間** | 受け入れる（半開区間） | 済 |
+| IT-ATT-26 | **同じ日次勤怠で区間が重なる** | `daily_attendance_slices_no_overlap` で拒否 | 済 |
+| IT-ATT-27 | **接しているだけの区間** | 受け入れる（半開区間） | 済 |
+| IT-ATT-28 | **別の日次勤怠で同じ時刻の区間** | 受け入れる（別の社員の勤務） | 済 |
 
 ---
 

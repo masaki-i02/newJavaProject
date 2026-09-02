@@ -16,6 +16,8 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 DESIGN = os.path.join(ROOT, '02_詳細設計')
 
 CONTEXTS = [
+    # 業務コンテキストに属さない横断的な観点（スキーマ・アーキテクチャ）もここから拾う
+    ('00_共通', '共通'),
     ('01_社員・組織', '社員・組織'),
     ('02_就業規則・カレンダー', '就業規則・カレンダー'),
     ('03_勤怠_打刻と日次集計', '勤怠（打刻・日次集計）'),

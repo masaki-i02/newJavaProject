@@ -343,7 +343,7 @@ class WorkRuleConstraintTest extends IntegrationTestBase {
 
         /** 総枠を超えない月では検出されない。真になるケースだけでは判定の向きを確かめられない。 */
         @Test
-        @DisplayName("IT-WR-21b 2026-05 は所定総労働時間が法定総枠を超えない")
+        @DisplayName("IT-WR-23 2026-05 は所定総労働時間が法定総枠を超えない")
         void doesNotDetectWhenWithinTheLimit() {
             jdbc.update("""
                     INSERT INTO company_calendars (calendar_date, day_type, name)

@@ -57,6 +57,9 @@ class DailyAttendanceConstraintTest extends IntegrationTestBase {
         int legalHoliday = 0;
         boolean breakSatisfied = true;
 
+        UUID employeeId = employee;
+
+        Daily employee(UUID v) { employeeId = v; return this; }
         Daily workDate(LocalDate v) { workDate = v; return this; }
         Daily dayType(String v) { dayType = v; return this; }
         Daily system(String v) { system = v; return this; }
@@ -78,7 +81,7 @@ class DailyAttendanceConstraintTest extends IntegrationTestBase {
                         overtime_beyond_statutory_minutes, night_minutes,
                         legal_holiday_minutes, break_requirement_satisfied)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, id, employee, workDate, dayType, system, workRule, working,
+                    """, id, employeeId, workDate, dayType, system, workRule, working,
                     breakMinutes, base, overtimeWithin, overtimeBeyond, night,
                     legalHoliday, breakSatisfied);
             return id;
@@ -242,6 +245,79 @@ class DailyAttendanceConstraintTest extends IntegrationTestBase {
                             + "WHERE daily_attendance_id = ? ORDER BY sequence_no",
                     LocalDate.class, dailyId))
                     .containsExactly(LocalDate.of(2026, 4, 7), LocalDate.of(2026, 4, 8));
+        }
+
+        /**
+         * <strong>レビューで見つかった穴。</strong>
+         *
+         * <p>上のテストは整合した 2 行を入れて読み戻すだけで、
+         * <strong>自分が入れた値を確認していた</strong>（どの制約も検査していない）。
+         * 実際に、無関係な {@code calendar_date}・暦日をまたぐ区間・重なった区間の
+         * いずれも DB が受け入れていた。
+         */
+        @Test
+        @DisplayName("IT-ATT-23 calendar_date が開始時刻の暦日と食い違うと拒否される")
+        void calendarDateMustMatchTheStart() {
+            rejectedBy("daily_attendance_slices_calendar_date_check",
+                    () -> slice(1, LocalDate.of(2030, 12, 25),
+                            "2026-04-07 13:00:00+09", "2026-04-07 18:00:00+09"));
+        }
+
+        @Test
+        @DisplayName("IT-ATT-24 区間が暦日をまたぐと拒否される")
+        void sliceMustStayInsideOneCalendarDay() {
+            rejectedBy("daily_attendance_slices_single_day_check",
+                    () -> slice(1, LocalDate.of(2026, 4, 7),
+                            "2026-04-07 22:00:00+09", "2026-04-08 03:00:00+09", "NIGHT"));
+        }
+
+        /** 終了が翌日 0:00 ちょうどになるのは半開区間として正当。 */
+        @Test
+        @DisplayName("IT-ATT-25 終了が翌日 0:00 ちょうどの区間は受け入れる")
+        void endingExactlyAtMidnightIsAccepted() {
+            accepted(() -> slice(1, LocalDate.of(2026, 4, 7),
+                    "2026-04-07 22:00:00+09", "2026-04-08 00:00:00+09", "NIGHT"));
+        }
+
+        @Test
+        @DisplayName("IT-ATT-26 同じ日次勤怠の区間が重なると拒否される")
+        void overlappingSlicesAreRejected() {
+            slice(1, LocalDate.of(2026, 4, 7),
+                    "2026-04-07 09:00:00+09", "2026-04-07 12:00:00+09");
+
+            rejectedBy("daily_attendance_slices_no_overlap",
+                    () -> slice(2, LocalDate.of(2026, 4, 7),
+                            "2026-04-07 11:00:00+09", "2026-04-07 14:00:00+09"));
+        }
+
+        /** 接しているだけの区間は重ならない。半開区間なので正当。 */
+        @Test
+        @DisplayName("IT-ATT-27 接しているだけの区間は受け入れる")
+        void touchingSlicesAreAccepted() {
+            slice(1, LocalDate.of(2026, 4, 7),
+                    "2026-04-07 09:00:00+09", "2026-04-07 12:00:00+09");
+
+            accepted(() -> slice(2, LocalDate.of(2026, 4, 7),
+                    "2026-04-07 12:00:00+09", "2026-04-07 14:00:00+09"));
+        }
+
+        /** 別の日次勤怠どうしなら、同じ時刻の区間があってよい（別の社員の勤務）。 */
+        @Test
+        @DisplayName("IT-ATT-28 別の日次勤怠なら同じ時刻の区間を持てる")
+        void otherAttendancesMayShareTheSameInstant() {
+            slice(1, LocalDate.of(2026, 4, 7),
+                    "2026-04-07 09:00:00+09", "2026-04-07 12:00:00+09");
+            UUID otherDaily = daily()
+                    .employee(fixtures.employee("E0900", LocalDate.of(2026, 1, 1)))
+                    .insert();
+
+            accepted(() -> jdbc.update("""
+                    INSERT INTO daily_attendance_slices (id, daily_attendance_id, sequence_no,
+                            calendar_date, started_at, ended_at, premiums)
+                    VALUES (?, ?, 1, DATE '2026-04-07',
+                            '2026-04-07 09:00:00+09'::timestamptz,
+                            '2026-04-07 12:00:00+09'::timestamptz, '{}'::text[])
+                    """, Fixtures.id(), otherDaily));
         }
     }
 
