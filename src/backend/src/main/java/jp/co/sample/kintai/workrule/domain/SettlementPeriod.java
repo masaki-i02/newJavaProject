@@ -63,4 +63,25 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
         // 桁あふれを黙って負の総枠にしない。総枠が負になると全時間が時間外になる
         return Duration.ofMinutes(Math.multiplyExact(days(), statutoryWeekly.toMinutes()) / 7);
     }
+
+    /**
+     * 所定総労働時間が法定総枠を超えるか。超えるなら警告を返す。
+     *
+     * <p>フレックスでは、所定総労働時間が総枠を超える月がありうる。
+     * 2026-06 は所定 22 日 × 8 時間 = 10,560 分に対し、総枠は 30 ÷ 7 × 2,400 = 10,285 分である。
+     *
+     * <p><strong>例外にしない。</strong> 適法な状態なので登録は許し、人事に知らせるだけにする。
+     * 規則の登録・改定時とカレンダーの一括設定時に呼ぶ。
+     */
+    public Optional<ScheduleExceedsStatutoryLimit> checkCapacity(
+            FlextimeSystem flex, int workdayCount, Duration statutoryWeekly) {
+        if (flex == null) {
+            throw new IllegalArgumentException("フレックスの規則に null は許されません");
+        }
+        Duration scheduled = flex.scheduledTotalWorkingTime(workdayCount);
+        Duration limit = statutoryTotalLimit(statutoryWeekly);
+        return scheduled.compareTo(limit) > 0
+                ? Optional.of(new ScheduleExceedsStatutoryLimit(month, scheduled, limit))
+                : Optional.empty();
+    }
 }

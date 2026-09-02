@@ -72,6 +72,39 @@ class WorkRuleTest {
                     .hasMessageContaining("コアタイムはフレキシブルタイムの内側");
         }
 
+        /**
+         * 始業と終業が同じ時刻は<strong>24 時間拘束</strong>を意味する。
+         * 0 時間ではない。ここを 0 と読むと、所定 0 の規則が作れてしまい、
+         * 出勤した瞬間から全時間が残業になる。
+         */
+        @Test
+        @DisplayName("始業と終業が同じ時刻なら 24 時間拘束として扱う")
+        void startEqualToEndMeansFullDay() {
+            var allDay = new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(9, 0),
+                    Duration.ofHours(1));
+
+            assertThat(allDay.scheduledWorkingTime()).isEqualTo(Duration.ofHours(23));
+        }
+
+        @Test
+        @DisplayName("終業が始業より前なら日をまたぐ勤務として扱う")
+        void endBeforeStartCrossesMidnight() {
+            var overnight = new FixedTimeSystem(LocalTime.of(22, 0), LocalTime.of(7, 0),
+                    Duration.ofHours(1));
+
+            assertThat(overnight.scheduledWorkingTime()).isEqualTo(Duration.ofHours(8));
+        }
+
+        /** 休憩が拘束時間を食い尽くす規則は、所定労働時間が 0 以下になる。 */
+        @Test
+        @DisplayName("休憩が拘束時間を超える規則は作れない")
+        void breakLongerThanSpanIsRejected() {
+            assertThatThrownBy(() -> new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(12, 0),
+                    Duration.ofHours(4)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("所定労働時間が 0 以下です");
+        }
+
         @Test
         @DisplayName("フレキシブル帯はコアタイムから導出される")
         void flexibleBandsAreDerived() {

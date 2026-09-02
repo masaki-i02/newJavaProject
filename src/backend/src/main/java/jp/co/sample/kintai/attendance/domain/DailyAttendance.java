@@ -93,11 +93,10 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
                                     overtimeBeyondStatutoryTime));
         }
 
-        if (nightTime.compareTo(workingTime) > 0) {
-            throw new IllegalArgumentException(
-                    "深夜労働時間が実労働時間を超えています: 深夜 %s / 実労働 %s"
-                            .formatted(nightTime, workingTime));
-        }
+        // 「深夜 ≤ 実労働」は上の 2 つから導ける。深夜は slices のうち NIGHT が付いたものの
+        // 合計に等しく（requireMatches）、実労働は slices 全体の合計に等しい（slicedWorking）。
+        // 独立した検査として書くと、成立しない条件を検査することになる
+        // （CLAUDE.md 落とし穴 16）。ここに足さない。
     }
 
     private static void requireNonNull(Duration value, String label) {

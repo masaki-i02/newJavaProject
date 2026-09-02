@@ -1,4 +1,4 @@
-package jp.co.sample.kintai.settlement.infrastructure;
+package jp.co.sample.kintai.attendance.infrastructure;
 
 import static jp.co.sample.kintai.support.ConstraintAssertions.accepted;
 import static jp.co.sample.kintai.support.ConstraintAssertions.rejectedBy;

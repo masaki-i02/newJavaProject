@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.architecture;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleNameEndingWith;
+import static com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Predicates.annotatedWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
@@ -72,11 +74,21 @@ class LayerDependencyTest {
                     .because("コントローラが JPA エンティティを直接返すと、"
                             + "テーブルの変更がそのまま API の互換性を壊す");
 
-    /** AR-05 エンティティを実装詳細に閉じ込める。 */
+    /**
+     * AR-05 エンティティを実装詳細に閉じ込める。
+     *
+     * <p>名前の規約（{@code *Entity}）だけでは足りない。規約から外れた名前を付けた瞬間に
+     * ルールが素通りする。<strong>{@link jakarta.persistence.Entity} 注釈でも判定する。</strong>
+     * 逆に注釈だけでも足りない。エンティティと対になる
+     * {@code @Embeddable} や {@code @MappedSuperclass} は注釈が違うので、
+     * 名前の規約が最後の網になる。
+     */
     @ArchTest
     static final ArchRule AR_05_entities_must_stay_inside_infrastructure =
             noClasses().that().resideOutsideOfPackage("..infrastructure..")
-                    .should().dependOnClassesThat().haveSimpleNameEndingWith("Entity")
+                    .should().dependOnClassesThat(
+                            simpleNameEndingWith("Entity")
+                                    .or(annotatedWith(jakarta.persistence.Entity.class)))
                     .allowEmptyShould(true)
                     .because("JPA エンティティはパッケージプライベートに保つ（CLAUDE.md 4.3）");
 

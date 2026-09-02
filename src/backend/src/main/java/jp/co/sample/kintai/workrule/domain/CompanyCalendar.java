@@ -21,6 +21,23 @@ public interface CompanyCalendar {
      *
      * <p>期間は半開区間で受ける。月中入社の初月は清算期間が
      * 「入社日から翌月 1 日まで」になり、暦月に固定できないため。
+     *
+     * <p><strong>既定実装をここに置く。</strong> 数え方は
+     * {@link #dayTypeOf(LocalDate)} から一意に決まるので、実装ごとに書き直す理由が無い。
+     * 実装側に置くと、半開区間の数え方（末日を含むか）を実装の数だけ間違えられる。
+     * テストの代役に置いた場合は、そもそも本番のコードを 1 行も検査していないことになる。
      */
-    int workdayCountIn(DateRange period);
+    default int workdayCountIn(DateRange period) {
+        if (period == null) {
+            throw new IllegalArgumentException("期間に null は許されません");
+        }
+        int count = 0;
+        for (LocalDate date = period.from(); date.isBefore(period.toExclusive());
+                date = date.plusDays(1)) {
+            if (dayTypeOf(date) == DayType.WORKDAY) {
+                count++;
+            }
+        }
+        return count;
+    }
 }

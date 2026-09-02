@@ -15,7 +15,9 @@ import org.junit.jupiter.api.Test;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
+import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
+import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
 /** 日次集計の単体テスト（UT-ATT-01〜26）。 */
 @DisplayName("日次集計")
@@ -36,19 +38,6 @@ class DailyAttendanceCalculatorTest {
         return calculate(workDate, punches, rule, TestCalendar.allWorkdays());
     }
 
-    /**
-     * <strong>この不変条件がすべてのケースで成立する。</strong>
-     * 深夜を二重計上する誤りは、この破れとして現れる。
-     */
-    private void assertBreakdownSumsToWorkingTime(DailyAttendance attendance) {
-        assertThat(attendance.baseTime()
-                .plus(attendance.overtimeWithinStatutoryTime())
-                .plus(attendance.overtimeBeyondStatutoryTime())
-                .plus(attendance.legalHolidayTime()))
-                .as("UT-ATT-09 内訳の合計 = 実労働時間")
-                .isEqualTo(attendance.workingTime());
-    }
-
     @Nested
     @DisplayName("固定時間制の基本")
     class Fixed {
@@ -63,7 +52,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.breakTime()).isEqualTo(Duration.ofHours(1));
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -76,7 +64,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.overtimeWithinStatutoryTime()).isZero();
             assertThat(result.overtimeBeyondStatutoryTime()).isEqualTo(Duration.ofHours(2));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -87,7 +74,6 @@ class DailyAttendanceCalculatorTest {
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -97,7 +83,6 @@ class DailyAttendanceCalculatorTest {
 
             assertThat(result.workingTime()).isZero();
             assertThat(result.slices()).isEmpty();
-            assertBreakdownSumsToWorkingTime(result);
         }
     }
 
@@ -117,7 +102,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.baseTime()).as("所定は 0 として扱う").isZero();
             assertThat(result.overtimeWithinStatutoryTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.overtimeBeyondStatutoryTime()).isEqualTo(Duration.ofHours(1));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -131,7 +115,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.overtimeWithinStatutoryTime()).isZero();
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
             assertThat(result.baseTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         /**
@@ -150,7 +133,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.legalHolidayTime())
                     .as("日曜 0:00–6:00 の 6 時間だけ")
                     .isEqualTo(Duration.ofHours(6));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -164,7 +146,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.legalHolidayTime())
                     .as("日曜 22:00–24:00 の 2 時間だけ")
                     .isEqualTo(Duration.ofHours(2));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         /** 法定休日労働は時間外労働に算入しない（労基法 36 条）。 */
@@ -179,7 +160,6 @@ class DailyAttendanceCalculatorTest {
             // 勤務日が法定休日なので所定 0 → 6 時間すべてが法定内残業
             assertThat(result.overtimeWithinStatutoryTime()).isEqualTo(Duration.ofHours(6));
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
     }
 
@@ -197,7 +177,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.nightTime()).isEqualTo(Duration.ofHours(4));
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(6));
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         /** 深夜は他の区分に重ねて付く。合計には数えない。 */
@@ -214,7 +193,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.nightTime())
                     .as("22:00–翌 03:00。法定外残業と完全に重なる")
                     .isEqualTo(Duration.ofHours(5));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -258,7 +236,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(10));
             assertThat(result.overtimeWithinStatutoryTime()).isZero();
             assertThat(result.overtimeBeyondStatutoryTime()).isZero();
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -269,7 +246,6 @@ class DailyAttendanceCalculatorTest {
                     .in("09:00").out("17:00"), flexRule(), calendar);
 
             assertThat(result.legalHolidayTime()).isEqualTo(Duration.ofHours(8));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         @Test
@@ -279,7 +255,6 @@ class DailyAttendanceCalculatorTest {
                     .in("20:00").out("2026-04-07T02:00"), flexRule());
 
             assertThat(result.nightTime()).isEqualTo(Duration.ofHours(4));
-            assertBreakdownSumsToWorkingTime(result);
         }
     }
 
@@ -295,7 +270,6 @@ class DailyAttendanceCalculatorTest {
                     .in("2026-04-06T09:00:30").out("2026-04-06T18:00:30"), fixedRule());
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(541));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         /**
@@ -552,7 +526,6 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(5));
             assertThat(result.nightTime()).isEqualTo(Duration.ofHours(5));
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(5));
-            assertBreakdownSumsToWorkingTime(result);
         }
     }
 
@@ -585,7 +558,6 @@ class DailyAttendanceCalculatorTest {
 
             assertThat(result.overtimeWithinStatutoryTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.overtimeBeyondStatutoryTime()).isEqualTo(Duration.ofHours(1));
-            assertBreakdownSumsToWorkingTime(result);
         }
 
         /**
@@ -608,26 +580,103 @@ class DailyAttendanceCalculatorTest {
     }
 
     /**
-     * この不変条件は、上のすべてのケースで
-     * {@code assertBreakdownSumsToWorkingTime} として実施している。
-     * 集計ロジックの誤り（特に深夜の二重計上）は、この破れとして現れる。
+     * 暦日境界の分割は 1 回で終わるとは限らない。
+     *
+     * <p>2 泊にわたる勤務では暦日が 3 つになる。分割を「日をまたぐか」の
+     * <strong>1 回の判定</strong>で書くと、2 日目の 24 時間が丸ごと 1 区間に残り、
+     * 法定休日労働の判定（暦日で行う）が中日について効かなくなる。
      */
     @Test
-    @DisplayName("UT-ATT-09 内訳の合計が実労働時間に一致する（全ケースで実施）")
-    void breakdownAlwaysSumsToWorkingTime() {
-        var calendar = TestCalendar.allWorkdays().legalHoliday(SUN).nonLegalHoliday(SAT);
-        var cases = java.util.List.of(
-                calculate(MON, Punches.on("2026-04-06").in("09:00").out("18:00"), fixedRule()),
-                calculate(MON, Punches.on("2026-04-06").in("20:00").out("2026-04-07T02:00"),
-                        fixedRule()),
-                calculate(SAT, Punches.on("2026-04-04").in("22:00").out("2026-04-05T06:00"),
-                        fixedRule(), calendar),
-                calculate(SUN, Punches.on("2026-04-05").in("22:00").out("2026-04-06T06:00"),
-                        fixedRule(), calendar),
-                calculate(MON, Punches.on("2026-04-06").in("09:00").out("20:00"), flexRule()),
-                calculate(MON, Punches.on("2026-04-06"), fixedRule()));
+    @DisplayName("3 つの暦日にまたがる勤務は暦日ごとに分割される")
+    void workSpanningThreeCalendarDays() {
+        // 月 22:00 出勤 → 水 02:00 退勤。28 時間の連続勤務
+        var result = calculate(MON, Punches.on("2026-04-06")
+                .in("22:00").out("2026-04-08T02:00"), fixedRule());
 
-        assertThat(cases).allSatisfy(this::assertBreakdownSumsToWorkingTime);
+        assertThat(result.workingTime()).isEqualTo(Duration.ofHours(28));
+        assertThat(result.slices()).extracting(WorkSlice::calendarDate)
+                .contains(LocalDate.of(2026, 4, 6), LocalDate.of(2026, 4, 7),
+                        LocalDate.of(2026, 4, 8));
+
+        // 中日（火）は 24 時間まるごと労働している
+        Duration tuesday = result.slices().stream()
+                .filter(slice -> slice.calendarDate().equals(LocalDate.of(2026, 4, 7)))
+                .map(WorkSlice::duration)
+                .reduce(Duration.ZERO, Duration::plus);
+        assertThat(tuesday).isEqualTo(Duration.ofHours(24));
+
+        // 深夜は 3 日ぶん。月 22:00–24:00 / 火 00:00–05:00・22:00–24:00 / 水 00:00–02:00
+        assertThat(result.nightTime()).isEqualTo(Duration.ofHours(11));
+    }
+
+    /**
+     * 内訳の合計が実労働時間に一致すること（BR-03）。
+     *
+     * <p><strong>計算結果に対してこれを確かめても、何も検査したことにならない。</strong>
+     * この不変条件は {@link DailyAttendance} の compact constructor が強制しているので、
+     * オブジェクトが存在する時点で必ず成立している。破れていれば生成の時点で例外になり、
+     * アサーションまで到達しない。以前はすべてのケースの末尾でこれを呼んでいたが、
+     * 恒真な行を 18 か所に並べていただけだった。
+     *
+     * <p>実効性があるのは、<strong>不変条件を強制している当の場所</strong>を直接叩くことである。
+     * 集計側の誤りは、各ケースが絶対値で置いている期待値のほうが捕まえる。
+     */
+    @Test
+    @DisplayName("UT-ATT-09 内訳の合計が実労働時間と食い違う値では生成できない")
+    void breakdownMustSumToWorkingTime() {
+        var slices = calculate(MON, Punches.on("2026-04-06")
+                .in("09:00").out("17:00"), fixedRule()).slices();
+
+        // 実労働 8 時間に対して内訳の合計が 7 時間しかない
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
+                Duration.ofHours(8), Duration.ZERO,
+                Duration.ofHours(7), Duration.ZERO, Duration.ZERO,
+                Duration.ZERO, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("内訳の合計が実労働時間と一致しません");
+    }
+
+    /**
+     * 深夜は<strong>重ね掛け</strong>なので、排他の 4 区分の合計には含めない
+     * （CLAUDE.md 落とし穴 5）。
+     *
+     * <p>「深夜 ≤ 実労働」を独立した検査として書こうとしたが、
+     * <strong>成立しない条件だった</strong>（CLAUDE.md 落とし穴 16）。
+     * 深夜の集計値は NIGHT が付いた区間の合計に一致することを強制しており、
+     * 実労働は区間全体の合計に一致することを強制しているので、
+     * 前者が後者を超える値はそもそも区間の照合で弾かれる。
+     * ここではその<strong>実際に効いている制約</strong>のほうを確かめる。
+     */
+    @Test
+    @DisplayName("深夜の集計値が区間と食い違う値では生成できない")
+    void nightMustMatchTheSlices() {
+        var slices = calculate(MON, Punches.on("2026-04-06")
+                .in("09:00").out("17:00"), fixedRule()).slices();
+
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
+                Duration.ofHours(8), Duration.ZERO,
+                Duration.ofHours(8), Duration.ZERO, Duration.ZERO,
+                Duration.ofHours(9), Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("深夜の集計値が内訳と一致しません");
+    }
+
+    /** 休憩が負になるのは、実労働区間が重なっている証拠である。 */
+    @Test
+    @DisplayName("休憩時間が負の値では生成できない")
+    void negativeBreakIsRejected() {
+        var slices = calculate(MON, Punches.on("2026-04-06")
+                .in("09:00").out("17:00"), fixedRule()).slices();
+
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
+                Duration.ofHours(8), Duration.ofMinutes(-1),
+                Duration.ofHours(8), Duration.ZERO, Duration.ZERO,
+                Duration.ZERO, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("休憩時間が負になっています");
     }
 
     @Test
@@ -637,8 +686,8 @@ class DailyAttendanceCalculatorTest {
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
         assertThatThrownBy(() -> new DailyAttendance(MON,
-                jp.co.sample.kintai.workrule.domain.DayType.WORKDAY,
-                jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType.FIXED, slices,
+                DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(7), Duration.ofHours(1), Duration.ZERO,
                 Duration.ZERO, Duration.ZERO))
@@ -653,7 +702,7 @@ class DailyAttendanceCalculatorTest {
                 .in("09:00").out("19:00"), WorkRules.fixedRule());
 
         assertThatThrownBy(() -> new DailyAttendance(MON, attendance.dayType(),
-                jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType.FLEX,
+                WorkingTimeSystemType.FLEX,
                 attendance.slices(), attendance.workingTime(), attendance.breakTime(),
                 attendance.baseTime(), attendance.overtimeWithinStatutoryTime(),
                 attendance.overtimeBeyondStatutoryTime(), attendance.nightTime(),

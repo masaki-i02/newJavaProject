@@ -2,6 +2,7 @@ package jp.co.sample.kintai.workrule.domain;
 
 import static jp.co.sample.kintai.support.WorkRules.fixed;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -31,8 +32,15 @@ class EffectiveWorkRuleTest {
             new WorkRuleAssignment(EMPLOYEE, SERIES,
                     DateRange.startingAt(LocalDate.of(2026, 4, 1))));
 
+    /** 別の社員が使っている、まったく別の系列。 */
+    private static final WorkRuleSeriesId OTHER_SERIES = new WorkRuleSeriesId(UUID.randomUUID());
+
     private static WorkRule version(DateRange validPeriod) {
-        return new WorkRule(new WorkRuleId(UUID.randomUUID()), SERIES, validPeriod, fixed(),
+        return version(SERIES, validPeriod);
+    }
+
+    private static WorkRule version(WorkRuleSeriesId seriesId, DateRange validPeriod) {
+        return new WorkRule(new WorkRuleId(UUID.randomUUID()), seriesId, validPeriod, fixed(),
                 Duration.ofHours(8), Duration.ofHours(40),
                 NightWindow.STANDARD, PremiumRates.STATUTORY);
     }
@@ -69,6 +77,52 @@ class EffectiveWorkRuleTest {
     void beforeAssignment() {
         assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 3, 1))).isEmpty();
+    }
+
+    /**
+     * 版の一覧は<strong>系列で絞られていなければならない。</strong>
+     * 絞りを落としても、系列が 1 つしかないテストでは気づけない。
+     * 他社員の系列の版を混ぜ、しかも先に並べておく。
+     */
+    @Test
+    @DisplayName("他の系列の版は、有効期間が重なっていても返らない")
+    void versionsOfAnotherSeriesAreIgnored() {
+        var foreign = version(OTHER_SERIES, DateRange.startingAt(LocalDate.of(2026, 4, 1)));
+
+        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(foreign, BEFORE, AFTER),
+                LocalDate.of(2026, 5, 5))).contains(BEFORE);
+    }
+
+    /**
+     * 期間の重なりは DB の {@code EXCLUDE} 制約で禁じている。
+     * 2 件見つかるのは制約が壊れたか、別の社員の履歴を混ぜて渡したかである。
+     * <strong>先頭を黙って採ると、どちらが使われたかが実行のたびに変わりうる。</strong>
+     */
+    @Test
+    @DisplayName("同じ系列の版が重なっていたら例外になる（黙って先頭を採らない）")
+    void overlappingVersionsAreRejected() {
+        var overlapping = version(new DateRange(
+                LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 1)));
+
+        assertThatThrownBy(() -> EffectiveWorkRule.resolve(ASSIGNMENTS,
+                List.of(BEFORE, overlapping), LocalDate.of(2026, 5, 5)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("版 が 2026-05-05 時点で 2 件あります");
+    }
+
+    @Test
+    @DisplayName("適用が重なっていたら例外になる")
+    void overlappingAssignmentsAreRejected() {
+        var duplicated = List.of(
+                new WorkRuleAssignment(EMPLOYEE, SERIES,
+                        DateRange.startingAt(LocalDate.of(2026, 4, 1))),
+                new WorkRuleAssignment(EMPLOYEE, OTHER_SERIES,
+                        DateRange.startingAt(LocalDate.of(2026, 4, 1))));
+
+        assertThatThrownBy(() -> EffectiveWorkRule.resolve(duplicated, List.of(BEFORE, AFTER),
+                LocalDate.of(2026, 5, 5)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("適用 が 2026-05-05 時点で 2 件あります");
     }
 
     @Test

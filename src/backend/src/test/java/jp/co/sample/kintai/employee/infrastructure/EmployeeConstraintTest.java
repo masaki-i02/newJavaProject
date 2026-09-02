@@ -98,7 +98,7 @@ class EmployeeConstraintTest extends IntegrationTestBase {
         @DisplayName("IT-EMP-05 部署の親に自分自身を設定すると、循環検出トリガで拒否される")
         void selfParentIsRejected() {
             UUID department = fixtures.department("S1", "第一営業部");
-            rejectedWithMessage("循環", () -> jdbc.update(
+            rejectedWithMessage("部署の親子関係が循環しています", () -> jdbc.update(
                     "UPDATE departments SET parent_id = id WHERE id = ?", department));
         }
 
@@ -109,7 +109,7 @@ class EmployeeConstraintTest extends IntegrationTestBase {
             UUID division = fixtures.department("S1", "第一営業部", head);
             UUID section = fixtures.department("S1A", "第一営業課", division);
 
-            rejectedWithMessage("循環", () -> jdbc.update(
+            rejectedWithMessage("部署の親子関係が循環しています", () -> jdbc.update(
                     "UPDATE departments SET parent_id = ? WHERE id = ?", section, head));
         }
     }
