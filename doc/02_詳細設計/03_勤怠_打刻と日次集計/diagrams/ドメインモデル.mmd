@@ -4,7 +4,6 @@ classDiagram
     class TimeClockEvent {
         <<sealed interface>>
         LocalDateTime occurredAt
-        type() TimeClockEventType
     }
     class ClockIn { <<record>> }
     class ClockOut { <<record>> }
@@ -65,7 +64,7 @@ classDiagram
     }
     class DailyAttendanceCalculator {
         <<domain service>>
-        calculate(LocalDate, TimeClockSequence, WorkRule, CompanyCalendar) DailyAttendance
+        calculate(LocalDate, TimeClockSequence, WorkRule) DailyAttendance
     }
     class WorkRule {
         <<record · workrule>>

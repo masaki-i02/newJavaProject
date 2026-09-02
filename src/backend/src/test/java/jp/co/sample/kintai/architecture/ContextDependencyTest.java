@@ -17,7 +17,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
 
 /**
- * 業務コンテキスト間の依存を強制する（AR-06・AR-07）。
+ * 業務コンテキスト間の依存を強制する（AR-06・AR-07・AR-10）。
  *
  * <p>許される依存の向きは次のとおり（アーキテクチャ設計書 4 章）。
  * <pre>
@@ -61,9 +61,9 @@ class ContextDependencyTest {
                     .because("循環すると分割の意味が無くなる。"
                             + "PremiumType と締め判定はこれを避けるために shared へ置いた（ADR 0004）");
 
-    /** shared はどのコンテキストにも依存しない。 */
+    /** AR-10 shared はどのコンテキストにも依存しない。 */
     @ArchTest
-    static final ArchRule shared_must_not_depend_on_any_context =
+    static final ArchRule AR_10_shared_must_not_depend_on_any_context =
             noClasses().that().resideInAPackage("..kintai.shared..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "..kintai.employee..", "..kintai.workrule..",

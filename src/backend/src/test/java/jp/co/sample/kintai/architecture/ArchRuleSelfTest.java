@@ -131,9 +131,9 @@ class ArchRuleSelfTest {
         }
 
         @Test
-        @DisplayName("shared がコンテキストを参照したら落ちる")
+        @DisplayName("AR-10 shared がコンテキストを参照したら落ちる")
         void sharedMustNotDependOnContexts() {
-            assertFails(ContextDependencyTest.shared_must_not_depend_on_any_context,
+            assertFails(ContextDependencyTest.AR_10_shared_must_not_depend_on_any_context,
                     SHARED_PROBES, "SharedReachesIntoContext");
         }
 
