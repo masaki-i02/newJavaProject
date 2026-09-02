@@ -62,6 +62,63 @@ class WorkRuleTest {
                     .hasMessageContaining("休憩は 45 分以上必要です（労基法 34 条）");
         }
 
+        /**
+         * 労基法 34 条の境界。条文は「6 時間を<strong>超える</strong>場合」
+         * 「8 時間を<strong>超える</strong>場合」なので、
+         * ちょうど 6 時間・ちょうど 8 時間は下の段に入る。
+         *
+         * <p>1 点だけを試していたので、比較を {@code >} から {@code >=} に変えても
+         * 288 件が通っていた。適法な規則を登録できなくする欠陥がすり抜けていた。
+         */
+        @Test
+        @DisplayName("UT-WR-12b 所定ちょうど 6 時間なら休憩 0 分でも登録できる")
+        void exactlySixHoursNeedsNoBreak() {
+            assertThat(new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(15, 0),
+                    Duration.ZERO).scheduledWorkingTime())
+                    .isEqualTo(Duration.ofHours(6));
+        }
+
+        @Test
+        @DisplayName("UT-WR-12c 所定 6 時間 1 分で休憩 44 分は登録できない")
+        void justOverSixHoursNeeds45Minutes() {
+            assertThatThrownBy(() -> new FixedTimeSystem(
+                    LocalTime.of(9, 0), LocalTime.of(15, 45), Duration.ofMinutes(44)))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("休憩は 45 分以上必要です");
+        }
+
+        @Test
+        @DisplayName("UT-WR-12d 所定ちょうど 8 時間なら休憩 45 分で登録できる")
+        void exactlyEightHoursNeeds45Minutes() {
+            assertThat(new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(17, 45),
+                    Duration.ofMinutes(45)).scheduledWorkingTime())
+                    .isEqualTo(Duration.ofHours(8));
+        }
+
+        /**
+         * 8 時間を超えたら 60 分。
+         * <strong>この検査は WorkRule ではなくこの型が持つ。</strong>
+         * 「所定 ≤ 8 時間を別の制約で保証しているから恒真」なのは DB の話であって、
+         * public record であるこの型は単体で不正な値を保持できる。
+         */
+        @Test
+        @DisplayName("UT-WR-12e 所定 8 時間 1 分で休憩 45 分は登録できない")
+        void justOverEightHoursNeeds60Minutes() {
+            assertThatThrownBy(() -> new FixedTimeSystem(
+                    LocalTime.of(9, 0), LocalTime.of(17, 46), Duration.ofMinutes(45)))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("休憩は 60 分以上必要です");
+        }
+
+        @Test
+        @DisplayName("UT-WR-12f 所定 10 時間 15 分で休憩 45 分は単体でも登録できない")
+        void longScheduleNeeds60Minutes() {
+            assertThatThrownBy(() -> new FixedTimeSystem(
+                    LocalTime.of(9, 0), LocalTime.of(20, 0), Duration.ofMinutes(45)))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("休憩は 60 分以上必要です");
+        }
+
         @Test
         @DisplayName("コアタイムがフレキシブルタイムの外にあると生成できない")
         void coreOutsideFlexible() {
@@ -71,6 +128,54 @@ class WorkRuleTest {
                     Duration.ofHours(8)))
                     .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("コアタイムはフレキシブルタイムの内側");
+        }
+
+        /**
+         * コアタイムが外枠の<strong>後ろへ</strong>はみ出すケース。
+         *
+         * <p>前へはみ出す 1 パターンしか試していなかったため、
+         * {@code TimeOfDayRange.contains} から終端の判定を落としても通っていた。
+         * コア 11:00–23:00 / フレキシブル 07:00–22:00 が登録できてしまう。
+         */
+        @Test
+        @DisplayName("コアタイムが外枠の後ろへはみ出しても生成できない")
+        void coreOverrunsFlexibleEnd() {
+            assertThatThrownBy(() -> new FlextimeSystem(
+                    new TimeOfDayRange(LocalTime.of(7, 0), LocalTime.of(22, 0)),
+                    new TimeOfDayRange(LocalTime.of(11, 0), LocalTime.of(23, 0)),
+                    Duration.ofHours(8)))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("コアタイムはフレキシブルタイムの内側");
+        }
+
+        /**
+         * 深夜シフトのフレックスは業務上ありうる入力だが、いまは扱わない。
+         * <strong>「この型では答えられない」という例外を漏らさない。</strong>
+         * 日をまたぐ範囲の包含は基準日が無いと判定できないので、
+         * 業務エラーとして受け止める。
+         */
+        @Test
+        @DisplayName("フレックスの外枠が日をまたぐと業務エラーになる")
+        void flexibleTimeCannotCrossMidnight() {
+            assertThatThrownBy(() -> new FlextimeSystem(
+                    new TimeOfDayRange(LocalTime.of(22, 0), LocalTime.of(6, 0)),
+                    new TimeOfDayRange(LocalTime.of(23, 0), LocalTime.of(1, 0)),
+                    Duration.ofHours(8)))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("日をまたげません");
+        }
+
+        /** コアタイムが外枠の先頭・末尾に接する規則は正当。帯が無いだけである。 */
+        @Test
+        @DisplayName("コアタイムが外枠と完全に一致する規則ではフレキシブル帯が空になる")
+        void coreFillingTheWholeFlexibleBand() {
+            var noFlexibility = new FlextimeSystem(
+                    new TimeOfDayRange(LocalTime.of(9, 0), LocalTime.of(18, 0)),
+                    new TimeOfDayRange(LocalTime.of(9, 0), LocalTime.of(18, 0)),
+                    Duration.ofHours(8));
+
+            assertThat(noFlexibility.flexibleMorning()).isEmpty();
+            assertThat(noFlexibility.flexibleEvening()).isEmpty();
         }
 
         /**
@@ -168,6 +273,29 @@ class WorkRuleTest {
                     DateRange.startingAt(LocalDate.of(2026, 1, 1)),
                     new FixedTimeSystem(LocalTime.of(9, 0), LocalTime.of(19, 0),
                             Duration.ofMinutes(60)),
+                    Duration.ofHours(8), Duration.ofHours(40),
+                    NightWindow.STANDARD, PremiumRates.STATUTORY))
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("所定労働時間が法定労働時間を超えています");
+        }
+
+        /**
+         * <strong>フレックス側も同じ検査を受ける。</strong>
+         * 固定時間制でしか試していなかったため、
+         * 所定を取り出す {@code switch} のフレックスの枝を {@code Duration.ZERO} に
+         * 変えても 288 件が通っていた。1 日 12 時間を「所定」とする
+         * フレックス規則が作れてしまう（落とし穴 15 の主題そのもの）。
+         */
+        @Test
+        @DisplayName("UT-WR-11b フレックスでも所定が法定を超える規則は生成できない")
+        void flexScheduledExceedsStatutory() {
+            assertThatThrownBy(() -> new WorkRule(
+                    new WorkRuleId(UUID.randomUUID()), new WorkRuleSeriesId(UUID.randomUUID()),
+                    DateRange.startingAt(LocalDate.of(2026, 1, 1)),
+                    new FlextimeSystem(
+                            new TimeOfDayRange(LocalTime.of(7, 0), LocalTime.of(22, 0)),
+                            new TimeOfDayRange(LocalTime.of(11, 0), LocalTime.of(15, 0)),
+                            Duration.ofHours(12)),
                     Duration.ofHours(8), Duration.ofHours(40),
                     NightWindow.STANDARD, PremiumRates.STATUTORY))
                     .isInstanceOf(BusinessRuleViolationException.class)

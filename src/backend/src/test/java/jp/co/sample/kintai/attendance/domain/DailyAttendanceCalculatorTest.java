@@ -374,8 +374,15 @@ class DailyAttendanceCalculatorTest {
                     .breakFrom("2026-04-06T12:30:26").breakTo("2026-04-06T12:30:55")
                     .out("2026-04-06T14:11:30"), fixedRule());
 
-            assertThat(result.workingTime()).isLessThanOrEqualTo(Duration.ofMinutes(312));
-            assertThat(result.breakTime()).isGreaterThanOrEqualTo(Duration.ZERO);
+            // 拘束は 09:00–14:12 の 312 分。
+            // 休憩 3 回はいずれも 1 分未満なので、丸めるとすべて長さ 0 になる。
+            // 「実労働 <= 312 分」「休憩 >= 0」という不等式では、
+            // compact constructor が強制している不変条件を書き写しているだけで恒真になる。
+            // 押し戻しが効いているかは絶対値でしか確かめられない
+            assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(312));
+            assertThat(result.breakTime()).isZero();
+            assertThat(result.slices()).extracting(WorkSlice::duration)
+                    .allSatisfy(duration -> assertThat(duration).isPositive());
         }
     }
 
@@ -527,9 +534,16 @@ class DailyAttendanceCalculatorTest {
             var result = calculate(MON, Punches.on("2026-04-06")
                     .in("09:00").breakFrom("09:00").breakTo("10:00").out("18:00"), fixedRule());
 
+            // 長さ 0 の区間は TimeRange が生成を禁じているので、
+            // 「すべての区間が正の長さを持つ」は恒真である。
+            // 確かめるべきは「捨てた結果 10:00–18:00 の 1 本になる」こと
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(8));
-            assertThat(result.slices()).allSatisfy(
-                    slice -> assertThat(slice.duration()).isPositive());
+            assertThat(result.slices()).hasSize(1);
+            assertThat(result.slices().get(0).range().start())
+                    .isEqualTo(java.time.LocalDateTime.parse("2026-04-06T10:00"));
+            assertThat(result.breakTime())
+                    .as("09:00 から 10:00 までが休憩。出勤打刻の時刻は失われない")
+                    .isEqualTo(Duration.ofHours(1));
         }
     }
 
@@ -692,6 +706,69 @@ class DailyAttendanceCalculatorTest {
                 Duration.ofHours(9), Duration.ZERO))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("深夜の集計値が内訳と一致しません");
+    }
+
+    /**
+     * 集計値と内訳の照合は 4 区分すべてにある。
+     * <strong>1 本でも消すと落ちる状態にしておく。</strong>
+     * 深夜と法定内残業しか叩いていなかったため、法定休日と法定外残業の
+     * {@code requireMatches} を削除しても 288 件が通っていた。
+     */
+    @Test
+    @DisplayName("法定休日労働の集計値が区間と食い違う値では生成できない")
+    void legalHolidayMustMatchTheSlices() {
+        var slices = calculate(MON, Punches.on("2026-04-06")
+                .in("09:00").out("17:00"), fixedRule()).slices();
+
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
+                Duration.ofHours(8), Duration.ZERO,
+                Duration.ofHours(6), Duration.ZERO, Duration.ZERO,
+                Duration.ZERO, Duration.ofHours(2)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("法定休日労働の集計値が内訳と一致しません");
+    }
+
+    @Test
+    @DisplayName("法定外残業の集計値が区間と食い違う値では生成できない")
+    void beyondStatutoryMustMatchTheSlices() {
+        var slices = calculate(MON, Punches.on("2026-04-06")
+                .in("09:00").out("17:00"), fixedRule()).slices();
+
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, slices,
+                Duration.ofHours(8), Duration.ZERO,
+                Duration.ofHours(6), Duration.ZERO, Duration.ofHours(2),
+                Duration.ZERO, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("法定外残業の集計値が内訳と一致しません");
+    }
+
+    /**
+     * 区間が重なった内訳では生成できない。
+     *
+     * <p>合計だけを見ると 3 時間 + 3 時間 = 6 時間で辻褄が合うが、
+     * 実際の拘束は 09:00–14:00 の 5 時間しかない。
+     * <strong>1 時間が二重に計上されている</strong>（CLAUDE.md 落とし穴 32）。
+     */
+    @Test
+    @DisplayName("区間が重なった内訳では生成できない")
+    void overlappingSlicesAreRejected() {
+        var overlapping = java.util.List.of(
+                WorkSlice.plain(new jp.co.sample.kintai.shared.domain.TimeRange(
+                        java.time.LocalDateTime.parse("2026-04-06T09:00"),
+                        java.time.LocalDateTime.parse("2026-04-06T12:00"))),
+                WorkSlice.plain(new jp.co.sample.kintai.shared.domain.TimeRange(
+                        java.time.LocalDateTime.parse("2026-04-06T11:00"),
+                        java.time.LocalDateTime.parse("2026-04-06T14:00"))));
+
+        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+                WorkingTimeSystemType.FIXED, overlapping,
+                Duration.ofHours(6), Duration.ZERO,
+                Duration.ofHours(6), Duration.ZERO, Duration.ZERO,
+                Duration.ZERO, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("重なっています");
     }
 
     /** 休憩が負になるのは、実労働区間が重なっている証拠である。 */

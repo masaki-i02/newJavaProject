@@ -66,6 +66,40 @@ class DateRangeTest {
         assertThat(first.intersect(second)).isEmpty();
     }
 
+    /**
+     * 重なりの判定。
+     *
+     * <p>「重ならない」ケースしか無いと、{@code return false;} に潰しても通ってしまう。
+     * <strong>真になるケースを必ず置く。</strong>
+     */
+    @Test
+    @DisplayName("一部でも重なれば true、包含も true")
+    void overlappingPeriods() {
+        var september = new DateRange(SEP_1, LocalDate.of(2026, 10, 1));
+
+        assertThat(september.overlaps(new DateRange(SEP_20, LocalDate.of(2026, 10, 10))))
+                .as("後ろで重なる").isTrue();
+        assertThat(september.overlaps(new DateRange(LocalDate.of(2026, 8, 20), SEP_20)))
+                .as("前で重なる").isTrue();
+        assertThat(september.overlaps(new DateRange(SEP_1, SEP_20)))
+                .as("内側に含む").isTrue();
+        assertThat(september.overlaps(new DateRange(LocalDate.of(2026, 1, 1),
+                LocalDate.of(2027, 1, 1)))).as("外側に含まれる").isTrue();
+        assertThat(september.overlaps(new DateRange(LocalDate.of(2026, 10, 1),
+                LocalDate.of(2026, 11, 1)))).as("接しているだけ").isFalse();
+
+        assertThat(september.intersect(new DateRange(SEP_20, LocalDate.of(2026, 10, 10))))
+                .contains(new DateRange(SEP_20, LocalDate.of(2026, 10, 1)));
+    }
+
+    @Test
+    @DisplayName("判定する日付に null は渡せない")
+    void containsRejectsNull() {
+        assertThatThrownBy(() -> new DateRange(SEP_1, SEP_20).contains(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("判定する日付に null は許されません");
+    }
+
     @Test
     @DisplayName("長さ 0 の期間は作れない")
     void emptyPeriodIsRejected() {

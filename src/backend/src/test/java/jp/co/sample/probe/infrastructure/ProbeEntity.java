@@ -1,18 +1,14 @@
 package jp.co.sample.probe.infrastructure;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-
 /**
- * infrastructure の外へ漏れてはいけない JPA エンティティ。
+ * 名前の規約（{@code *Entity}）だけを持つクラス。
  *
- * <p>名前の規約（{@code *Entity}）と {@link Entity} 注釈の両方を持たせて、
- * AR-05 の 2 つの判定条件をどちらも踏ませる。
+ * <p>JPA の注釈は<strong>付けない</strong>。付けると、名前の規約と注釈の
+ * どちらの判定が効いてルールが落ちたのか区別できなくなる。
+ * 注釈による判定は {@link LegacyRow} が担う。
  */
-@Entity
 public class ProbeEntity {
 
-    @Id
     private Long id;
 
     public Long getId() {

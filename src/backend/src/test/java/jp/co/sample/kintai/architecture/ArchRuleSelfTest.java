@@ -46,18 +46,28 @@ class ArchRuleSelfTest {
     @DisplayName("層のルール")
     class Layers {
 
+        /**
+         * 禁止するパッケージを 1 つずつ踏む違反クラスを置く。
+         *
+         * <p><strong>1 つだけ踏んでも足りない。</strong>
+         * 禁止先を 5 個から 1 個に減らしても、そのうち 1 個しか踏んでいなければ
+         * 自己検査は落ちない。実際、5 個を {@code org.springframework..} だけに
+         * 削っても 288 件が通る状態だった。
+         */
         @Test
-        @DisplayName("AR-01 ドメインがフレームワークに依存したら落ちる")
+        @DisplayName("AR-01 禁止したフレームワークをどれか 1 つでも使ったら落ちる")
         void ar01() {
             assertFails(LayerDependencyTest.AR_01_domain_must_not_depend_on_frameworks,
-                    LAYER_PROBES, "UsesSpringFramework");
+                    LAYER_PROBES, "UsesSpringFramework", "UsesJackson",
+                    "UsesJakartaPersistence", "UsesHibernate");
         }
 
         @Test
-        @DisplayName("AR-02 ドメインが外側の層に依存したら落ちる")
+        @DisplayName("AR-02 ドメインが外側の 3 層のどれに依存しても落ちる")
         void ar02() {
             assertFails(LayerDependencyTest.AR_02_domain_must_not_depend_on_outer_layers,
-                    LAYER_PROBES, "ReachesIntoInfrastructure");
+                    LAYER_PROBES, "ReachesIntoInfrastructure", "ReachesIntoApplication",
+                    "ReachesIntoPresentation");
         }
 
         @Test
@@ -74,11 +84,17 @@ class ArchRuleSelfTest {
                     LAYER_PROBES, "ReturnsEntity");
         }
 
+        /**
+         * 名前の規約と注釈の<strong>両方</strong>が効いていることを確かめる。
+         *
+         * <p>1 個の probe に両方を持たせると、どちらの条件で落ちたのか区別できない。
+         * 名前だけの {@code ProbeEntity} と注釈だけの {@code LegacyRow} に分けてある。
+         */
         @Test
-        @DisplayName("AR-05 エンティティが infrastructure の外へ出たら落ちる")
+        @DisplayName("AR-05 名前の規約でも注釈でもエンティティの漏れを捕まえる")
         void ar05() {
             assertFails(LayerDependencyTest.AR_05_entities_must_stay_inside_infrastructure,
-                    LAYER_PROBES, "LeaksEntity");
+                    LAYER_PROBES, "ProbeEntity", "LegacyRow");
         }
 
         @Test
@@ -162,10 +178,17 @@ class ArchRuleSelfTest {
                 .importPackages("jp.co.sample.kintai");
     }
 
-    private static void assertFails(ArchRule rule, JavaClasses probes, String expectedInMessage) {
+    /**
+     * ルールが落ち、しかも<strong>期待した違反をすべて報告する</strong>ことを確かめる。
+     *
+     * <p>「落ちた」だけを見ると、条件を 1 つ残して他を削ったルールでも通ってしまう。
+     * 条件ごとに違反クラスを置き、そのすべてが報告に現れることを求める。
+     */
+    private static void assertFails(ArchRule rule, JavaClasses probes,
+                                    String... expectedInMessage) {
         assertThatThrownBy(() -> rule.check(probes))
                 .as("%s は違反を捕まえなければならない", rule.getDescription())
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining(expectedInMessage);
+                .hasMessageContainingAll(expectedInMessage);
     }
 }

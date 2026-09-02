@@ -117,6 +117,71 @@ class TimeClockSequenceTest {
     }
 
     @Nested
+    @DisplayName("打刻が無い日")
+    class Empty {
+
+        /**
+         * 欠勤日に対して呼んでも例外にしない。
+         *
+         * <p>{@code DailyAttendanceCalculator} は先に {@code isEmpty()} で短絡するので、
+         * 集計経由のテストではこの経路に到達しない。
+         * 画面や月次集計が直接呼ぶ経路があるため、契約を単体で押さえる。
+         */
+        @Test
+        @DisplayName("実労働区間は空になる")
+        void workedRangesAreEmpty() {
+            assertThat(TimeClockSequence.empty().toWorkedRanges()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("拘束時間は空になる")
+        void attendanceSpanIsEmpty() {
+            assertThat(TimeClockSequence.empty().attendanceSpan()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("出勤打刻の時刻も空になる")
+        void clockedInAtIsEmpty() {
+            assertThat(TimeClockSequence.empty().clockedInAt()).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("出勤と退勤が同一時刻")
+    class ZeroLengthAttendance {
+
+        /**
+         * <strong>レビューで見つかった実バグ。</strong>
+         *
+         * <p>丸めた出勤と退勤が同値になると、拘束時間として長さ 0 の
+         * {@code TimeRange} を作ろうとして {@code IllegalArgumentException} が飛んでいた。
+         * これは {@code DomainException} ではないので Problem Details に変換されず
+         * 500 になり、<strong>退勤打刻の登録そのものが落ちて一次証拠が残らない</strong>
+         * （CLAUDE.md 落とし穴 19）。
+         */
+        @Test
+        @DisplayName("例外にせず、拘束時間 0 分として扱う")
+        void zeroLengthAttendanceIsNotAnError() {
+            var sequence = Punches.on("2026-04-06").in("09:00").out("09:00").build();
+
+            assertThat(sequence.isClosed()).isTrue();
+            assertThat(sequence.toWorkedRanges()).isEmpty();
+            assertThat(sequence.attendanceSpan()).isEmpty();
+            assertThat(sequence.clockedInAt())
+                    .contains(LocalDateTime.parse("2026-04-06T09:00"));
+        }
+
+        @Test
+        @DisplayName("遷移の検査も通る")
+        void validateTransitionsAccepts() {
+            assertThatCode(() ->
+                    Punches.on("2026-04-06").in("09:00").out("09:00").build()
+                            .validateTransitions())
+                    .doesNotThrowAnyException();
+        }
+    }
+
+    @Nested
     @DisplayName("入力順への非依存")
     class Ordering {
 
@@ -157,6 +222,51 @@ class TimeClockSequenceTest {
                             TimeClockEvent.BreakStart.class,
                             TimeClockEvent.BreakEnd.class,
                             TimeClockEvent.ClockOut.class);
+        }
+
+        /**
+         * 休憩を 2 つに割った境界が同一時刻でも受け入れる。
+         *
+         * <p>種別に固定の全順序（休憩開始 → 休憩終了）を与えると、
+         * この列は「休憩開始・休憩開始・休憩終了・休憩終了」に並べ替えられ、
+         * <strong>正当な打刻が拒否される。</strong>
+         * 拒否すると働いた事実が残らない（CLAUDE.md 落とし穴 19）。
+         */
+        @Test
+        @DisplayName("休憩終了と休憩開始が同一時刻でも受け入れる")
+        void touchingBreaksAreAccepted() {
+            var sequence = Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("12:00").breakTo("12:45")
+                    .breakFrom("12:45").breakTo("13:00").out("18:00").build();
+
+            assertThatCode(sequence::validateTransitions).doesNotThrowAnyException();
+            assertThat(sequence.toWorkedRanges()).hasSize(2);
+            assertThat(sequence.attendanceSpan().orElseThrow().duration())
+                    .isEqualTo(java.time.Duration.ofHours(9));
+        }
+
+        /**
+         * 長さ 0 の休憩（休憩開始と休憩終了が同一時刻）も受け入れる。
+         *
+         * <p>区間は 2 本に分かれるが、<strong>接しているだけで重ならない。</strong>
+         * 労働時間は 9 時間のままで、休憩は 0 分である。
+         */
+        @Test
+        @DisplayName("長さ 0 の休憩も受け入れる")
+        void zeroLengthBreakIsAccepted() {
+            var sequence = Punches.on("2026-04-06")
+                    .in("09:00").breakFrom("12:00").breakTo("12:00").out("18:00").build();
+
+            assertThatCode(sequence::validateTransitions).doesNotThrowAnyException();
+            var worked = sequence.toWorkedRanges();
+            assertThat(worked).hasSize(2);
+            assertThat(worked.get(0).end())
+                    .as("接しているだけで重ならない")
+                    .isEqualTo(worked.get(1).start());
+            assertThat(worked.stream()
+                    .map(jp.co.sample.kintai.shared.domain.TimeRange::duration)
+                    .reduce(java.time.Duration.ZERO, java.time.Duration::plus))
+                    .isEqualTo(java.time.Duration.ofHours(9));
         }
 
         private LocalDateTime at(String time) {

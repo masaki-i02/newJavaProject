@@ -6,6 +6,7 @@ import static jp.co.sample.kintai.support.ConstraintAssertions.rejectedWithMessa
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -298,6 +299,15 @@ class WorkRuleConstraintTest extends IntegrationTestBase {
                     .isEqualTo(22);
         }
 
+        /**
+         * <strong>設計書 4.4 のクエリを実際に実行する。</strong>
+         *
+         * <p>第 1 版は {@code workdays * 480} と {@code 30 * 2400 / 7} を Java 側で
+         * 計算し直して突き合わせていた。DB から取っていたのは所定労働日数だけで、
+         * 4.4 のクエリに欠陥があっても（暦日数を {@code end - start + 1} と数える、
+         * {@code work_rules} との結合を落とす、など）緑のままだった。
+         * テスト自身の算術を検査していたことになる（落とし穴 37 のテスト側での再発）。
+         */
         @Test
         @DisplayName("IT-WR-21 2026-06 は所定総労働時間が法定総枠を超えることを検出できる")
         void detectsScheduleExceedingStatutoryLimit() {
@@ -310,16 +320,90 @@ class WorkRuleConstraintTest extends IntegrationTestBase {
                       FROM generate_series(DATE '2026-06-01', DATE '2026-06-30', INTERVAL '1 day') d
                      WHERE extract(dow from d) IN (0, 6)
                     """);
-            int workdays = workdayCount(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 7, 1));
+            UUID flexRule = Fixtures.id();
+            jdbc.update("""
+                    INSERT INTO work_rules (id, series_id, working_time_system, valid_from,
+                        flexible_start, flexible_end, core_start, core_end,
+                        standard_daily_minutes, statutory_daily_minutes,
+                        statutory_weekly_minutes)
+                    VALUES (?, ?, 'FLEX', DATE '2026-04-01', TIME '07:00', TIME '22:00',
+                            TIME '11:00', TIME '15:00', 480, 480, 2400)
+                    """, flexRule, flexSeries);
 
-            int scheduledTotal = workdays * 480;                 // 22 日 × 8 時間
-            int statutoryLimit = 30 * 2400 / 7;                  // 暦日 30 日 ÷ 7 × 40 時間
+            var detected = capacityOf(flexRule,
+                    LocalDate.of(2026, 6, 1), LocalDate.of(2026, 7, 1));
 
-            assertThat(scheduledTotal).isEqualTo(10_560);
-            assertThat(statutoryLimit).isEqualTo(10_285);
-            assertThat(scheduledTotal)
+            assertThat(minutes(detected, "workday_count")).isEqualTo(22);
+            assertThat(minutes(detected, "scheduled_total_minutes")).isEqualTo(10_560);
+            assertThat(minutes(detected, "statutory_total_limit_minutes")).isEqualTo(10_285);
+            assertThat(detected.get("exceeds_limit"))
                     .as("所定どおり働くだけで法定外残業が 275 分発生する月がある")
-                    .isGreaterThan(statutoryLimit);
+                    .isEqualTo(true);
+        }
+
+        /** 総枠を超えない月では検出されない。真になるケースだけでは判定の向きを確かめられない。 */
+        @Test
+        @DisplayName("IT-WR-21b 2026-05 は所定総労働時間が法定総枠を超えない")
+        void doesNotDetectWhenWithinTheLimit() {
+            jdbc.update("""
+                    INSERT INTO company_calendars (calendar_date, day_type, name)
+                    SELECT d::date,
+                           CASE WHEN extract(dow from d) = 0
+                                THEN 'LEGAL_HOLIDAY' ELSE 'NON_LEGAL_HOLIDAY' END,
+                           '休日'
+                      FROM generate_series(DATE '2026-05-01', DATE '2026-05-31', INTERVAL '1 day') d
+                     WHERE extract(dow from d) IN (0, 6)
+                    """);
+            UUID flexRule = Fixtures.id();
+            jdbc.update("""
+                    INSERT INTO work_rules (id, series_id, working_time_system, valid_from,
+                        flexible_start, flexible_end, core_start, core_end,
+                        standard_daily_minutes, statutory_daily_minutes,
+                        statutory_weekly_minutes)
+                    VALUES (?, ?, 'FLEX', DATE '2026-04-01', TIME '07:00', TIME '22:00',
+                            TIME '11:00', TIME '15:00', 480, 480, 2400)
+                    """, flexRule, flexSeries);
+
+            var detected = capacityOf(flexRule,
+                    LocalDate.of(2026, 5, 1), LocalDate.of(2026, 6, 1));
+
+            assertThat(minutes(detected, "workday_count")).isEqualTo(21);
+            assertThat(minutes(detected, "scheduled_total_minutes")).isEqualTo(10_080);
+            assertThat(minutes(detected, "statutory_total_limit_minutes")).isEqualTo(10_628);
+            assertThat(detected.get("exceeds_limit")).isEqualTo(false);
+        }
+
+        /** 列の型（int / bigint）の違いを吸収する。数値の一致だけを見たい。 */
+        private long minutes(Map<String, Object> row, String column) {
+            return ((Number) row.get(column)).longValue();
+        }
+
+        /** DB設計書 4.4 のクエリ。<strong>写経ではなく、設計書の SQL をそのまま実行する。</strong> */
+        private Map<String, Object> capacityOf(UUID workRuleId, LocalDate from,
+                                               LocalDate toExclusive) {
+            return jdbc.queryForMap("""
+                    WITH period AS (
+                        SELECT ?::date AS start_date, ?::date AS end_date
+                    ), workdays AS (
+                        SELECT count(*) AS workday_count
+                        FROM period p,
+                             generate_series(p.start_date, p.end_date - 1, INTERVAL '1 day')
+                                 AS d(calendar_date)
+                        LEFT JOIN company_calendars c
+                               ON c.calendar_date = d.calendar_date::date
+                        WHERE coalesce(c.day_type, 'WORKDAY') = 'WORKDAY'
+                    )
+                    SELECT w.workday_count,
+                           r.standard_daily_minutes * w.workday_count
+                               AS scheduled_total_minutes,
+                           (p.end_date - p.start_date) * r.statutory_weekly_minutes / 7
+                               AS statutory_total_limit_minutes,
+                           r.standard_daily_minutes * w.workday_count
+                               > (p.end_date - p.start_date) * r.statutory_weekly_minutes / 7
+                               AS exceeds_limit
+                    FROM period p, workdays w, work_rules r
+                    WHERE r.id = ?
+                    """, from, toExclusive, workRuleId);
         }
 
         /** DB設計書 4.2 のクエリ。登録が無い日は所定労働日として数える。 */

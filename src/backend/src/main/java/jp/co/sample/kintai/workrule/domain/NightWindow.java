@@ -49,7 +49,7 @@ public enum NightWindow {
     }
 
     public boolean crossesMidnight() {
-        return start.isAfter(end);
+        return asTimeOfDayRange().crossesMidnight();
     }
 
     public TimeOfDayRange asTimeOfDayRange() {
@@ -71,16 +71,5 @@ public enum NightWindow {
             window.on(date).intersect(range).ifPresent(found::add);
         }
         return List.copyOf(found);
-    }
-
-    /**
-     * 指定の時刻が深夜帯に入るか。
-     *
-     * <p>半開区間として判定する。22:00 は入り、05:00 は入らない。
-     */
-    public boolean contains(LocalTime time) {
-        return crossesMidnight()
-                ? !time.isBefore(start) || time.isBefore(end)
-                : !time.isBefore(start) && time.isBefore(end);
     }
 }
