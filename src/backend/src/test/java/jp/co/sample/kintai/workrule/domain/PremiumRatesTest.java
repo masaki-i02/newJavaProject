@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 import jp.co.sample.kintai.shared.domain.PremiumType;
 
 /** 割増率と賃金倍率（労基法 37 条）。 */
@@ -132,7 +133,7 @@ class PremiumRatesTest {
         void legalHolidayBelowMinimum() {
             assertThatThrownBy(() -> new PremiumRates(new BigDecimal("0.25"),
                     new BigDecimal("0.25"), new BigDecimal("0.30")))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("法定休日の割増率が法定下限を下回っています");
         }
 
@@ -141,7 +142,7 @@ class PremiumRatesTest {
         void nightBelowMinimum() {
             assertThatThrownBy(() -> new PremiumRates(new BigDecimal("0.25"),
                     new BigDecimal("0.20"), new BigDecimal("0.35")))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("深夜の割増率が法定下限を下回っています");
         }
 

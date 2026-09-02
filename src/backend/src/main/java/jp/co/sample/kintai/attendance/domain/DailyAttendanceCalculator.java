@@ -2,7 +2,9 @@ package jp.co.sample.kintai.attendance.domain;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
@@ -33,6 +35,10 @@ public final class DailyAttendanceCalculator {
 
     public DailyAttendance calculate(LocalDate workDate, TimeClockSequence punches,
                                      WorkRule workRule) {
+        if (workDate == null || punches == null || workRule == null) {
+            throw new IllegalArgumentException("日次集計の引数に null は許されません");
+        }
+        requireRuleCoversWorkDate(workDate, workRule);
         WorkingTimeSystemType systemType = workRule.systemType();
         DayType workDayType = calendar.dayTypeOf(workDate);
 
@@ -40,9 +46,15 @@ public final class DailyAttendanceCalculator {
             return DailyAttendance.absent(workDate, workDayType, systemType);
         }
 
+        requireWorkDateMatchesPunches(workDate, punches.clockedInAt().orElseThrow());
+
         List<TimeRange> worked = punches.toWorkedRanges();
-        TimeRange span = punches.attendanceSpan().orElseThrow();
-        requireWorkDateMatchesPunches(workDate, span);
+        Optional<TimeRange> span = punches.attendanceSpan();
+        if (span.isEmpty()) {
+            // 出勤と退勤が同一時刻。打刻は記録されているが、働いた時間は 0 分である。
+            // 集計値はすべて 0 になるので、欠勤と同じ形で返す
+            return DailyAttendance.absent(workDate, workDayType, systemType);
+        }
         List<WorkSlice> slices = worked.stream().map(WorkSlice::plain).toList();
         for (AttendanceRule rule : rulesFor(workRule, workDayType)) {
             slices = rule.apply(slices);
@@ -51,7 +63,7 @@ public final class DailyAttendanceCalculator {
         Duration workingTime = sum(slices, slice -> true);
         return new DailyAttendance(workDate, workDayType, systemType, slices,
                 workingTime,
-                breakTimeOf(span, worked),
+                breakTimeOf(span.orElseThrow(), worked),
                 sum(slices, slice -> slice.premiums().stream()
                         .noneMatch(PremiumType::partitionsWorkingTime)),
                 sum(slices, slice -> slice.has(PremiumType.OVERTIME_WITHIN_STATUTORY)),
@@ -102,12 +114,28 @@ public final class DailyAttendanceCalculator {
      * <strong>2 つの日付がずれると、所定だけが別の日のものになる。</strong>
      * 所定内 8 時間が「法定内残業 8 時間」に化けるといった誤りが起きる。
      */
-    private static void requireWorkDateMatchesPunches(LocalDate workDate, TimeRange span) {
-        LocalDate punchedOn = span.start().toLocalDate();
+    private static void requireWorkDateMatchesPunches(LocalDate workDate,
+                                                      LocalDateTime clockedInAt) {
+        LocalDate punchedOn = clockedInAt.toLocalDate();
         if (!punchedOn.equals(workDate)) {
             throw new IllegalArgumentException(
                     "勤務日と出勤打刻の日付が一致しません: 勤務日 %s / 出勤 %s"
                             .formatted(workDate, punchedOn));
+        }
+    }
+
+    /**
+     * 就業規則がその勤務日をカバーしていることを確かめる。
+     *
+     * <p>時点解決は {@code EffectiveWorkRule} の責務だが、解決の結果を取り違えて
+     * 別の版を渡されると、<strong>改定前の所定・法定値で黙って計算される。</strong>
+     * 勤務日と打刻の一致は確かめているのに、規則との一致だけ確かめないのは非対称である。
+     */
+    private static void requireRuleCoversWorkDate(LocalDate workDate, WorkRule workRule) {
+        if (!workRule.validPeriod().contains(workDate)) {
+            throw new IllegalArgumentException(
+                    "就業規則の有効期間が勤務日を含んでいません: 勤務日 %s / 有効期間 %s"
+                            .formatted(workDate, workRule.validPeriod()));
         }
     }
 

@@ -17,6 +17,12 @@ public record BreakTimeRequirement(Duration workingTime, Duration actualBreak) {
         if (workingTime == null || actualBreak == null) {
             throw new IllegalArgumentException("休憩の判定に null は許されません");
         }
+        // 負の労働時間・負の休憩は「休憩の要件を満たしている」と誤答する
+        if (workingTime.isNegative() || actualBreak.isNegative()) {
+            throw new IllegalArgumentException(
+                    "労働時間と休憩時間を負にはできません: 労働 %s / 休憩 %s"
+                            .formatted(workingTime, actualBreak));
+        }
     }
 
     /** 必要な休憩時間。 */

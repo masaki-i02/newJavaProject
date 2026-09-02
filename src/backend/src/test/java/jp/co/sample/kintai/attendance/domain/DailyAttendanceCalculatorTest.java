@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
@@ -133,6 +134,15 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.legalHolidayTime())
                     .as("日曜 0:00–6:00 の 6 時間だけ")
                     .isEqualTo(Duration.ofHours(6));
+            // 深夜は法定休日に重ねて付く（倍率 1.60）。落とすと 25% が丸ごと消える
+            assertThat(result.nightTime())
+                    .as("土 22:00–24:00 と 日 00:00–05:00 の 7 時間")
+                    .isEqualTo(Duration.ofHours(7));
+            assertThat(result.slices())
+                    .filteredOn(slice -> slice.has(PremiumType.LEGAL_HOLIDAY)
+                            && slice.has(PremiumType.NIGHT))
+                    .as("法定休日かつ深夜の区間が実際に生成される")
+                    .isNotEmpty();
         }
 
         @Test
@@ -146,20 +156,41 @@ class DailyAttendanceCalculatorTest {
             assertThat(result.legalHolidayTime())
                     .as("日曜 22:00–24:00 の 2 時間だけ")
                     .isEqualTo(Duration.ofHours(2));
+            assertThat(result.nightTime())
+                    .as("日 22:00–24:00 と 月 00:00–05:00 の 7 時間")
+                    .isEqualTo(Duration.ofHours(7));
+            assertThat(result.slices())
+                    .filteredOn(slice -> slice.has(PremiumType.LEGAL_HOLIDAY)
+                            && slice.has(PremiumType.NIGHT))
+                    .isNotEmpty();
         }
 
-        /** 法定休日労働は時間外労働に算入しない（労基法 36 条）。 */
+        /**
+         * 法定休日労働は時間外労働に算入しない（労基法 36 条）。
+         *
+         * <p><strong>法定休日を 8 時間の閾値より長く取る。</strong>
+         * 第 1 版は「法定休日 2 時間 + 翌日 6 時間 = 8 時間」で、
+         * 累積に数えても数えなくても結果が同じだった。
+         * ルールを消しても落ちないテストになっていた（落とし穴 24 と同型）。
+         */
         @Test
         @DisplayName("UT-ATT-19 法定休日をまたぐ勤務で、法定休日部分を残業の累積に数えない")
         void legalHolidayIsNotAccumulated() {
             var calendar = TestCalendar.allWorkdays().legalHoliday(SUN);
+            // 日曜 20:00 → 月曜 09:00。法定休日 4 時間 + 月曜 9 時間 = 13 時間
             var result = calculate(SUN, Punches.on("2026-04-05")
-                    .in("22:00").out("2026-04-06T06:00"), fixedRule(), calendar);
+                    .in("20:00").out("2026-04-06T09:00"), fixedRule(), calendar);
 
-            // 日曜 2 時間は法定休日。月曜 0:00–6:00 の 6 時間は累積 0 から始まる。
-            // 勤務日が法定休日なので所定 0 → 6 時間すべてが法定内残業
-            assertThat(result.overtimeWithinStatutoryTime()).isEqualTo(Duration.ofHours(6));
-            assertThat(result.overtimeBeyondStatutoryTime()).isZero();
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(13));
+            assertThat(result.legalHolidayTime()).isEqualTo(Duration.ofHours(4));
+            // 月曜分の 9 時間だけを累積する。勤務日が法定休日なので所定 0、法定は 8 時間。
+            // 法定休日の 4 時間を累積に数えてしまうと、法定内 4h / 法定外 5h にずれる
+            assertThat(result.overtimeWithinStatutoryTime())
+                    .as("累積 0→8 時間ぶんが法定内残業")
+                    .isEqualTo(Duration.ofHours(8));
+            assertThat(result.overtimeBeyondStatutoryTime())
+                    .as("8 時間を超えた 1 時間だけが法定外残業")
+                    .isEqualTo(Duration.ofHours(1));
         }
     }
 

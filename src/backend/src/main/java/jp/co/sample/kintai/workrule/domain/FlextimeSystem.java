@@ -3,6 +3,7 @@ package jp.co.sample.kintai.workrule.domain;
 import java.time.Duration;
 import java.util.Optional;
 
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 import jp.co.sample.kintai.shared.domain.TimeOfDayRange;
 
 /**
@@ -23,8 +24,18 @@ public record FlextimeSystem(TimeOfDayRange flexibleTime, TimeOfDayRange coreTim
         if (flexibleTime == null || coreTime == null || standardDailyWorkingTime == null) {
             throw new IllegalArgumentException("フレックスの項目に null は許されません");
         }
+        // ★ 包含の判定より先に日跨ぎを弾く。
+        //   TimeOfDayRange.contains は日をまたぐ範囲に対して
+        //   UnsupportedOperationException を投げる（基準日が無いと前後を決められないため）。
+        //   深夜シフトのフレックスは業務上ありうる入力なので、
+        //   ここで受け止めないと「不正な入力でも業務ルール違反でもない第 3 の例外」が漏れる。
+        if (flexibleTime.crossesMidnight() || coreTime.crossesMidnight()) {
+            throw new BusinessRuleViolationException("BR-05",
+                    "フレックスの外枠とコアタイムは日をまたげません: コア %s / フレキシブル %s"
+                            .formatted(coreTime, flexibleTime));
+        }
         if (!flexibleTime.contains(coreTime)) {
-            throw new IllegalArgumentException(
+            throw new BusinessRuleViolationException("BR-05",
                     "コアタイムはフレキシブルタイムの内側である必要があります: コア %s / フレキシブル %s"
                             .formatted(coreTime, flexibleTime));
         }

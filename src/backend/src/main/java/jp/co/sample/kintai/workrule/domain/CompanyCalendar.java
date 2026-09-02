@@ -31,6 +31,11 @@ public interface CompanyCalendar {
         if (period == null) {
             throw new IllegalArgumentException("期間に null は許されません");
         }
+        // ★ 端が番兵なら 21 億日ぶん回る。DateRange.days() が番兵を弾いているのと同じ理由で、
+        //   ここでも弾く。素通りさせると応答が返らず、原因の特定も難しい
+        if (period.isUnbounded() || period.isUnboundedStart()) {
+            throw new IllegalStateException("端の無い期間の所定労働日数は数えられません: " + period);
+        }
         int count = 0;
         for (LocalDate date = period.from(); date.isBefore(period.toExclusive());
                 date = date.plusDays(1)) {

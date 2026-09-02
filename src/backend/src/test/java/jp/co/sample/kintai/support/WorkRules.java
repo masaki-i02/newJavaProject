@@ -48,13 +48,29 @@ public final class WorkRules {
 
     /** 法定どおりの就業規則。 */
     public static WorkRule rule(WorkingTimeSystem system) {
+        return rule(system, Duration.ofHours(8), NightWindow.STANDARD);
+    }
+
+    /**
+     * 法定労働時間と深夜帯を差し替えた就業規則。
+     *
+     * <p>既定値だけでテストを書くと、<strong>計算が規則の値を読んでいるのか、
+     * 同じ定数を偶然使っているのか区別できない。</strong>
+     */
+    public static WorkRule rule(WorkingTimeSystem system, Duration statutoryDaily,
+                                NightWindow nightWindow) {
         return new WorkRule(
                 new WorkRuleId(UUID.randomUUID()),
                 new WorkRuleSeriesId(UUID.randomUUID()),
                 DateRange.startingAt(LocalDate.of(2026, 1, 1)),
                 system,
-                Duration.ofHours(8), Duration.ofHours(40),
-                NightWindow.STANDARD, PremiumRates.STATUTORY);
+                statutoryDaily, Duration.ofHours(40),
+                nightWindow, PremiumRates.STATUTORY);
+    }
+
+    /** 所定 7 時間（9:00–17:00 / 休憩 60 分）。所定 &lt; 法定を作るために使う。 */
+    public static FixedTimeSystem sevenHours() {
+        return fixed("09:00", "17:00", 60);
     }
 
     public static WorkRule fixedRule() {

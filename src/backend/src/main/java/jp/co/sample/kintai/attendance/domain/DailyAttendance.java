@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.function.Predicate;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
+import jp.co.sample.kintai.shared.domain.TimeRange;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
@@ -69,6 +70,9 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
                             .formatted(breakdown, workingTime));
         }
 
+        // ★ 内訳の区間は時系列順に並び、互いに重ならない
+        requireDisjointAndOrdered(slices);
+
         // ★ 集計値は内訳から再集計した値と一致しなければならない
         Duration slicedWorking = total(slices, slice -> true);
         if (!slicedWorking.equals(workingTime)) {
@@ -97,6 +101,31 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
         // 合計に等しく（requireMatches）、実労働は slices 全体の合計に等しい（slicedWorking）。
         // 独立した検査として書くと、成立しない条件を検査することになる
         // （CLAUDE.md 落とし穴 16）。ここに足さない。
+    }
+
+    /**
+     * 内訳の区間が時系列順で、互いに重ならないことを確かめる。
+     *
+     * <p><strong>合計の一致だけでは重なりを検出できない。</strong>
+     * {@code 09:00–12:00} と {@code 11:00–14:00} の 2 区間は合計 6 時間になるので、
+     * 実労働 6 時間として矛盾なく構築できてしまう。実際の拘束は 5 時間なので、
+     * 1 時間が二重に計上されている（CLAUDE.md 落とし穴 32）。
+     *
+     * <p>計算経路では「休憩が負」で気づけるが、それは計算機が求めた拘束時間に依存する。
+     * DB から復元する経路では効かないので、<strong>この型自身で閉じる。</strong>
+     *
+     * <p>この検査は合計の一致からは導けないので恒真ではない（落とし穴 36）。
+     */
+    private static void requireDisjointAndOrdered(List<WorkSlice> slices) {
+        for (int i = 1; i < slices.size(); i++) {
+            TimeRange previous = slices.get(i - 1).range();
+            TimeRange current = slices.get(i).range();
+            if (current.start().isBefore(previous.end())) {
+                throw new IllegalArgumentException(
+                        "内訳の区間が時系列順に並んでいないか、重なっています: %s のあとに %s"
+                                .formatted(previous, current));
+            }
+        }
     }
 
     private static void requireNonNull(Duration value, String label) {

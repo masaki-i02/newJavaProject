@@ -27,8 +27,17 @@ public enum PremiumType {
      * <p><strong>{@code NIGHT} だけは他に重ねて付く属性であり、合計には数えない。</strong>
      * ここを間違えると「深夜だけが付いた基本時間の区間」をどの区分にも数え損ね、
      * 内訳の合計が実労働時間と一致しなくなる。
+     *
+     * <p><strong>{@code this != NIGHT} と書かない。</strong>
+     * 区分を追加したときに黙って「排他区分」に分類され、
+     * 内訳の合計が壊れる形でしか気づけなくなる。
+     * {@code default} 句の無い {@code switch} にしておけば、
+     * 追加した瞬間にコンパイルエラーになる。
      */
     public boolean partitionsWorkingTime() {
-        return this != NIGHT;
+        return switch (this) {
+            case NIGHT -> false;
+            case OVERTIME_WITHIN_STATUTORY, OVERTIME_BEYOND_STATUTORY, LEGAL_HOLIDAY -> true;
+        };
     }
 }

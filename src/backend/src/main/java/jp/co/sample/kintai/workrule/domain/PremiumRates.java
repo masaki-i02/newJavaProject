@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.util.Set;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 
 /**
  * 割増率（労基法 37 条）。
@@ -44,7 +45,7 @@ public record PremiumRates(BigDecimal overtimeBeyondStatutory, BigDecimal night,
             throw new IllegalArgumentException("%sの割増率に null は許されません".formatted(label));
         }
         if (rate.compareTo(minimum) < 0) {
-            throw new IllegalArgumentException(
+            throw new BusinessRuleViolationException("BR-06",
                     "%sの割増率が法定下限を下回っています: %s < %s".formatted(label, rate, minimum));
         }
         try {

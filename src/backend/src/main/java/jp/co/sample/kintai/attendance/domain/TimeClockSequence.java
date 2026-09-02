@@ -26,22 +26,90 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
     }
 
     /** 畳み込みの結果。状態と区間を 1 度の走査で得る。 */
-    private record Folded(Status status, List<TimeRange> ranges, Optional<TimeRange> span) {
+    private record Folded(Status status, List<TimeRange> ranges, LocalDateTime clockedInAt,
+                          Optional<TimeRange> span) {
     }
 
     public TimeClockSequence {
         if (events == null) {
             throw new IllegalArgumentException("打刻の並びに null は許されません");
         }
-        // 同時刻の打刻が並び順で結果を変えないよう、種別にも順序を与える
-        events = events.stream()
-                .sorted(Comparator.comparing(TimeClockEvent::occurredAt)
-                        .thenComparingInt(TimeClockSequence::orderWithinSameInstant))
-                .toList();
+        events = canonicalOrder(events);
     }
 
-    /** 同時刻なら「労働を終える打刻 → 労働を始める打刻」の順に扱う。 */
-    private static int orderWithinSameInstant(TimeClockEvent event) {
+    /**
+     * 同時刻の打刻の並びを一意に決める。
+     *
+     * <p>打刻は端末から届く順が保証されないので、入力順で結果が変わってはいけない。
+     * かといって種別に<strong>固定の全順序</strong>を与えるだけでは足りない。
+     * 同じ時刻に「休憩終了 → 休憩開始」（休憩を 2 つに割った境界）と
+     * 「休憩開始 → 休憩終了」（長さ 0 の休憩）の<strong>両方が正当</strong>であり、
+     * どちらか一方の順にそろえると、もう片方の正当な打刻を拒否してしまう。
+     * 拒否すると働いた事実が残らない（CLAUDE.md 落とし穴 19）。
+     *
+     * <p>そこで、同時刻のかたまりの中では<strong>状態機械が受け入れられる打刻を先に採る</strong>。
+     * 採れるものが複数あるときだけ種別の順で決めるので、入力順には依存しない。
+     * どれも採れない並びは正準化しても不正のままで、{@code fold()} が改めて検査する。
+     */
+    private static List<TimeClockEvent> canonicalOrder(List<TimeClockEvent> events) {
+        List<TimeClockEvent> remaining = new ArrayList<>(events);
+        remaining.sort(Comparator.comparing(TimeClockEvent::occurredAt)
+                .thenComparingInt(TimeClockSequence::typeOrder));
+        List<TimeClockEvent> ordered = new ArrayList<>(remaining.size());
+        Status status = Status.NOT_STARTED;
+
+        int index = 0;
+        while (index < remaining.size()) {
+            int groupEnd = index;
+            LocalDateTime instant = remaining.get(index).occurredAt();
+            while (groupEnd < remaining.size()
+                    && remaining.get(groupEnd).occurredAt().equals(instant)) {
+                groupEnd++;
+            }
+            List<TimeClockEvent> group = new ArrayList<>(remaining.subList(index, groupEnd));
+            while (!group.isEmpty()) {
+                Status current = status;
+                // 受け入れられるものを優先し、無ければ種別順の先頭（不正な並び）
+                TimeClockEvent picked = group.stream()
+                        .filter(event -> accepts(current, event))
+                        .findFirst()
+                        .orElseGet(() -> group.get(0));
+                group.remove(picked);
+                ordered.add(picked);
+                status = nextStatus(picked);
+            }
+            index = groupEnd;
+        }
+        return List.copyOf(ordered);
+    }
+
+    /** その状態でその打刻を受け入れられるか。 */
+    private static boolean accepts(Status status, TimeClockEvent event) {
+        return status == requiredStatusFor(event);
+    }
+
+    /** その打刻を打てる状態。 */
+    private static Status requiredStatusFor(TimeClockEvent event) {
+        return switch (event) {
+            case ClockIn ignored -> Status.NOT_STARTED;
+            case BreakStart ignored -> Status.WORKING;
+            case BreakEnd ignored -> Status.ON_BREAK;
+            case ClockOut ignored -> Status.WORKING;
+        };
+    }
+
+    /** その打刻の後の状態。正準化では不正な並びでも先へ進める。 */
+    private static Status nextStatus(TimeClockEvent event) {
+        return switch (event) {
+            case ClockIn ignored -> Status.WORKING;
+            case BreakStart ignored -> Status.ON_BREAK;
+            case BreakEnd ignored -> Status.WORKING;
+            case ClockOut ignored -> Status.FINISHED;
+        };
+    }
+
+    /** 受け入れられる打刻が複数あるときの決定順。 */
+    private static int typeOrder(TimeClockEvent event) {
         return switch (event) {
             case ClockIn ignored -> 0;
             case BreakStart ignored -> 1;
@@ -106,6 +174,16 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
         return folded.span();
     }
 
+    /**
+     * 出勤打刻の時刻（秒を切り捨てたもの）。打刻が無ければ空。
+     *
+     * <p>拘束時間が 0 分（出勤と退勤が同一時刻）でも値を持つ。
+     * 勤務日と打刻の照合は、拘束時間ではなくこちらで行う。
+     */
+    public Optional<LocalDateTime> clockedInAt() {
+        return Optional.ofNullable(fold().clockedInAt());
+    }
+
     private void requireFinished(Status status) {
         if (status != Status.FINISHED && !events.isEmpty()) {
             throw new IncompleteTimeClockSequenceException(
@@ -159,10 +237,15 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
             // default 句を書かない。打刻種別を追加した瞬間にここがコンパイルエラーになる
         }
 
-        Optional<TimeRange> span = (clockedInAt != null && clockedOutAt != null)
+        // ★ 出勤と退勤が同一時刻なら拘束時間は 0 分であって、長さ 0 の区間ではない。
+        //   TimeRange は長さ 0 を禁じているので、ここで作ると IllegalArgumentException が飛ぶ。
+        //   これは DomainException ではないので Problem Details に変換されず 500 になり、
+        //   退勤打刻の登録そのものが落ちて一次証拠が残らない（CLAUDE.md 落とし穴 19）。
+        Optional<TimeRange> span = (clockedInAt != null && clockedOutAt != null
+                && clockedInAt.isBefore(clockedOutAt))
                 ? Optional.of(new TimeRange(clockedInAt, clockedOutAt))
                 : Optional.empty();
-        return new Folded(status, List.copyOf(ranges), span);
+        return new Folded(status, List.copyOf(ranges), clockedInAt, span);
     }
 
     /**

@@ -3,6 +3,8 @@ package jp.co.sample.kintai.workrule.domain;
 import java.time.Duration;
 import java.time.LocalTime;
 
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
+
 /**
  * 固定時間制。始業・終業・休憩が就業規則で決まっている。
  *
@@ -13,9 +15,11 @@ import java.time.LocalTime;
 public record FixedTimeSystem(LocalTime scheduledStart, LocalTime scheduledEnd,
                               Duration scheduledBreak) implements WorkingTimeSystem {
 
-    /** 労基法 34 条。労働時間が 6 時間を超えるなら休憩 45 分以上。 */
+    /** 労基法 34 条。6 時間を<strong>超える</strong>なら 45 分、8 時間を超えるなら 60 分。 */
     private static final Duration SIX_HOURS = Duration.ofHours(6);
+    private static final Duration EIGHT_HOURS = Duration.ofHours(8);
     private static final Duration BREAK_OVER_SIX_HOURS = Duration.ofMinutes(45);
+    private static final Duration BREAK_OVER_EIGHT_HOURS = Duration.ofMinutes(60);
 
     public FixedTimeSystem {
         if (scheduledStart == null || scheduledEnd == null || scheduledBreak == null) {
@@ -29,12 +33,29 @@ public record FixedTimeSystem(LocalTime scheduledStart, LocalTime scheduledEnd,
             throw new IllegalArgumentException(
                     "所定労働時間が 0 以下です（休憩が拘束時間を超えています）: " + working);
         }
-        if (working.compareTo(SIX_HOURS) > 0
-                && scheduledBreak.compareTo(BREAK_OVER_SIX_HOURS) < 0) {
-            throw new IllegalArgumentException(
-                    "所定労働時間が 6 時間を超える場合、休憩は 45 分以上必要です（労基法 34 条）: "
-                            + "所定 %s / 休憩 %s".formatted(working, scheduledBreak));
+        // ★ 8 時間超の 60 分も、この型で検査する。
+        //   「所定 <= 8 時間を別の制約で保証しているから恒真」なのは DB の話であって、
+        //   Java では成り立たない。所定 <= 法定を課しているのは WorkRule であり、
+        //   public record であるこの型は単体で不正な値を保持できてしまう。
+        Duration requiredBreak = requiredBreakFor(working);
+        if (scheduledBreak.compareTo(requiredBreak) < 0) {
+            throw new BusinessRuleViolationException("BR-08",
+                    "所定労働時間が %s の場合、休憩は %s 分以上必要です（労基法 34 条）: 休憩 %s"
+                            .formatted(working, requiredBreak.toMinutes(), scheduledBreak));
         }
+    }
+
+    /**
+     * その所定労働時間に必要な休憩（労基法 34 条）。
+     *
+     * <p>条文は「6 時間を<strong>超える</strong>場合」「8 時間を<strong>超える</strong>場合」なので、
+     * ちょうど 6 時間・ちょうど 8 時間は下の段に入る。
+     */
+    private static Duration requiredBreakFor(Duration working) {
+        if (working.compareTo(EIGHT_HOURS) > 0) {
+            return BREAK_OVER_EIGHT_HOURS;
+        }
+        return working.compareTo(SIX_HOURS) > 0 ? BREAK_OVER_SIX_HOURS : Duration.ZERO;
     }
 
     /**

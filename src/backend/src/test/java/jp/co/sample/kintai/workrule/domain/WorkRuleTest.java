@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.shared.domain.TimeOfDayRange;
@@ -57,8 +58,8 @@ class WorkRuleTest {
         void breakBelowLegalMinimum() {
             assertThatThrownBy(() -> new FixedTimeSystem(
                     LocalTime.of(9, 0), LocalTime.of(16, 30), Duration.ofMinutes(30)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("休憩は 45 分以上必要です");
+                    .isInstanceOf(BusinessRuleViolationException.class)
+                    .hasMessageContaining("休憩は 45 分以上必要です（労基法 34 条）");
         }
 
         @Test
@@ -68,7 +69,7 @@ class WorkRuleTest {
                     new TimeOfDayRange(LocalTime.of(7, 0), LocalTime.of(22, 0)),
                     new TimeOfDayRange(LocalTime.of(6, 0), LocalTime.of(15, 0)),
                     Duration.ofHours(8)))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("コアタイムはフレキシブルタイムの内側");
         }
 
@@ -124,7 +125,7 @@ class WorkRuleTest {
         void premiumRateBelowMinimum() {
             assertThatThrownBy(() -> new PremiumRates(new BigDecimal("0.10"),
                     new BigDecimal("0.25"), new BigDecimal("0.35")))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("法定外残業の割増率が法定下限を下回っています");
         }
 
@@ -155,7 +156,7 @@ class WorkRuleTest {
                     DateRange.startingAt(LocalDate.of(2026, 1, 1)), fixed(),
                     Duration.ofHours(12), Duration.ofHours(40),
                     NightWindow.STANDARD, PremiumRates.STATUTORY))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("1 日の法定労働時間が法定の上限を超えています");
         }
 
@@ -169,7 +170,7 @@ class WorkRuleTest {
                             Duration.ofMinutes(60)),
                     Duration.ofHours(8), Duration.ofHours(40),
                     NightWindow.STANDARD, PremiumRates.STATUTORY))
-                    .isInstanceOf(IllegalArgumentException.class)
+                    .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("所定労働時間が法定労働時間を超えています");
         }
     }

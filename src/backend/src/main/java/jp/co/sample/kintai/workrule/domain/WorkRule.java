@@ -3,6 +3,7 @@ package jp.co.sample.kintai.workrule.domain;
 import java.time.Duration;
 
 import jp.co.sample.kintai.shared.domain.DateRange;
+import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 
 /**
  * 就業規則の<strong>版</strong>。改定のたびに 1 つ増える。
@@ -55,7 +56,8 @@ public record WorkRule(WorkRuleId id, WorkRuleSeriesId seriesId, DateRange valid
             throw new IllegalArgumentException("%sは正である必要があります: %s".formatted(label, actual));
         }
         if (actual.compareTo(maximum) > 0) {
-            throw new IllegalArgumentException(
+            // 人事が登録画面から踏める誤りなので、業務エラーとして 422 に載せる
+            throw new BusinessRuleViolationException("BR-04",
                     "%sが法定の上限を超えています: %s > %s".formatted(label, actual, maximum));
         }
     }
@@ -68,7 +70,7 @@ public record WorkRule(WorkRuleId id, WorkRuleSeriesId seriesId, DateRange valid
             case FlextimeSystem flex -> flex.standardDailyWorkingTime();
         };
         if (scheduled.compareTo(statutoryDaily) > 0) {
-            throw new IllegalArgumentException(
+            throw new BusinessRuleViolationException("BR-04",
                     "所定労働時間が法定労働時間を超えています: %s > %s"
                             .formatted(scheduled, statutoryDaily));
         }

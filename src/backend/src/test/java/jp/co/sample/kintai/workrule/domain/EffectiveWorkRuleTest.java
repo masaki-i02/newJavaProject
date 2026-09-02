@@ -48,14 +48,14 @@ class EffectiveWorkRuleTest {
     @Test
     @DisplayName("UT-WR-13 改定後の日付では新しい版が返る。適用行は書き換えていない")
     void afterRevision() {
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 11, 5))).contains(AFTER);
     }
 
     @Test
     @DisplayName("UT-WR-14 改定前の日付では古い版が返る（過去分を当時の規則で再計算できる）")
     void beforeRevision() {
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 5, 5))).contains(BEFORE);
     }
 
@@ -68,14 +68,14 @@ class EffectiveWorkRuleTest {
     void gapBetweenVersions() {
         var withGap = version(DateRange.startingAt(LocalDate.of(2026, 11, 1)));
 
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, withGap),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, withGap),
                 LocalDate.of(2026, 10, 15))).isEmpty();
     }
 
     @Test
     @DisplayName("適用そのものが無い日付では空が返る")
     void beforeAssignment() {
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 3, 1))).isEmpty();
     }
 
@@ -89,7 +89,7 @@ class EffectiveWorkRuleTest {
     void versionsOfAnotherSeriesAreIgnored() {
         var foreign = version(OTHER_SERIES, DateRange.startingAt(LocalDate.of(2026, 4, 1)));
 
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(foreign, BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(foreign, BEFORE, AFTER),
                 LocalDate.of(2026, 5, 5))).contains(BEFORE);
     }
 
@@ -104,7 +104,7 @@ class EffectiveWorkRuleTest {
         var overlapping = version(new DateRange(
                 LocalDate.of(2026, 4, 1), LocalDate.of(2026, 12, 1)));
 
-        assertThatThrownBy(() -> EffectiveWorkRule.resolve(ASSIGNMENTS,
+        assertThatThrownBy(() -> EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS,
                 List.of(BEFORE, overlapping), LocalDate.of(2026, 5, 5)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("版 が 2026-05-05 時点で 2 件あります");
@@ -119,7 +119,7 @@ class EffectiveWorkRuleTest {
                 new WorkRuleAssignment(EMPLOYEE, OTHER_SERIES,
                         DateRange.startingAt(LocalDate.of(2026, 4, 1))));
 
-        assertThatThrownBy(() -> EffectiveWorkRule.resolve(duplicated, List.of(BEFORE, AFTER),
+        assertThatThrownBy(() -> EffectiveWorkRule.resolve(EMPLOYEE, duplicated, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 5, 5)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("適用 が 2026-05-05 時点で 2 件あります");
@@ -128,9 +128,9 @@ class EffectiveWorkRuleTest {
     @Test
     @DisplayName("改定の境界日は新しい版が返る（半開区間）")
     void boundaryDayBelongsToTheNewVersion() {
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 10, 1))).contains(AFTER);
-        assertThat(EffectiveWorkRule.resolve(ASSIGNMENTS, List.of(BEFORE, AFTER),
+        assertThat(EffectiveWorkRule.resolve(EMPLOYEE, ASSIGNMENTS, List.of(BEFORE, AFTER),
                 LocalDate.of(2026, 9, 30))).contains(BEFORE);
     }
 }

@@ -53,7 +53,9 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
         if (lastDay == null) {
             throw new IllegalArgumentException("最終日に null は許されません");
         }
-        if (!lastDay.isBefore(UNBOUNDED_END)) {
+        // ★ 「最終日が番兵」ではなく「翌日が番兵になる」で判定する。
+        //   前者だと lastDay = MAX.minusDays(1) が素通りし、黙って無期限の期間になる
+        if (!lastDay.isBefore(UNBOUNDED_END.minusDays(1))) {
             throw new IllegalArgumentException(
                     "最終日に番兵を渡さないでください。無期限は startingAt を使います: " + lastDay);
         }
@@ -66,6 +68,9 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
     }
 
     public boolean contains(LocalDate date) {
+        if (date == null) {
+            throw new IllegalArgumentException("判定する日付に null は許されません");
+        }
         return !date.isBefore(from) && date.isBefore(toExclusive);
     }
 
