@@ -118,6 +118,32 @@ public final class Fixtures {
         return id;
     }
 
+    // --- 打刻 ------------------------------------------------------------
+
+    /** 通常の打刻（ENTRY）。 */
+    public UUID punch(UUID employeeId, LocalDate workDate, String eventType, String occurredAt) {
+        UUID id = id();
+        jdbc.update("""
+                INSERT INTO time_clock_events (id, work_date, employee_id, entry_type,
+                                               event_type, occurred_at, recorded_by)
+                VALUES (?, ?, ?, 'ENTRY', ?, ?::timestamptz, ?)
+                """, id, workDate, employeeId, eventType, occurredAt, employeeId);
+        return id;
+    }
+
+    /** 取消（REVOCATION）。 */
+    public UUID revoke(UUID employeeId, LocalDate workDate, String eventType,
+                       String occurredAt, UUID targetId, String reason) {
+        UUID id = id();
+        jdbc.update("""
+                INSERT INTO time_clock_events (id, work_date, employee_id, entry_type,
+                        event_type, occurred_at, revokes_event_id, reason, recorded_by)
+                VALUES (?, ?, ?, 'REVOCATION', ?, ?::timestamptz, ?, ?, ?)
+                """, id, workDate, employeeId, eventType, occurredAt, targetId, reason,
+                employeeId);
+        return id;
+    }
+
     public UUID assignWorkRule(UUID employeeId, UUID seriesId, LocalDate validFrom) {
         UUID id = id();
         jdbc.update("""
