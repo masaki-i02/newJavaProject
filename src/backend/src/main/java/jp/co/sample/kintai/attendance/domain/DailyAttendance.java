@@ -3,6 +3,7 @@ package jp.co.sample.kintai.attendance.domain;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Predicate;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.workrule.domain.DayType;
@@ -53,7 +54,7 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
 
         // ★ 休憩が負になるのは、実労働区間が重なっている証拠である
         if (breakTime.isNegative()) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "休憩時間が負になっています（実労働区間が重なっている可能性）: " + breakTime);
         }
 
@@ -63,7 +64,7 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
                 .plus(overtimeBeyondStatutoryTime)
                 .plus(legalHolidayTime);
         if (!breakdown.equals(workingTime)) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "内訳の合計が実労働時間と一致しません: 内訳 %s / 実労働 %s"
                             .formatted(breakdown, workingTime));
         }
@@ -71,7 +72,7 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
         // ★ 集計値は内訳から再集計した値と一致しなければならない
         Duration slicedWorking = total(slices, slice -> true);
         if (!slicedWorking.equals(workingTime)) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "内訳（slices）の合計が実労働時間と一致しません: 内訳 %s / 実労働 %s"
                             .formatted(slicedWorking, workingTime));
         }
@@ -86,14 +87,14 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
         if (workingTimeSystem == WorkingTimeSystemType.FLEX
                 && !(overtimeWithinStatutoryTime.isZero()
                         && overtimeBeyondStatutoryTime.isZero())) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "フレックスに日次の残業を計上しています: 法定内 %s / 法定外 %s"
                             .formatted(overtimeWithinStatutoryTime,
                                     overtimeBeyondStatutoryTime));
         }
 
         if (nightTime.compareTo(workingTime) > 0) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "深夜労働時間が実労働時間を超えています: 深夜 %s / 実労働 %s"
                             .formatted(nightTime, workingTime));
         }
@@ -109,14 +110,13 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
                                        Duration expected, String label) {
         Duration actual = total(slices, slice -> slice.has(premium));
         if (!actual.equals(expected)) {
-            throw new IllegalStateException(
+            throw new IllegalArgumentException(
                     "%sの集計値が内訳と一致しません: 集計 %s / 内訳 %s"
                             .formatted(label, expected, actual));
         }
     }
 
-    private static Duration total(List<WorkSlice> slices,
-                                  java.util.function.Predicate<WorkSlice> filter) {
+    private static Duration total(List<WorkSlice> slices, Predicate<WorkSlice> filter) {
         return slices.stream().filter(filter)
                 .map(WorkSlice::duration)
                 .reduce(Duration.ZERO, Duration::plus);

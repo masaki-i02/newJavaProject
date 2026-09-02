@@ -5,6 +5,7 @@ import static jp.co.sample.kintai.support.WorkRules.flex;
 import static jp.co.sample.kintai.support.WorkRules.rule;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -75,9 +76,9 @@ class WorkRuleTest {
         @DisplayName("フレキシブル帯はコアタイムから導出される")
         void flexibleBandsAreDerived() {
             assertThat(flex().flexibleMorning())
-                    .isEqualTo(new TimeOfDayRange(LocalTime.of(7, 0), LocalTime.of(11, 0)));
+                    .contains(new TimeOfDayRange(LocalTime.of(7, 0), LocalTime.of(11, 0)));
             assertThat(flex().flexibleEvening())
-                    .isEqualTo(new TimeOfDayRange(LocalTime.of(15, 0), LocalTime.of(22, 0)));
+                    .contains(new TimeOfDayRange(LocalTime.of(15, 0), LocalTime.of(22, 0)));
         }
     }
 
@@ -94,12 +95,19 @@ class WorkRuleTest {
                     .hasMessageContaining("法定外残業の割増率が法定下限を下回っています");
         }
 
+        /**
+         * 深夜帯は {@code enum} なので、02:00–03:00 のような値は
+         * <strong>そもそも書けない</strong>（コンパイルが通らない）。
+         * ここで確かめられるのは「法が認める 2 つ以外が増えていないこと」だけである。
+         */
         @Test
-        @DisplayName("UT-WR-09 深夜帯を 02:00–03:00 では生成できない")
-        void arbitraryNightWindow() {
-            assertThatThrownBy(() -> new NightWindow(LocalTime.of(2, 0), LocalTime.of(3, 0)))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("深夜帯は 22:00–05:00 または 23:00–06:00 に限ります");
+        @DisplayName("UT-WR-09 深夜帯は 22:00–05:00 と 23:00–06:00 の 2 つしか存在しない")
+        void nightWindowIsClosedSet() {
+            assertThat(NightWindow.values())
+                    .extracting(NightWindow::start, NightWindow::end)
+                    .containsExactlyInAnyOrder(
+                            tuple(LocalTime.of(22, 0), LocalTime.of(5, 0)),
+                            tuple(LocalTime.of(23, 0), LocalTime.of(6, 0)));
         }
 
         /**

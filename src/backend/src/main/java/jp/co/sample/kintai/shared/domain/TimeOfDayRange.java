@@ -32,11 +32,20 @@ public record TimeOfDayRange(LocalTime start, LocalTime end) {
         return crossesMidnight() ? span.plusDays(1) : span;
     }
 
-    /** この範囲が {@code other} を完全に含むか。日をまたぐ範囲どうしは比較しない。 */
+    /**
+     * この範囲が {@code other} を完全に含むか。
+     *
+     * <p>日をまたぐ範囲は基準となる日付が無いと前後を決められないので判定しない。
+     * 引数が不正なのではなく<strong>この型では答えられない</strong>問いなので、
+     * {@link UnsupportedOperationException} を投げる。
+     * 日付が要るなら {@link #on(LocalDate)} で {@link TimeRange} にしてから比べる。
+     *
+     * @throws UnsupportedOperationException どちらかが日をまたぐとき
+     */
     public boolean contains(TimeOfDayRange other) {
         if (crossesMidnight() || other.crossesMidnight()) {
-            throw new IllegalArgumentException(
-                    "日をまたぐ範囲の包含は判定しません: %s / %s".formatted(this, other));
+            throw new UnsupportedOperationException(
+                    "日をまたぐ範囲の包含は判定できません: %s / %s".formatted(this, other));
         }
         return !other.start.isBefore(start) && !other.end.isAfter(end);
     }

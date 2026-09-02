@@ -33,12 +33,36 @@ public final class EffectiveWorkRule {
      */
     public static Optional<WorkRule> resolve(List<WorkRuleAssignment> assignments,
                                              List<WorkRule> versions, LocalDate date) {
-        return assignments.stream()
-                .filter(assignment -> assignment.period().contains(date))
-                .findFirst()
-                .flatMap(assignment -> versions.stream()
-                        .filter(version -> version.seriesId().equals(assignment.seriesId()))
-                        .filter(version -> version.validPeriod().contains(date))
-                        .findFirst());
+        if (assignments == null || versions == null || date == null) {
+            throw new IllegalArgumentException("時点解決の引数に null は許されません");
+        }
+        return only(assignments.stream()
+                        .filter(assignment -> assignment.period().contains(date))
+                        .toList(),
+                "適用", date)
+                .flatMap(assignment -> only(versions.stream()
+                                .filter(v -> v.seriesId().equals(assignment.seriesId()))
+                                .filter(v -> v.validPeriod().contains(date))
+                                .toList(),
+                        "版", date));
+    }
+
+    /**
+     * ただ 1 件であることを確かめて返す。0 件なら空。
+     *
+     * <p><strong>findFirst にしない。</strong>
+     * 適用も版も期間が重ならないことを DB の {@code EXCLUDE} 制約で保証しているので、
+     * 2 件見つかるのは制約が壊れたか、呼び出し側が別の社員・別の系列の履歴を
+     * 混ぜて渡したかのどちらかである。先頭を黙って採ると、
+     * どちらが使われたかは実行のたびに変わりうるのに、誰も気づけない。
+     *
+     * @throws IllegalStateException 2 件以上見つかったとき
+     */
+    private static <T> Optional<T> only(List<T> found, String label, LocalDate date) {
+        if (found.size() > 1) {
+            throw new IllegalStateException(
+                    "%s が %s 時点で %d 件あります: %s".formatted(label, date, found.size(), found));
+        }
+        return found.stream().findFirst();
     }
 }

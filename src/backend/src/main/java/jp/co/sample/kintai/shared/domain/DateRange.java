@@ -13,10 +13,21 @@ import java.util.Optional;
  *
  * <p>「最終日」を意味する値（退職日など）は {@code plusDays(1)} で上限へ変換する。
  *
+ * <p>上限・下限が無い期間は番兵（{@link #UNBOUNDED_END} / {@link #UNBOUNDED_START}）で表す。
+ * <strong>番兵はそのままでは永続化できない。</strong>
+ * PostgreSQL の {@code date} が表せる上限（5874897 年）を超えるため、
+ * {@code infrastructure} 層が {@link #isUnbounded()} を見て SQL の {@code NULL} に写す。
+ *
  * @param from        開始日。含む
- * @param toExclusive 終了日。<strong>含まない。</strong> 無期限は {@link LocalDate#MAX}
+ * @param toExclusive 終了日。<strong>含まない。</strong> 無期限は {@link #UNBOUNDED_END}
  */
 public record DateRange(LocalDate from, LocalDate toExclusive) {
+
+    /** 上限が無いことを表す番兵。DB では {@code NULL} に写す。 */
+    public static final LocalDate UNBOUNDED_END = LocalDate.MAX;
+
+    /** 下限が無いことを表す番兵。DB では {@code NULL} に写す。 */
+    public static final LocalDate UNBOUNDED_START = LocalDate.MIN;
 
     public DateRange {
         if (from == null || toExclusive == null) {
@@ -30,7 +41,7 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
 
     /** 上限のない期間。 */
     public static DateRange startingAt(LocalDate from) {
-        return new DateRange(from, LocalDate.MAX);
+        return new DateRange(from, UNBOUNDED_END);
     }
 
     /**
@@ -39,6 +50,13 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
      * <p>退職日・廃止日のように「その日まで有効」という値は必ずここを通す。
      */
     public static DateRange closed(LocalDate from, LocalDate lastDay) {
+        if (lastDay == null) {
+            throw new IllegalArgumentException("最終日に null は許されません");
+        }
+        if (!lastDay.isBefore(UNBOUNDED_END)) {
+            throw new IllegalArgumentException(
+                    "最終日に番兵を渡さないでください。無期限は startingAt を使います: " + lastDay);
+        }
         return new DateRange(from, lastDay.plusDays(1));
     }
 
@@ -62,12 +80,25 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
         return start.isBefore(end) ? Optional.of(new DateRange(start, end)) : Optional.empty();
     }
 
-    /** 暦日数。 */
+    /**
+     * 暦日数。
+     *
+     * @throws IllegalStateException 端が番兵のとき。無期限の期間に日数は無い
+     */
     public long days() {
+        if (isUnbounded() || isUnboundedStart()) {
+            throw new IllegalStateException("端の無い期間の日数は求められません: " + this);
+        }
         return ChronoUnit.DAYS.between(from, toExclusive);
     }
 
+    /** 上限が無いか。 */
     public boolean isUnbounded() {
-        return LocalDate.MAX.equals(toExclusive);
+        return UNBOUNDED_END.equals(toExclusive);
+    }
+
+    /** 下限が無いか。 */
+    public boolean isUnboundedStart() {
+        return UNBOUNDED_START.equals(from);
     }
 }

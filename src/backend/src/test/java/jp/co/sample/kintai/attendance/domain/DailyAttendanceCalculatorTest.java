@@ -488,7 +488,7 @@ class DailyAttendanceCalculatorTest {
         void withoutClockOut() {
             assertThatThrownBy(() -> calculate(MON, Punches.on("2026-04-06").in("09:00"),
                     fixedRule()))
-                    .isInstanceOf(InvalidTimeClockSequenceException.class)
+                    .isInstanceOf(IncompleteTimeClockSequenceException.class)
                     .hasMessageContaining("退勤打刻がないため");
         }
 
@@ -642,7 +642,7 @@ class DailyAttendanceCalculatorTest {
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(7), Duration.ofHours(1), Duration.ZERO,
                 Duration.ZERO, Duration.ZERO))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("法定内残業の集計値が内訳と一致しません");
     }
 
@@ -658,7 +658,7 @@ class DailyAttendanceCalculatorTest {
                 attendance.baseTime(), attendance.overtimeWithinStatutoryTime(),
                 attendance.overtimeBeyondStatutoryTime(), attendance.nightTime(),
                 attendance.legalHolidayTime()))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("フレックスに日次の残業を計上しています");
     }
 }

@@ -3,6 +3,7 @@ package jp.co.sample.kintai.attendance.domain;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -25,7 +26,11 @@ public record WorkSlice(TimeRange range, Set<PremiumType> premiums) {
         if (range == null || premiums == null) {
             throw new IllegalArgumentException("労働区間の項目に null は許されません");
         }
-        premiums = premiums.isEmpty() ? Set.of() : Set.copyOf(EnumSet.copyOf(premiums));
+        // EnumSet は反復順が宣言順で安定し、contains が速い。
+        // 不変にするラップは 1 回で足りる（Set.copyOf を重ねると無駄にもう 1 つ作る）
+        premiums = premiums.isEmpty()
+                ? Set.of()
+                : Collections.unmodifiableSet(EnumSet.copyOf(premiums));
         long exclusive = premiums.stream().filter(PremiumType::partitionsWorkingTime).count();
         if (exclusive > 1) {
             throw new IllegalArgumentException(

@@ -108,7 +108,7 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
 
     private void requireFinished(Status status) {
         if (status != Status.FINISHED && !events.isEmpty()) {
-            throw new InvalidTimeClockSequenceException(
+            throw new IncompleteTimeClockSequenceException(
                     "退勤打刻がないため労働時間を確定できません（状態: %s）".formatted(describe(status)));
         }
     }

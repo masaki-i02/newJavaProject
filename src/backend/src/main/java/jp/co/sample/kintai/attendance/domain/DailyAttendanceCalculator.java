@@ -2,8 +2,8 @@ package jp.co.sample.kintai.attendance.domain;
 
 import java.time.Duration;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.shared.domain.TimeRange;
@@ -20,7 +20,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * <p>処理は「1 本の労働区間を、割増の切り替わり点でひたすら細切れにしていく」形をとる。
  * 適用する規則は<strong>労働時間制度と勤務日の区分の両方</strong>で決まる。
  */
-public class DailyAttendanceCalculator {
+public final class DailyAttendanceCalculator {
 
     private final CompanyCalendar calendar;
 
@@ -126,14 +126,10 @@ public class DailyAttendanceCalculator {
         return span.duration().minus(workedTotal);
     }
 
-    private static Duration sum(List<WorkSlice> slices,
-                                java.util.function.Predicate<WorkSlice> filter) {
-        List<WorkSlice> matched = new ArrayList<>();
-        for (WorkSlice slice : slices) {
-            if (filter.test(slice)) {
-                matched.add(slice);
-            }
-        }
-        return matched.stream().map(WorkSlice::duration).reduce(Duration.ZERO, Duration::plus);
+    private static Duration sum(List<WorkSlice> slices, Predicate<WorkSlice> filter) {
+        return slices.stream()
+                .filter(filter)
+                .map(WorkSlice::duration)
+                .reduce(Duration.ZERO, Duration::plus);
     }
 }

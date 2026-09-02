@@ -33,7 +33,7 @@ public record WorkRuleSeries(WorkRuleSeriesId id, String name,
 
     /** 系列が有効な期間。半開区間。 */
     public DateRange activePeriod() {
-        return new DateRange(LocalDate.MIN, abolishedOn.orElse(LocalDate.MAX));
+        return new DateRange(DateRange.UNBOUNDED_START, abolishedOn.orElse(DateRange.UNBOUNDED_END));
     }
 
     public boolean isActiveOn(LocalDate date) {

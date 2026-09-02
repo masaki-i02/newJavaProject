@@ -30,10 +30,9 @@ spring:
         order_inserts: true
         order_updates: true
 
-# ドメインは壁掛け時計時刻（LocalDateTime）を扱う。
-# DB は timestamptz。変換は BusinessZone に集約する（アーキテクチャ設計書 6.3）
-kintai:
-  business-zone: Asia/Tokyo
+# ドメインは壁掛け時計時刻（LocalDateTime）を扱い、DB は timestamptz。
+# 変換は shared.domain.BusinessZone（Asia/Tokyo）に集約する（アーキテクチャ設計書 6.3）。
+# 設定値にはしない。あとから変えると、過去に記録した打刻の解釈まで遡って変わる
 
 management:
   endpoints:

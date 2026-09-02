@@ -2,6 +2,7 @@ package jp.co.sample.kintai.workrule.domain;
 
 import java.time.Duration;
 import java.time.YearMonth;
+import java.util.Optional;
 
 import jp.co.sample.kintai.shared.domain.DateRange;
 
@@ -31,8 +32,7 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
     }
 
     /** 暦月と在籍期間の交差を取る。重ならなければ、その月に清算するものは無い。 */
-    public static java.util.Optional<SettlementPeriod> of(YearMonth month,
-                                                          DateRange employmentPeriod) {
+    public static Optional<SettlementPeriod> of(YearMonth month, DateRange employmentPeriod) {
         return calendarMonthOf(month).intersect(employmentPeriod)
                 .map(intersection -> new SettlementPeriod(month, intersection));
     }
@@ -53,6 +53,14 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
      * 時間が増え、割増賃金が多くなる。労働者に有利な方向である。
      */
     public Duration statutoryTotalLimit(Duration statutoryWeekly) {
-        return Duration.ofMinutes(days() * statutoryWeekly.toMinutes() / 7);
+        if (statutoryWeekly == null) {
+            throw new IllegalArgumentException("週法定労働時間に null は許されません");
+        }
+        if (!statutoryWeekly.isPositive()) {
+            throw new IllegalArgumentException("週法定労働時間は正である必要があります: "
+                    + statutoryWeekly);
+        }
+        // 桁あふれを黙って負の総枠にしない。総枠が負になると全時間が時間外になる
+        return Duration.ofMinutes(Math.multiplyExact(days(), statutoryWeekly.toMinutes()) / 7);
     }
 }

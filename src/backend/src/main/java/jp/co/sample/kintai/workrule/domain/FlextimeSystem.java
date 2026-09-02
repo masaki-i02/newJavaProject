@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.workrule.domain;
 
 import java.time.Duration;
+import java.util.Optional;
 
 import jp.co.sample.kintai.shared.domain.TimeOfDayRange;
 
@@ -41,13 +42,26 @@ public record FlextimeSystem(TimeOfDayRange flexibleTime, TimeOfDayRange coreTim
         return standardDailyWorkingTime.multipliedBy(workdayCount);
     }
 
-    /** コアタイム前のフレキシブル帯（07:00–11:00 など）。 */
-    public TimeOfDayRange flexibleMorning() {
-        return new TimeOfDayRange(flexibleTime.start(), coreTime.start());
+    /**
+     * コアタイム前のフレキシブル帯（07:00–11:00 など）。
+     *
+     * <p>コアタイムが外枠の先頭から始まる規則では帯が存在しないので空を返す。
+     * これは矛盾ではなく<strong>正当な設定</strong>なので、例外にしない。
+     */
+    public Optional<TimeOfDayRange> flexibleMorning() {
+        return flexibleTime.start().equals(coreTime.start())
+                ? Optional.empty()
+                : Optional.of(new TimeOfDayRange(flexibleTime.start(), coreTime.start()));
     }
 
-    /** コアタイム後のフレキシブル帯（15:00–22:00 など）。 */
-    public TimeOfDayRange flexibleEvening() {
-        return new TimeOfDayRange(coreTime.end(), flexibleTime.end());
+    /**
+     * コアタイム後のフレキシブル帯（15:00–22:00 など）。
+     *
+     * <p>コアタイムが外枠の末尾で終わる規則では帯が存在しないので空を返す。
+     */
+    public Optional<TimeOfDayRange> flexibleEvening() {
+        return coreTime.end().equals(flexibleTime.end())
+                ? Optional.empty()
+                : Optional.of(new TimeOfDayRange(coreTime.end(), flexibleTime.end()));
     }
 }

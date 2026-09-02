@@ -26,10 +26,10 @@ public record LegalHolidayWorkRule(CompanyCalendar calendar) implements Attendan
 
     @Override
     public List<WorkSlice> apply(List<WorkSlice> slices) {
-        return slices.stream()
+        return List.copyOf(slices.stream()
                 .map(slice -> calendar.dayTypeOf(slice.calendarDate()) == DayType.LEGAL_HOLIDAY
                         ? slice.with(PremiumType.LEGAL_HOLIDAY)
                         : slice)
-                .toList();
+                .toList());
     }
 }

@@ -32,13 +32,17 @@ public record NightWorkRule(NightWindow nightWindow) implements AttendanceRule {
     }
 
     private List<WorkSlice> applyTo(WorkSlice slice) {
+        List<TimeRange> nights = nightWindow.intervalsOverlapping(slice.range());
+        if (nights.isEmpty()) {
+            return List.of(slice);
+        }
         List<WorkSlice> parts = new ArrayList<>(List.of(slice));
         // 重なる深夜帯の端点で切る。切った結果に対して属性を付ける
-        for (TimeRange night : nightWindow.intervalsOverlapping(slice.range())) {
+        for (TimeRange night : nights) {
             parts = splitAll(parts, night);
         }
         return parts.stream()
-                .map(part -> overlapsNight(part) ? part.with(PremiumType.NIGHT) : part)
+                .map(part -> insideNight(nights, part) ? part.with(PremiumType.NIGHT) : part)
                 .toList();
     }
 
@@ -53,8 +57,15 @@ public record NightWorkRule(NightWindow nightWindow) implements AttendanceRule {
         return split;
     }
 
-    private boolean overlapsNight(WorkSlice slice) {
-        return nightWindow.intervalsOverlapping(slice.range()).stream()
-                .anyMatch(night -> night.equals(slice.range()));
+    /**
+     * 分割後の区間が深夜帯の内側にあるか。
+     *
+     * <p>深夜帯の端点ですべて切ったあとなので、区間は深夜帯に
+     * <strong>完全に含まれるか、まったく重ならないか</strong>のどちらかしかない。
+     * よって開始時刻が深夜帯に入っているかだけを見ればよい。
+     * 区間の一致で判定すると、他の規則がさらに細かく切った断片を取りこぼす。
+     */
+    private static boolean insideNight(List<TimeRange> nights, WorkSlice slice) {
+        return nights.stream().anyMatch(night -> night.contains(slice.range().start()));
     }
 }

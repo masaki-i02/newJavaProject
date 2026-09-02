@@ -36,8 +36,8 @@ classDiagram
         TimeOfDayRange flexibleTime
         TimeOfDayRange coreTime
         Duration standardDailyWorkingTime
-        flexibleMorning() TimeOfDayRange
-        flexibleEvening() TimeOfDayRange
+        flexibleMorning() Optional~TimeOfDayRange~
+        flexibleEvening() Optional~TimeOfDayRange~
         scheduledTotalWorkingTime(int) Duration
     }
 
@@ -49,9 +49,9 @@ classDiagram
         multiplierFor(Set~PremiumType~) BigDecimal
     }
     class NightWindow {
-        <<record>>
-        LocalTime start
-        LocalTime end
+        <<enum>>
+        STANDARD
+        DESIGNATED_AREA
         crossesMidnight() boolean
         intervalsOverlapping(TimeRange) List~TimeRange~
     }
