@@ -163,6 +163,10 @@
 | --- | --- |
 | 1 | **`hibernate.jdbc.time_zone` を設定しない。** JDBC 層が `time` 型のカラムまで変換し、深夜帯 22:00–05:00 が別の時刻として読み込まれる |
 | 2 | **Spring Boot 4 でスターター名が変わっている。** `spring-boot-starter-web` → `spring-boot-starter-webmvc`、Flyway は `spring-boot-starter-flyway`、テストは機能ごとに `-data-jpa-test` などへ分割。3.x 向けの記事をそのまま写さない |
+| 28 | **Spring Boot 4.1 が管理する Testcontainers は 2.0 系だが、`junit-jupiter` / `postgresql` の座標が 1.x から変わっており解決できない。** BOM を 1.21.3 に固定する |
+| 29 | **ArchUnit のルールのフィールド名に日本語を使わない。** フィールド名がそのままレポートのファイル名になり、locale が POSIX / C の環境（CI のコンテナ）で「Malformed input」でレポート生成が落ちる。`sun.jnu.encoding` は `-D` で上書きできない。説明は `because(...)` に書く |
+| 30 | **ArchUnit の `noClasses()` は、対象が 0 件だと「1 件も検査しなかった」として落ちる。** 実装が進んでいない段階では `allowEmptyShould(true)` を付ける |
+| 31 | **ArchUnit のルールは、わざと違反するクラスを置いて落ちることを確かめる。** 対象が無くて通っているのか、守れていて通っているのかを区別する |
 | 3 | **`.gitignore` でスラッシュを含むパターンはその `.gitignore` の階層が基準。** `!gradle/wrapper/gradle-wrapper.jar` はサブディレクトリのプロジェクトに効かない。`!**/gradle/...` と書く |
 | 4 | **`./gradlew build` はテストを含む。** データソース未設定の段階では `contextLoads()` が失敗する。生成直後の確認は `compileJava` で行う |
 | 5 | **深夜は他の区分と重複する属性であり、労働時間を分割する区分ではない。** 集計時に「深夜のみが付いた所定内の区間」を数え損ねやすい。内訳の合計＝実労働時間、を不変条件として検証すること |

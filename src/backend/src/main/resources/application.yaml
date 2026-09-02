@@ -1,3 +1,42 @@
 spring:
   application:
     name: kintai
+
+  datasource:
+    url: ${KINTAI_DB_URL:jdbc:postgresql://localhost:5432/kintai}
+    username: ${KINTAI_DB_USER:kintai}
+    password: ${KINTAI_DB_PASSWORD:kintai}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 本番でスキーマを勝手に直さない。差異は必ずマイグレーションで表現する
+    validate-on-migrate: true
+    clean-disabled: true
+
+  jpa:
+    # スキーマは Flyway が作る。Hibernate に触らせない
+    hibernate:
+      ddl-auto: validate
+    # トランザクション境界は application 層の公開メソッド（アーキテクチャ設計書 6.1）
+    open-in-view: false
+    properties:
+      hibernate:
+        # hibernate.jdbc.time_zone は設定しない。
+        # JDBC 層が time 型のカラムまで変換し、深夜帯 22:00-05:00 が
+        # 別の時刻として読み込まれる（CLAUDE.md 落とし穴 1）
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+# ドメインは壁掛け時計時刻（LocalDateTime）を扱う。
+# DB は timestamptz。変換は BusinessZone に集約する（アーキテクチャ設計書 6.3）
+kintai:
+  business-zone: Asia/Tokyo
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
