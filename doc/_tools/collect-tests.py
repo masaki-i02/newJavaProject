@@ -90,6 +90,7 @@ def render(prefix, title, rows):
     out.append('')
     out.append('---')
     out.append('')
+    out.append(render_by_requirement(rows))
     for _, label in CONTEXTS:
         part = [r for r in rows if r['context'] == label]
         if not part:
@@ -104,6 +105,28 @@ def render(prefix, title, rows):
             out.append(f"| `{r['id']}` | {r['view']} | {r['expect']} | {r['ref']} | {link} |")
         out.append('')
     return '\n'.join(out) + '\n'
+
+
+def render_by_requirement(rows):
+    """要件 ID（BR-xx）ごとの件数。
+
+    **手で数えない。** 仕様書に件数を書いていたが、
+    ケースを足すたびに合わなくなり、5 行が実際と食い違っていた。
+    """
+    counts = {}
+    for r in rows:
+        for br in sorted(set(re.findall(r'BR-\d+', r['ref']))):
+            counts.setdefault(br, []).append(r['id'])
+    if not counts:
+        return ''
+    out = ['## 要件ごとの件数', '',
+           '| 要件 | 件数 |', '| --- | --- |']
+    for br in sorted(counts, key=lambda b: int(b.split('-')[1])):
+        out.append(f'| `{br}` | {len(counts[br])} |')
+    untraced = [r['id'] for r in rows if not re.search(r'BR-\d+', r['ref'])]
+    out.append(f'| （要件に紐づかない） | {len(untraced)} |')
+    out.append('')
+    return '\n'.join(out)
 
 
 def main():

@@ -18,9 +18,9 @@ import java.time.YearMonth;
  * @param scheduled 所定総労働時間
  * @param limit     法定労働時間の総枠
  */
-public record ScheduleExceedsStatutoryLimit(YearMonth month, Duration scheduled, Duration limit) {
+public record ScheduleCapacityWarning(YearMonth month, Duration scheduled, Duration limit) {
 
-    public ScheduleExceedsStatutoryLimit {
+    public ScheduleCapacityWarning {
         if (month == null || scheduled == null || limit == null) {
             throw new IllegalArgumentException("警告の項目に null は許されません");
         }

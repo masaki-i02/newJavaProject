@@ -68,6 +68,17 @@ public record PremiumRates(BigDecimal overtimeBeyondStatutory, BigDecimal night,
      * </pre>
      */
     public BigDecimal multiplierFor(Set<PremiumType> premiums) {
+        if (premiums == null) {
+            throw new IllegalArgumentException("割増区分の集合に null は許されません");
+        }
+        // ★ 排他の検査をここでも行う。呼び出し側（WorkSlice）が強制しているが、
+        //   この引数は生の Set なのでその不変条件が型としては届かない。
+        //   下の if / else if は、ありえない組み合わせを黙って法定休日として採ってしまう
+        long exclusive = premiums.stream().filter(PremiumType::partitionsWorkingTime).count();
+        if (exclusive > 1) {
+            throw new IllegalArgumentException(
+                    "排他的な割増区分が 2 つ以上あります: " + premiums);
+        }
         BigDecimal multiplier = BigDecimal.ONE;
         if (premiums.contains(PremiumType.LEGAL_HOLIDAY)) {
             multiplier = multiplier.add(legalHoliday);

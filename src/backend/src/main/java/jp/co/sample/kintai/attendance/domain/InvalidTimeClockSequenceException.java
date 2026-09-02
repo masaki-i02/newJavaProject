@@ -10,7 +10,7 @@ import java.io.Serial;
  * ——退勤し忘れは並びが正しいまま途中なだけで、退勤を打てば解消するからである。
  * 同じ例外にすると、画面が「訂正申請へ」と「退勤を打ってください」を出し分けられない。
  */
-public class InvalidTimeClockSequenceException extends TimeClockSequenceException {
+public final class InvalidTimeClockSequenceException extends TimeClockSequenceException {
 
     @Serial
     private static final long serialVersionUID = 1L;

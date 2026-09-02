@@ -151,7 +151,7 @@ class SettlementPeriodTest {
     @Test
     @DisplayName("超えていない値では警告を作れない")
     void warningCannotBeBuiltWithoutExcess() {
-        assertThatThrownBy(() -> new ScheduleExceedsStatutoryLimit(
+        assertThatThrownBy(() -> new ScheduleCapacityWarning(
                 YearMonth.of(2026, 6), Duration.ofMinutes(100), Duration.ofMinutes(100)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("総枠を超えていないのに警告を作ろうとしています");

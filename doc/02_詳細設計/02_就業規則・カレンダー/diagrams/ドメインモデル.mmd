@@ -62,9 +62,29 @@ classDiagram
         NON_LEGAL_HOLIDAY
     }
     class CompanyCalendar {
-        <<domain service>>
+        <<interface>>
         dayTypeOf(LocalDate) DayType
         workdayCountIn(DateRange) int
+    }
+    class SettlementPeriod {
+        <<record>>
+        YearMonth month
+        DateRange period
+        of(YearMonth, DateRange) Optional~SettlementPeriod~
+        days() long
+        statutoryTotalLimit(Duration) Duration
+        checkCapacity(FlextimeSystem, int, Duration) Optional~ScheduleCapacityWarning~
+    }
+    class ScheduleCapacityWarning {
+        <<record>>
+        YearMonth month
+        Duration scheduled
+        Duration limit
+        excess() Duration
+    }
+    class EffectiveWorkRule {
+        <<domain service>>
+        resolve(EmployeeId, List~WorkRuleAssignment~, List~WorkRule~, LocalDate) Optional~WorkRule~
     }
     class WorkRuleAssignment {
         <<record>>
@@ -94,3 +114,7 @@ classDiagram
     PremiumRates ..> PremiumType
     CompanyCalendar --> DayType
     WorkRuleAssignment --> WorkRuleSeries : 系列を指す
+    SettlementPeriod ..> ScheduleCapacityWarning : 総枠超過を知らせる
+    SettlementPeriod ..> FlextimeSystem
+    EffectiveWorkRule ..> WorkRuleAssignment
+    EffectiveWorkRule ..> WorkRule : 時点解決

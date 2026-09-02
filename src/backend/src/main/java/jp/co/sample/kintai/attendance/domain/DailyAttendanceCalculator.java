@@ -77,7 +77,7 @@ public final class DailyAttendanceCalculator {
      *
      * <p>{@code default} 句を書かないので、制度を追加した瞬間にここがコンパイルエラーになる。
      */
-    List<AttendanceRule> rulesFor(WorkRule workRule, DayType workDayType) {
+    private List<AttendanceRule> rulesFor(WorkRule workRule, DayType workDayType) {
         var boundary = new CalendarDayBoundaryRule();
         var night = new NightWorkRule(workRule.nightWindow());
         var holiday = new LegalHolidayWorkRule(calendar);
@@ -88,7 +88,7 @@ public final class DailyAttendanceCalculator {
                     new DailyOvertimeRule(scheduledFor(workDayType, fixed),
                             workRule.statutoryDailyWorkingTime()));
             // フレックス: 日々の所定が無いので日次では残業を判定しない（BR-05）
-            case FlextimeSystem flex -> List.of(boundary, night, holiday);
+            case FlextimeSystem ignored -> List.of(boundary, night, holiday);
         };
     }
 

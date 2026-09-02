@@ -7,7 +7,7 @@ import java.io.Serial;
  *
  * <p>誤りではなく<strong>途中の状態</strong>である。退勤を打てば解消する。
  */
-public class IncompleteTimeClockSequenceException extends TimeClockSequenceException {
+public final class IncompleteTimeClockSequenceException extends TimeClockSequenceException {
 
     @Serial
     private static final long serialVersionUID = 1L;

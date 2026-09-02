@@ -73,7 +73,7 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
      * <p><strong>例外にしない。</strong> 適法な状態なので登録は許し、人事に知らせるだけにする。
      * 規則の登録・改定時とカレンダーの一括設定時に呼ぶ。
      */
-    public Optional<ScheduleExceedsStatutoryLimit> checkCapacity(
+    public Optional<ScheduleCapacityWarning> checkCapacity(
             FlextimeSystem flex, int workdayCount, Duration statutoryWeekly) {
         if (flex == null) {
             throw new IllegalArgumentException("フレックスの規則に null は許されません");
@@ -81,7 +81,7 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
         Duration scheduled = flex.scheduledTotalWorkingTime(workdayCount);
         Duration limit = statutoryTotalLimit(statutoryWeekly);
         return scheduled.compareTo(limit) > 0
-                ? Optional.of(new ScheduleExceedsStatutoryLimit(month, scheduled, limit))
+                ? Optional.of(new ScheduleCapacityWarning(month, scheduled, limit))
                 : Optional.empty();
     }
 }
