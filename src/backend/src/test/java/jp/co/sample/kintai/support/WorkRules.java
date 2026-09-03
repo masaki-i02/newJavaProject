@@ -73,6 +73,22 @@ public final class WorkRules {
         return fixed("09:00", "17:00", 60);
     }
 
+    /**
+     * 系列と有効期間を指定した版。永続化を伴うテストで使う。
+     *
+     * <p>{@link #rule(WorkingTimeSystem)} は系列を毎回作り直すので、
+     * 「同じ系列の改定」を組み立てられない。
+     */
+    public static WorkRule versionOf(WorkRuleSeriesId seriesId, LocalDate validFrom,
+                                     WorkingTimeSystem system, Duration statutoryDaily,
+                                     NightWindow nightWindow) {
+        return new WorkRule(
+                new WorkRuleId(UUID.randomUUID()), seriesId,
+                DateRange.startingAt(validFrom), system,
+                statutoryDaily, Duration.ofHours(40),
+                nightWindow, PremiumRates.STATUTORY);
+    }
+
     public static WorkRule fixedRule() {
         return rule(fixed());
     }

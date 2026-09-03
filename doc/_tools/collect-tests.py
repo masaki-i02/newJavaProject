@@ -30,7 +30,10 @@ TARGETS = [
     ('IT', os.path.join(ROOT, '04_結合テスト', 'テストケース一覧.md'), '結合テストケース一覧'),
 ]
 
-ROW = re.compile(r'^\|\s*(?:\*\*)?(?P<id>(?:UT|IT)-[A-Z0-9]+-\d+)(?:\*\*)?\s*\|(?P<rest>.*)\|\s*$')
+# ID は `IT-SCN-01` のようにバッククォートで囲まれていることもある。
+# 囲みを許さないと、その行を黙って落として一覧に現れなくなる（CLAUDE.md 落とし穴 45）
+ROW = re.compile(
+    r'^\|\s*[`*]*(?P<id>(?:UT|IT)-[A-Z0-9]+-\d+)[`*]*\s*\|(?P<rest>.*)\|\s*$')
 
 
 def cells(rest):
@@ -41,36 +44,56 @@ def cells(rest):
     return parts
 
 
+# 業務コンテキストに属さない横断的な観点は、テスト仕様書そのものが正になる。
+# シナリオ（IT-SCN）は複数のコンテキストをまたぐので、どの設計書にも置き場が無い
+EXTRA_SOURCES = [
+    ('シナリオ・横断', os.path.join(ROOT, '04_結合テスト', '結合テスト仕様書.md')),
+]
+
+
 def collect(prefix):
     """(コンテキスト, 出典ファイル, ID, 観点, 期待, 参照) を返す。"""
     found = []
     seen = {}
+    sources = []
     for directory, label in CONTEXTS:
         base = os.path.join(DESIGN, directory)
         if not os.path.isdir(base):
             continue
         for name in sorted(os.listdir(base)):
-            if not name.endswith('.md'):
+            if name.endswith('.md'):
+                sources.append((label, '%s/%s' % (directory, name),
+                                os.path.join(base, name)))
+    extras = []
+    for label, path in EXTRA_SOURCES:
+        if os.path.isfile(path):
+            extras.append((label, os.path.relpath(path, ROOT), path))
+
+    # 設計書を先に読み、そこで定義されなかった ID だけを仕様書から拾う
+    for label, source, path in sources + extras:
+        is_extra = (label, source, path) in extras
+        for line in io.open(path, encoding='utf-8'):
+            m = ROW.match(line.rstrip('\n'))
+            if not m or not m.group('id').startswith(prefix + '-'):
                 continue
-            path = os.path.join(base, name)
-            for line in io.open(path, encoding='utf-8'):
-                m = ROW.match(line.rstrip('\n'))
-                if not m or not m.group('id').startswith(prefix + '-'):
+            c = cells(m.group('rest'))
+            tid = m.group('id')
+            if tid in seen:
+                # 仕様書は、設計書で定義済みの ID を参照として並べることがある。
+                # 定義が先にあるならそちらを採り、重複としては数えない
+                if is_extra:
                     continue
-                c = cells(m.group('rest'))
-                tid = m.group('id')
-                if tid in seen:
-                    print(f'警告: {tid} が重複しています（{seen[tid]} と {label}/{name}）',
-                          file=sys.stderr)
-                seen[tid] = f'{label}/{name}'
-                found.append({
-                    'context': label,
-                    'source': f'{directory}/{name}',
-                    'id': tid,
-                    'view': c[0] if len(c) > 0 else '',
-                    'expect': c[1] if len(c) > 1 else '',
-                    'ref': c[2] if len(c) > 2 else '',
-                })
+                print(f'警告: {tid} が重複しています（{seen[tid]} と {source}）',
+                      file=sys.stderr)
+            seen[tid] = source
+            found.append({
+                'context': label,
+                'source': source,
+                'id': tid,
+                'view': c[0] if len(c) > 0 else '',
+                'expect': c[1] if len(c) > 1 else '',
+                'ref': c[2] if len(c) > 2 else '',
+            })
     return found
 
 
@@ -91,7 +114,9 @@ def render(prefix, title, rows):
     out.append('---')
     out.append('')
     out.append(render_by_requirement(rows))
-    for _, label in CONTEXTS:
+    labels = [label for _, label in CONTEXTS]
+    labels += [label for label, _ in EXTRA_SOURCES if label not in labels]
+    for label in labels:
         part = [r for r in rows if r['context'] == label]
         if not part:
             continue
@@ -101,7 +126,9 @@ def render(prefix, title, rows):
         out.append('| --- | --- | --- | --- | --- |')
         for r in part:
             src = r['source']
-            link = f'[{os.path.basename(src)}](../02_詳細設計/{src})'
+            link = (f'[{os.path.basename(src)}](../02_詳細設計/{src})'
+                    if not src.startswith('04_') and not src.startswith('03_')
+                    else f'[{os.path.basename(src)}](../{src})')
             out.append(f"| `{r['id']}` | {r['view']} | {r['expect']} | {r['ref']} | {link} |")
         out.append('')
     return '\n'.join(out) + '\n'
