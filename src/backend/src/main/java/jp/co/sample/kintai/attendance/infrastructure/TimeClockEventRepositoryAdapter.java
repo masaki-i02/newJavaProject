@@ -3,6 +3,7 @@ package jp.co.sample.kintai.attendance.infrastructure;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -43,7 +44,7 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
                         event_type, occurred_at, source, recorded_by)
                 VALUES (?, ?, ?, 'ENTRY', ?, ?, 'WEB', ?)
                 """,
-                UUID.randomUUID(), workDate, employeeId.value(), typeOf(event),
+                UUID.randomUUID(), workDate, employeeId.value(), event.type().name(),
                 BusinessZone.toAbsolute(event.occurredAt()), recordedBy.value());
     }
 
@@ -76,14 +77,29 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
         return TimeClockSequence.of(events);
     }
 
-    /** 打刻種別 → 列の値。{@code default} 句を書かないので、追加時にコンパイルエラーになる。 */
-    private static String typeOf(TimeClockEvent event) {
-        return switch (event) {
-            case TimeClockEvent.ClockIn ignored -> "CLOCK_IN";
-            case TimeClockEvent.ClockOut ignored -> "CLOCK_OUT";
-            case TimeClockEvent.BreakStart ignored -> "BREAK_START";
-            case TimeClockEvent.BreakEnd ignored -> "BREAK_END";
-        };
+    /**
+     * まだ退勤していない勤務日。
+     *
+     * <p>候補は「打刻がある勤務日」だけなので、新しい順に見て
+     * <strong>最初に見つかった未完了の日</strong>を返す。
+     * 状態機械の判定はドメイン（{@code isClosed}）に任せる。
+     * SQL で「退勤があるか」を書くと、状態機械の実装が 2 か所に散る。
+     */
+    @Override
+    public Optional<LocalDate> findOpenWorkDate(EmployeeId employeeId, LocalDate onOrAfter) {
+        List<LocalDate> candidates = jdbc.queryForList("""
+                SELECT DISTINCT work_date
+                  FROM time_clock_events
+                 WHERE employee_id = ? AND work_date >= ?
+                 ORDER BY work_date DESC
+                """, LocalDate.class, employeeId.value(), onOrAfter);
+        return candidates.stream()
+                .map(workDate -> java.util.Map.entry(workDate,
+                        findByWorkDate(employeeId, workDate)))
+                .filter(entry -> !entry.getValue().isEmpty())
+                .filter(entry -> !entry.getValue().isClosed())
+                .map(java.util.Map.Entry::getKey)
+                .findFirst();
     }
 
     private static TimeClockEvent toEvent(String eventType, LocalDateTime occurredAt) {

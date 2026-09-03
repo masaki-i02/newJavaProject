@@ -55,6 +55,8 @@ dependencies {
 
 tasks.withType<JavaCompile> {
 	options.encoding = "UTF-8"
+	// 非推奨 API を使っている箇所を具体的に知る。Note だけでは場所が分からない
+	options.compilerArgs.add("-Xlint:deprecation")
 }
 
 tasks.withType<Test> {

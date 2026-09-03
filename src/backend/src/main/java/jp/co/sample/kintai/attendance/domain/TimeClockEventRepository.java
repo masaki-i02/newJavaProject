@@ -27,4 +27,17 @@ public interface TimeClockEventRepository {
      * <p>打刻が 1 件も無い日は空の列を返す。休日や欠勤で正常に起こりうるので例外にしない。
      */
     TimeClockSequence findByWorkDate(EmployeeId employeeId, LocalDate workDate);
+
+    /**
+     * まだ退勤していない勤務日。
+     *
+     * <p><strong>勤務日は打刻した暦日と一致しない</strong>（BR-03）。
+     * 日をまたぐ勤務では、退勤・休憩の打刻を「出勤した日の勤務」に追記しなければならない。
+     * 打刻した暦日をそのまま勤務日にすると、日跨ぎ勤務の退勤が
+     * <strong>翌日の勤務として記録され、出勤の無い日に退勤だけが残る。</strong>
+     *
+     * @param onOrAfter この日以降の勤務日だけを見る。無期限に遡らせない
+     * @return 開いている勤務日。無ければ空（次の打刻は出勤である）
+     */
+    java.util.Optional<LocalDate> findOpenWorkDate(EmployeeId employeeId, LocalDate onOrAfter);
 }

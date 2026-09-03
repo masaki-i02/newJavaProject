@@ -40,4 +40,14 @@ public class BusinessRuleViolationException extends DomainException {
     public String errorCode() {
         return "urn:kintai:error:business-rule-violation";
     }
+
+    @Override
+    public DomainErrorKind kind() {
+        return DomainErrorKind.RULE_VIOLATION;
+    }
+
+    @Override
+    public String title() {
+        return "業務上の制約に反しています";
+    }
 }

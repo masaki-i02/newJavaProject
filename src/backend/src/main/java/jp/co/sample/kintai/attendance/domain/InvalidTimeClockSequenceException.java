@@ -2,6 +2,8 @@ package jp.co.sample.kintai.attendance.domain;
 
 import java.io.Serial;
 
+import jp.co.sample.kintai.shared.domain.DomainErrorKind;
+
 /**
  * 打刻の順序が状態機械に反する（勤務中でないのに休憩開始、二重の出勤など）。
  *
@@ -22,5 +24,16 @@ public final class InvalidTimeClockSequenceException extends TimeClockSequenceEx
     @Override
     public String errorCode() {
         return "urn:kintai:error:invalid-time-clock-sequence";
+    }
+
+    /** 並びそのものが誤っているので、入力を直す（訂正申請する）以外に道が無い。 */
+    @Override
+    public DomainErrorKind kind() {
+        return DomainErrorKind.RULE_VIOLATION;
+    }
+
+    @Override
+    public String title() {
+        return "打刻の順序が不正です";
     }
 }

@@ -34,4 +34,20 @@ public abstract class DomainException extends RuntimeException {
      * 文言で分岐させると、メッセージを直した瞬間に画面が壊れる。
      */
     public abstract String errorCode();
+
+    /**
+     * 業務上の分類。{@code presentation} が HTTP のステータスへ対応づける。
+     *
+     * <p><strong>ここで {@code HttpStatus} を返さない。</strong>
+     * ドメインはフレームワークを知らない（AR-01）。
+     */
+    public abstract DomainErrorKind kind();
+
+    /**
+     * 利用者に見せる見出し。Problem Details の {@code title} に使う。
+     *
+     * <p>{@code detail}（例外のメッセージ）は状況ごとに変わるが、
+     * {@code title} は種別ごとに一定にする。RFC 9457 がそう定めている。
+     */
+    public abstract String title();
 }

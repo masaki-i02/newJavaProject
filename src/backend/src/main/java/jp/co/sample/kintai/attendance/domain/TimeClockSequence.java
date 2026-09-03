@@ -145,6 +145,21 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
         }
     }
 
+    /**
+     * 打刻を 1 つ足した列を返す。<strong>元の列は変えない。</strong>
+     *
+     * <p>追記してから検査したいときに使う。
+     * 「保存してから検査する」と、不正な並びが DB に残ってしまう。
+     */
+    public TimeClockSequence plus(TimeClockEvent event) {
+        if (event == null) {
+            throw new IllegalArgumentException("追加する打刻に null は許されません");
+        }
+        List<TimeClockEvent> added = new ArrayList<>(events);
+        added.add(event);
+        return new TimeClockSequence(added);
+    }
+
     /** 打刻が 1 件も無いか。休日や欠勤で正常に起こりうる。 */
     public boolean isEmpty() {
         return events.isEmpty();
