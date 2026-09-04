@@ -38,4 +38,17 @@ public interface MonthClosureQuery {
      * <p>提出済みでも受け付ける。差戻しを待たずに、気づいた誤りを直せるようにする。
      */
     boolean acceptsCorrectionRequest(EmployeeId employeeId, YearMonth month);
+
+    /**
+     * その月を締めた社員が<strong>1 人でもいるか</strong>。
+     *
+     * <p><strong>会社カレンダーの変更に使う。</strong>
+     * 暦日区分は全社で共有する 1 つの表なので、社員ごとの判定では足りない。
+     * 誰か 1 人でも締めた月の暦日区分を変えると、
+     * 休日割増の計算が変わり<strong>確定済みの勤怠と矛盾する。</strong>
+     *
+     * <p>社員を指定できる変更（就業規則の適用）は
+     * {@link #isClosed(EmployeeId, YearMonth)} で判定すればよい。
+     */
+    boolean isClosedForAnyone(YearMonth month);
 }

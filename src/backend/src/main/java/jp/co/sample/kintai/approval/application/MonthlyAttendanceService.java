@@ -25,6 +25,7 @@ import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceId;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceRepository;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceStatus;
+import jp.co.sample.kintai.attendance.application.MonthlySettlementService;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
@@ -57,6 +58,7 @@ public class MonthlyAttendanceService {
     private final CompanyCalendar calendar;
     private final CalculatedWorkDates calculatedWorkDates;
     private final EmployeeVisibility visibility;
+    private final MonthlySettlementService settlements;
     private final Clock clock;
 
     public MonthlyAttendanceService(MonthlyAttendanceRepository attendances,
@@ -66,6 +68,7 @@ public class MonthlyAttendanceService {
                                     CompanyCalendar calendar,
                                     CalculatedWorkDates calculatedWorkDates,
                                     EmployeeVisibility visibility,
+                                    MonthlySettlementService settlements,
                                     Clock clock) {
         this.attendances = attendances;
         this.events = events;
@@ -74,6 +77,7 @@ public class MonthlyAttendanceService {
         this.calendar = calendar;
         this.calculatedWorkDates = calculatedWorkDates;
         this.visibility = visibility;
+        this.settlements = settlements;
         this.clock = clock;
     }
 
@@ -104,7 +108,12 @@ public class MonthlyAttendanceService {
         }
 
         requireMonthFinished(month, today);
-        requireAllWorkDatesCalculated(employeeId, month);
+        requireAllWorkDatesCalculated(employee, month);
+
+        // ★ 提出を契機に月次清算を計算し直す（月次清算 API設計書 3.1）。
+        //   ここで行わないと、承認者は日次だけが直った古い月次を見て承認することになる。
+        //   誰かが画面で見ている値ではないので、版は突き合わせない
+        settlements.settle(employeeId, month);
 
         MonthlyAttendance current = loadOrDraft(employeeId, month);
         MonthlyAttendance next = current.submit(requester.employeeId(),
@@ -305,10 +314,23 @@ public class MonthlyAttendanceService {
      * <strong>欠勤の日は「打刻が無い」ことが確定した状態</strong>であり未確定ではないが、
      * 日次勤怠としては計算されるので、ここでは同じに扱える。
      */
-    private void requireAllWorkDatesCalculated(EmployeeId employeeId, YearMonth month) {
+    /**
+     * 全勤務日の日次勤怠が確定しているか（ドメインモデル設計書 2.3）。
+     *
+     * <p><strong>範囲は暦月ではなく、その社員が在籍していた期間との重なりである。</strong>
+     * 暦月をそのまま見ると、月中入社の初月では入社前の勤務日が、
+     * 月中退職の最終月では退職後の勤務日が「未確定」になる。
+     * その日に働くことはありえないので確定させる手段が無く、
+     * <strong>初月と最終月を永久に提出できない。</strong>
+     *
+     * <p><strong>どの日が欠けているかを返す。</strong>
+     * 「提出できません」だけでは、利用者はどの日を直せばよいか分からない。
+     */
+    private void requireAllWorkDatesCalculated(Employee employee, YearMonth month) {
         DateRange period = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
-        Set<LocalDate> calculated = calculatedWorkDates.of(employeeId, period);
+        Set<LocalDate> calculated = calculatedWorkDates.of(employee.id(), period);
         List<LocalDate> missing = period.dates()
+                .filter(employee::isActiveOn)
                 .filter(date -> calendar.dayTypeOf(date) == DayType.WORKDAY)
                 .filter(date -> !calculated.contains(date))
                 .toList();

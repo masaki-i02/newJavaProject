@@ -46,6 +46,14 @@ class MonthClosureQueryAdapter implements MonthClosureQuery {
         return "DRAFT".equals(status) || "SUBMITTED".equals(status);
     }
 
+    @Override
+    public boolean isClosedForAnyone(YearMonth month) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM monthly_attendances
+                                WHERE target_month = ? AND status = 'CLOSED')
+                """, Boolean.class, month.atDay(1)));
+    }
+
     /** その月の状態。行が無ければ下書き。 */
     private String statusOf(EmployeeId employeeId, YearMonth month) {
         List<String> found = jdbc.queryForList("""

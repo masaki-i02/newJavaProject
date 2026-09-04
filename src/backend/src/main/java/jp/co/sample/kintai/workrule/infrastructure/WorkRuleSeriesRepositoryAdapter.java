@@ -47,8 +47,32 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
         series.save(entity);
     }
 
+    /**
+     * 適用する。
+     *
+     * <p><strong>現行の適用を閉じてから入れる。1 つの操作として行う。</strong>
+     * 入れるだけにすると期間が重なり、
+     * {@code work_rule_assignments_no_overlap} が拒否する。
+     * つまり<strong>一度適用した社員の規則を二度と変更できなくなる。</strong>
+     *
+     * <p>閉じる位置は新しい適用の開始日。半開区間なので、
+     * 同じ日から新しい規則が効く（隙間も重なりも生まれない）。
+     */
     @Override
     public void assign(EmployeeId employeeId, WorkRuleSeriesId seriesId, LocalDate validFrom) {
+        assignments.findByEmployeeIdOrderByValidFrom(employeeId.value()).stream()
+                .filter(row -> row.getValidTo() == null || row.getValidTo().isAfter(validFrom))
+                .filter(row -> !row.getValidFrom().isAfter(validFrom))
+                .forEach(row -> {
+                    row.setValidTo(validFrom);
+                    assignments.save(row);
+                });
+        // 期間が長さ 0 になる適用（同じ日に 2 回適用した）は残さない
+        assignments.findByEmployeeIdOrderByValidFrom(employeeId.value()).stream()
+                .filter(row -> validFrom.equals(row.getValidFrom())
+                        && validFrom.equals(row.getValidTo()))
+                .forEach(assignments::delete);
+
         var entity = new WorkRuleAssignmentEntity(UUID.randomUUID());
         entity.setEmployeeId(employeeId.value());
         entity.setWorkRuleSeriesId(seriesId.value());
