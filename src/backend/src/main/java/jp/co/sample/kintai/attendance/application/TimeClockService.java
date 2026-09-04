@@ -145,6 +145,21 @@ public class TimeClockService {
         return PunchResult.calculated(workDate, attendance);
     }
 
+    /**
+     * その勤務日の日次勤怠を計算し直す（BR-09）。
+     *
+     * <p>訂正の承認が使う。<strong>打刻から日次を作る手順をここに 1 つだけ置く。</strong>
+     * 訂正側に同じ手順をもう 1 つ書くと、
+     * 丸めや勤務日の扱いを直したときに片方だけが古くなる。
+     *
+     * @return 計算できたか。退勤していない日や就業規則の無い日は計算されない
+     */
+    @Transactional
+    public PunchResult recalculate(EmployeeId employeeId, LocalDate workDate) {
+        return calculateIfClosed(employeeId, workDate,
+                timeClocks.findByWorkDate(employeeId, workDate));
+    }
+
     /** 現在時刻（会社基準の壁掛け時計）。画面が「今日」を組み立てるのに使う。 */
     public LocalDateTime now() {
         return LocalDateTime.now(clock.withZone(BusinessZone.ID));

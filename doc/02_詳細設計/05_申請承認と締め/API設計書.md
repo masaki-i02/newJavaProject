@@ -21,14 +21,25 @@
 | `POST` | `/api/employees/{id}/monthly-attendances/{month}/approval` | 承認 | BR-11 の承認者 |
 | `POST` | `/api/employees/{id}/monthly-attendances/{month}/rejection` | 差戻し | BR-11 の承認者 |
 | `POST` | `/api/employees/{id}/monthly-attendances/{month}/closure` | 締め | `HR` |
-| `DELETE` | `/api/employees/{id}/monthly-attendances/{month}/approval` | 承認の取消 | `HR` |
-| `GET` | `/api/monthly-attendances/pending` | 承認待ちの一覧 | 承認者 / `HR` |
+| `POST` | `/api/employees/{id}/monthly-attendances/{month}/approval-revocation` | 承認の取消 | `HR` |
+| `GET` | `/api/monthly-attendances/pending-approval` | 承認待ちの一覧 | 承認者 / `HR` |
 | `POST` | `/api/monthly-attendances/bulk-closure` | 一括締め | `HR` |
 | `POST` | `/api/employees/{id}/correction-requests` | 打刻訂正の申請 | 本人 |
 | `GET` | `/api/employees/{id}/correction-requests` | 訂正申請の一覧 | 本人 / 承認者 / `HR` / `ADMIN` |
 | `POST` | `/api/correction-requests/{id}/approval` | 訂正の承認 | 承認者 |
 | `POST` | `/api/correction-requests/{id}/rejection` | 訂正の却下 | 承認者 |
 | `POST` | `/api/correction-requests/{id}/cancellation` | **訂正の取下げ** | 本人 |
+| `GET` | `/api/correction-requests/{id}` | 訂正申請 1 件 | 本人 / 承認者 / `HR` / `ADMIN` |
+| `GET` | `/api/correction-requests/pending-approval` | 訂正の承認待ちの一覧 | 承認者 / `HR` |
+
+**承認の取消を `DELETE` ではなく `POST .../approval-revocation` にする。**
+遷移はすべて `POST` の副リソースで表すという方針にそろえるためで、
+理由と `version` を本文で受け取る必要もある。
+`DELETE` は本文を持たせる規約が定まっていない。
+
+**承認待ちの一覧は `/pending-approval`。**
+「未処理の申請」ではなく「自分が承認する対象」を返すので、
+`pending` だけでは何に対して未処理なのかが読み取れない。
 
 ### 1.1 楽観ロック
 
@@ -470,6 +481,31 @@ API から DB までを通す。**コントローラだけを切り出してリ�
 | IT-APV-53 | **人事でない利用者の一括締め** | 403。全員を `skipped` にして 200 で返さない | 2.7 |
 | IT-APV-54 | `employeeIds` を省く | 全社員が対象になる | 2.7 |
 | IT-APV-55 | **月中に退職した社員** | 全社員が対象なら含まれる。外すとその月が永久に締まらない | 2.7 |
+| IT-APV-56 | **本人が訂正を申請** | 201。`SUBMITTED` で版は 1 | 3.1 |
+| IT-APV-57 | **人事が他人の訂正を代理申請** | 403。訂正は本人の意思表示である | 3.1 |
+| IT-APV-58 | 申請理由が空白のみ | 400 | 3.1 |
+| IT-APV-59 | 訂正内容が空 | 400 | 3.1 |
+| IT-APV-60 | **同一勤務日に未処理の申請が 2 件** | 409 `pending-correction-exists` | 3.1 |
+| IT-APV-61 | **適用すると打刻列が壊れる訂正** | 422 `invalid-time-clock-sequence`。**申請の時点で** | 3.1 |
+| IT-APV-62 | **実在しない打刻を取消対象に** | 409 `correction-target-not-found`。**その ID を返す** | 3.1 |
+| IT-APV-63 | 打刻漏れの補完（`ADD` だけ） | 201。取り消す対象が無くてよい | 3.1 |
+| IT-APV-64 | **承認すると打刻が書き換わり、日次が計算し直される** | 8h → 10h になる | 3.2 |
+| IT-APV-65 | **承認しても元の打刻は残る** | 取消行が追記され、訂正で足した打刻に理由が残る | 3.2 / BR-09 |
+| IT-APV-66 | **提出済みの月の訂正を承認** | 月次勤怠が下書きに戻り、`REVERT_BY_CORRECTION` が残る | 3.2 / BR-10 |
+| IT-APV-67 | **承認すると月次清算も計算し直される** | 日次だけ直ると月次の時間外が古いまま残る | 3.2 |
+| IT-APV-68 | 本人が自分の訂正を承認 | 403。打刻は変わらない | 3.2 |
+| IT-APV-69 | 承認者でない社員が承認 | 403 | 3.2 / BR-11 |
+| IT-APV-70 | **古い版で承認** | 409 `optimistic-lock-failure`。打刻は変わらない | 1.1 |
+| IT-APV-71 | 却下は理由が必須 | 空白のみなら 400。却下では打刻を書き換えない | 3.3 |
+| IT-APV-72 | **本人が取り下げ、同じ勤務日に出し直す** | どちらも成功する | 3.4 |
+| IT-APV-73 | 他人が取り下げる | 403 | 3.4 |
+| IT-APV-74 | 決着済みの申請を再び決裁 | 409 `correction-already-decided` | 3.2 |
+| IT-APV-75 | **承認済みの月への訂正申請** | 409 `month-not-editable`。締め済みとは分ける | 3.1 |
+| IT-APV-76 | 締め済みの月への訂正申請 | 409 `month-already-closed` | 3.1 |
+| IT-APV-77 | **提出済みの月への訂正申請** | 201。直接の打刻は受け付けないが訂正は受け付ける | 3.1 / BR-10 |
+| IT-APV-78 | 訂正の承認待ち一覧 | 見てよい社員のぶんだけ返る | 3.1 / BR-11 |
+| IT-APV-79 | 申請を 1 件取得 | 版を含めて返る | 1.1 |
+| IT-APV-80 | **その社員の申請一覧** | 決着したものも含む。却下された申請の理由が読めなくなる | 3.1 |
 
 **IT-APV-53 は「社員ごとの事情」と「依頼そのものの不備」を分ける。**
 人事でない・対象月がまだ終わっていない、は依頼が成り立たないので例外のまま返す。

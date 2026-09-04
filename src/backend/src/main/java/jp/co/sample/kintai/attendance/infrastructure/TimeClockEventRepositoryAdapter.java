@@ -9,7 +9,9 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import jp.co.sample.kintai.attendance.domain.RecordedTimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
+import jp.co.sample.kintai.attendance.domain.TimeClockEventId;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
@@ -47,6 +49,76 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
                 """,
                 UUID.randomUUID(), workDate, employeeId.value(), event.type().name(),
                 BusinessZone.toAbsolute(event.occurredAt()), recordedBy.value());
+    }
+
+    @Override
+    public void appendCorrection(EmployeeId employeeId, LocalDate workDate,
+                                 TimeClockEvent event, EmployeeId recordedBy,
+                                 String reason) {
+        jdbc.update("""
+                INSERT INTO time_clock_events (id, work_date, employee_id, entry_type,
+                        event_type, occurred_at, source, reason, recorded_by)
+                VALUES (?, ?, ?, 'ENTRY', ?, ?, 'CORRECTION', ?, ?)
+                """,
+                UUID.randomUUID(), workDate, employeeId.value(), event.type().name(),
+                BusinessZone.toAbsolute(event.occurredAt()), reason, recordedBy.value());
+    }
+
+    /**
+     * 取消行を追記する。
+     *
+     * <p><strong>{@code employee_id} を条件に含める。</strong>
+     * DB の {@code time_clock_events_revokes_fk} も同じ組で参照しているが、
+     * ここで絞らないと他人の打刻を指す行を作ろうとして
+     * <strong>外部キー違反という分かりにくい失敗になる。</strong>
+     *
+     * <p>取消行の {@code event_type} と {@code occurred_at} は対象からそのまま写す。
+     * 「何を取り消したか」が取消行だけを見て分かるようにするため。
+     */
+    @Override
+    public void revoke(EmployeeId employeeId, LocalDate workDate,
+                       TimeClockEventId targetId, EmployeeId recordedBy, String reason) {
+        int inserted = jdbc.update("""
+                INSERT INTO time_clock_events (id, work_date, employee_id, entry_type,
+                        event_type, occurred_at, source, revokes_event_id, reason,
+                        recorded_by)
+                SELECT ?, t.work_date, t.employee_id, 'REVOCATION',
+                       t.event_type, t.occurred_at, 'CORRECTION', t.id, ?, ?
+                  FROM time_clock_events t
+                 WHERE t.work_date = ? AND t.employee_id = ? AND t.id = ?
+                   AND t.entry_type = 'ENTRY'
+                """,
+                UUID.randomUUID(), reason, recordedBy.value(),
+                workDate, employeeId.value(), targetId.value());
+        if (inserted == 0) {
+            // 申請時に実在を確かめているので、ここへ来るのは競合か不正な指定である
+            throw new IllegalStateException(
+                    "取り消す打刻が見つかりません: " + targetId.value());
+        }
+    }
+
+    @Override
+    public java.util.List<RecordedTimeClockEvent> findRecordedByWorkDate(
+            EmployeeId employeeId, LocalDate workDate) {
+        return jdbc.query("""
+                SELECT e.id, e.event_type, e.occurred_at
+                  FROM time_clock_events e
+                 WHERE e.work_date = ? AND e.employee_id = ?
+                   AND e.entry_type = 'ENTRY'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM time_clock_events r
+                        WHERE r.work_date = e.work_date
+                          AND r.employee_id = e.employee_id
+                          AND r.entry_type = 'REVOCATION'
+                          AND r.revokes_event_id = e.id)
+                 ORDER BY e.occurred_at
+                """,
+                (rs, rowNum) -> new RecordedTimeClockEvent(
+                        new TimeClockEventId((UUID) rs.getObject("id")),
+                        toEvent(rs.getString("event_type"),
+                                BusinessZone.toLocal(rs.getObject("occurred_at",
+                                        java.time.OffsetDateTime.class)))),
+                workDate, employeeId.value());
     }
 
     /**

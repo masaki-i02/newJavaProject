@@ -19,6 +19,7 @@ import jp.co.sample.kintai.approval.domain.ApprovalEvent;
 import jp.co.sample.kintai.approval.domain.ApprovalEventKind;
 import jp.co.sample.kintai.approval.domain.ApprovalEventRepository;
 import jp.co.sample.kintai.approval.domain.Approver;
+import jp.co.sample.kintai.approval.domain.AttendanceState;
 import jp.co.sample.kintai.approval.domain.ApproverPolicy;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceId;
@@ -196,6 +197,19 @@ public class MonthlyAttendanceService {
             throw new AccessDeniedException();
         }
         return attendances.find(employeeId, month);
+    }
+
+    /**
+     * その月の状態（判別値）。
+     *
+     * <p>訂正の承認が「下書きに戻った」ことを応答へ載せるために使う。
+     * <strong>行が無い月は下書き相当。</strong>
+     */
+    @Transactional(readOnly = true)
+    public AttendanceState stateOf(EmployeeId employeeId, YearMonth month) {
+        return attendances.find(employeeId, month)
+                .map(attendance -> attendance.status().state())
+                .orElse(AttendanceState.DRAFT);
     }
 
     /**

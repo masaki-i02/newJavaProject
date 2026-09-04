@@ -22,11 +22,42 @@ public interface TimeClockEventRepository {
                 EmployeeId recordedBy);
 
     /**
+     * 訂正の承認により打刻を追記する（BR-09）。
+     *
+     * <p>通常の打刻と分けるのは、{@code source} と理由を必ず伴うためである。
+     * DB の {@code time_clock_events_revocation_check} が理由を必須にしている。
+     *
+     * @param reason 申請の理由。あとから「なぜこの打刻があるのか」を辿れるようにする
+     */
+    void appendCorrection(EmployeeId employeeId, LocalDate workDate, TimeClockEvent event,
+                          EmployeeId recordedBy, String reason);
+
+    /**
+     * 打刻を取り消す（BR-09）。
+     *
+     * <p><strong>行を消さない。</strong> 取消行を追記することで表現する。
+     * 打刻は労働時間の一次証拠であり、「元は何時だったか」を提示できる必要がある。
+     *
+     * @param targetId 取り消す打刻。同じ勤務日の同じ社員のものでなければならない
+     */
+    void revoke(EmployeeId employeeId, LocalDate workDate, TimeClockEventId targetId,
+                EmployeeId recordedBy, String reason);
+
+    /**
      * その勤務日の有効な打刻列。<strong>取り消された打刻は含まない。</strong>
      *
      * <p>打刻が 1 件も無い日は空の列を返す。休日や欠勤で正常に起こりうるので例外にしない。
      */
     TimeClockSequence findByWorkDate(EmployeeId employeeId, LocalDate workDate);
+
+    /**
+     * その勤務日の有効な打刻を、<strong>識別子つきで</strong>返す。
+     *
+     * <p>訂正申請が「どの打刻を取り消すか」を指すために使う。
+     * 並びは {@link #findByWorkDate} と同じく時刻順。
+     */
+    java.util.List<RecordedTimeClockEvent> findRecordedByWorkDate(EmployeeId employeeId,
+                                                                  LocalDate workDate);
 
     /**
      * まだ退勤していない勤務日。
