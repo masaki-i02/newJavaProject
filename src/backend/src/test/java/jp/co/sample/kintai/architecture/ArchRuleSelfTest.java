@@ -159,15 +159,20 @@ class ArchRuleSelfTest {
         }
 
         /**
-         * AR-10 は<strong>4 つのコンテキストすべて</strong>を禁じている。
+         * AR-10 は<strong>5 つのコンテキストすべて</strong>を禁じている。
          *
          * <p>1 つしか踏んでいないと、
-         * <strong>禁止先を 4 個から 1 個に削っても自己検査が通る。</strong>
+         * <strong>禁止先を 5 個から 1 個に削っても自己検査が通る。</strong>
+         *
+         * <p><strong>コンテキストを増やしたら、ここも同じコミットで増やす。</strong>
+         * {@code leave} を足したのに AR-10 を直さないと、
+         * そのコンテキストだけ検査対象から外れる（落とし穴 84・86）。
          */
         @org.junit.jupiter.params.ParameterizedTest(name = "AR-10 shared → {0} で落ちる")
         @org.junit.jupiter.params.provider.ValueSource(strings = {
                 "SharedReachesIntoEmployee", "SharedReachesIntoWorkRule",
-                "SharedReachesIntoAttendance", "SharedReachesIntoApproval"})
+                "SharedReachesIntoAttendance", "SharedReachesIntoApproval",
+                "SharedReachesIntoLeave"})
         void sharedMustNotDependOnContexts(String probe) {
             assertFails(ContextDependencyTest.AR_10_shared_must_not_depend_on_any_context,
                     SHARED_PROBES, probe);

@@ -81,7 +81,8 @@ class ContextDependencyTest {
             noClasses().that().resideInAPackage("..kintai.shared..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "..kintai.employee..", "..kintai.workrule..",
-                            "..kintai.attendance..", "..kintai.approval..")
+                            "..kintai.attendance..", "..kintai.approval..",
+                            "..kintai.leave..")
                     .allowEmptyShould(true)
                     .because("shared が個別のコンテキストを知ると、"
                             + "すべてのコンテキストが間接的に結合する");
