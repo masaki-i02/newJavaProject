@@ -5,6 +5,7 @@ import java.util.List;
 
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
+import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
 /**
@@ -12,6 +13,9 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  *
  * @param employeeId          対象の社員
  * @param period              清算期間。<strong>暦月 ∩ 在籍期間</strong>
+ * @param workRuleSeriesId    計算に使った就業規則の<strong>系列</strong>。
+ *                            版ではなく系列を指す。改定した瞬間に全参照が切れるため
+ *                            （CLAUDE.md 落とし穴 13）
  * @param workingTimeSystem   労働時間制度。永続化と表示のための判別値
  * @param workingTime         実労働の合計
  * @param legalHolidayTime    法定休日労働の合計
@@ -30,6 +34,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 public record MonthlySettlement(
         EmployeeId employeeId,
         SettlementPeriod period,
+        WorkRuleSeriesId workRuleSeriesId,
         WorkingTimeSystemType workingTimeSystem,
         Duration workingTime,
         Duration legalHolidayTime,
@@ -57,6 +62,7 @@ public record MonthlySettlement(
     public MonthlySettlement {
         requireNonNull(employeeId, "社員");
         requireNonNull(period, "清算期間");
+        requireNonNull(workRuleSeriesId, "就業規則の系列");
         requireNonNull(workingTimeSystem, "労働時間制度");
         requireNonNull(agreementUsage, "36 協定の消化状況");
         requireNonNull(weeklyBreakdown, "週ごとの内訳");

@@ -41,6 +41,8 @@ class MonthlySettlementCalculatorTest {
 
     private static final EmployeeId TARO = new EmployeeId(UUID.randomUUID());
     private static final Duration WEEKLY = Duration.ofHours(40);
+    private static final jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId SERIES =
+            new jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId(UUID.randomUUID());
 
     /** 在籍期間に制限が無い社員。 */
     private static final DateRange EMPLOYED = DateRange.startingAt(LocalDate.of(2020, 4, 1));
@@ -288,7 +290,7 @@ class MonthlySettlementCalculatorTest {
         void bothPositiveIsRejectedWhenScheduledIsBelowLimit() {
             var may = period(2026, 5);
 
-            assertThatThrownBy(() -> new MonthlySettlement(TARO, may,
+            assertThatThrownBy(() -> new MonthlySettlement(TARO, may, SERIES,
                     WorkingTimeSystemType.FLEX,
                     Duration.ofMinutes(10_000), Duration.ZERO, Duration.ofMinutes(10_000),
                     Duration.ofMinutes(9_600), Duration.ofMinutes(10_628),
@@ -497,7 +499,7 @@ class MonthlySettlementCalculatorTest {
         /** 時間外の内訳だけを差し替えた固定時間制の清算結果。 */
         private MonthlySettlement fixedWithOvertime(Duration overtime) {
             var may = period(2026, 5);
-            return new MonthlySettlement(TARO, may, WorkingTimeSystemType.FIXED,
+            return new MonthlySettlement(TARO, may, SERIES, WorkingTimeSystemType.FIXED,
                     overtime, Duration.ZERO, overtime,
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     overtime, Duration.ZERO, Duration.ZERO, overtime,

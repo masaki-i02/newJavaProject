@@ -21,6 +21,7 @@ CREATE TABLE monthly_settlements (
 
     daily_overtime_minutes          int         NOT NULL DEFAULT 0,
     weekly_overtime_minutes         int         NOT NULL DEFAULT 0,
+    carried_over_overtime_minutes   int         NOT NULL DEFAULT 0,
     overtime_minutes                int         NOT NULL,
     shortage_minutes                int         NOT NULL DEFAULT 0,
     night_minutes                   int         NOT NULL,
@@ -61,6 +62,7 @@ CREATE TABLE monthly_settlements (
                AND target_working_minutes >= 0 AND scheduled_total_minutes >= 0
                AND statutory_total_limit_minutes > 0
                AND daily_overtime_minutes >= 0 AND weekly_overtime_minutes >= 0
+               AND carried_over_overtime_minutes >= 0
                AND overtime_minutes >= 0 AND shortage_minutes >= 0
                AND night_minutes >= 0 AND core_time_absence_minutes >= 0
                AND annual_agreement_subject_before_minutes >= 0
@@ -79,20 +81,16 @@ CREATE TABLE monthly_settlements (
     CONSTRAINT monthly_settlements_variant_check CHECK (
         (working_time_system = 'FIXED'
              AND overtime_minutes = daily_overtime_minutes + weekly_overtime_minutes
-             AND shortage_minutes = 0
+                                    + carried_over_overtime_minutes
              AND core_time_absence_minutes = 0)
         OR
         (working_time_system = 'FLEX'
              AND daily_overtime_minutes = 0
              AND weekly_overtime_minutes = 0
+             AND carried_over_overtime_minutes = 0
              AND overtime_minutes = greatest(0, target_working_minutes - statutory_total_limit_minutes)
              AND shortage_minutes = greatest(0, scheduled_total_minutes - target_working_minutes))
     ),
-
-    -- ★ 時間外と不足が同時に正になるのは、所定総 > 法定総枠 の月に限る
-    CONSTRAINT monthly_settlements_overtime_shortage_check
-        CHECK (overtime_minutes = 0 OR shortage_minutes = 0
-               OR scheduled_total_minutes > statutory_total_limit_minutes),
 
     -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）
     CONSTRAINT monthly_settlements_monthly_agreement_check

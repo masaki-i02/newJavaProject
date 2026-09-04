@@ -80,7 +80,8 @@ public final class MonthlySettlementCalculator {
         Duration scheduledTotalTime = scheduledTotalOf(workRule, period);
         Duration shortage = scheduledTotalTime.minus(targetWorkingTime);
 
-        return new MonthlySettlement(employeeId, period, workRule.systemType(),
+        return new MonthlySettlement(employeeId, period, workRule.seriesId(),
+                workRule.systemType(),
                 workingTime, legalHolidayTime, targetWorkingTime,
                 scheduledTotalTime, statutoryTotalLimit,
                 overtime.daily(), overtime.weekly(), overtime.carriedOver(),

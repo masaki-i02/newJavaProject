@@ -16,7 +16,7 @@ import jp.co.sample.kintai.support.Fixtures;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 
 /**
- * 月次清算の制約（IT-SET-01〜20）。
+ * 月次清算の制約（IT-SET-01〜23）。
  *
  * <p>対応する設計は {@code doc/02_詳細設計/04_勤怠_月次清算/DB設計書.md} の 6 章。
  */
@@ -51,6 +51,7 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         int statutoryLimit = 10_628;
         int dailyOvertime = 300;
         int weeklyOvertime = 100;
+        int carriedOverOvertime = 0;
         int overtime = 400;
         int shortage = 0;
         int night = 200;
@@ -69,6 +70,7 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         Settlement statutoryLimit(int v) { statutoryLimit = v; return this; }
         Settlement dailyOvertime(int v) { dailyOvertime = v; return this; }
         Settlement weeklyOvertime(int v) { weeklyOvertime = v; return this; }
+        Settlement carriedOverOvertime(int v) { carriedOverOvertime = v; return this; }
         Settlement overtime(int v) { overtime = v; return this; }
         Settlement shortage(int v) { shortage = v; return this; }
         Settlement annualBefore(int v) { annualBefore = v; return this; }
@@ -80,6 +82,7 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
             system = "FLEX";
             dailyOvertime = 0;
             weeklyOvertime = 0;
+            carriedOverOvertime = 0;
             night = 0;
             overtime = Math.max(0, target - statutoryLimit);
             shortage = Math.max(0, scheduledTotal - target);
@@ -94,15 +97,18 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
                         working_time_system, working_minutes, legal_holiday_minutes,
                         target_working_minutes, scheduled_total_minutes,
                         statutory_total_limit_minutes, daily_overtime_minutes,
-                        weekly_overtime_minutes, overtime_minutes, shortage_minutes,
+                        weekly_overtime_minutes, carried_over_overtime_minutes,
+                        overtime_minutes, shortage_minutes,
                         night_minutes, core_time_absence_minutes,
                         annual_agreement_subject_before_minutes,
                         exceeds_monthly_agreement_limit, exceeds_annual_agreement_limit,
                         calculated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                            now())
                     """, id, employee, month, from, toExclusive, series, system, working,
                     legalHoliday, target, scheduledTotal, statutoryLimit, dailyOvertime,
-                    weeklyOvertime, overtime, shortage, night, coreAbsence, annualBefore,
+                    weeklyOvertime, carriedOverOvertime, overtime, shortage, night,
+                    coreAbsence, annualBefore,
                     exceedsMonthly, exceedsAnnual);
             return id;
         }
@@ -154,10 +160,22 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
                     .isEqualTo(160);
         }
 
+        /**
+         * <strong>この形は算出式に反するので、そもそも作れない。</strong>
+         * フレックスの時間外は {@code max(0, 対象労働 − 総枠)}、
+         * 不足は {@code max(0, 所定総 − 対象労働)} と {@code variant_check} が決めている。
+         * 両方が正なら {@code 所定総 > 対象労働 > 総枠} が導けるので、
+         * 所定総 ≤ 総枠 の月に両方が正の行を作ろうとすると算出式の方に捕まる。
+         *
+         * <p>第 2 版まではこれを別の {@code overtime_shortage_check} でも守っていたが、
+         * <strong>破れる行が 1 つも存在しない検査</strong>だったので外した
+         * （CLAUDE.md 落とし穴 16）。
+         * <strong>どの制約で拒否されたかを確かめる</strong>のが要点である（落とし穴 17・25）。
+         */
         @Test
-        @DisplayName("IT-SET-07 所定総 ≤ 総枠 の月で時間外と不足が同時に正だと拒否される")
+        @DisplayName("IT-SET-07 FLEX・所定総 ≤ 総枠 の月で時間外と不足が同時に正だと拒否される")
         void overtimeAndShortageCannotCoexistOtherwise() {
-            rejectedBy("monthly_settlements_overtime_shortage_check", () -> settlement()
+            rejectedBy("monthly_settlements_variant_check", () -> settlement()
                     .working(9_000).target(9_000)
                     .scheduledTotal(9_600).statutoryLimit(10_628)
                     .system("FLEX").dailyOvertime(0).weeklyOvertime(0)
@@ -225,25 +243,66 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         }
 
         @Test
-        @DisplayName("IT-SET-03 FIXED で時間外が 日次 + 週次 と一致しないと拒否される")
+        @DisplayName("IT-SET-03 FIXED で時間外が 日次 + 週次 + 通算 と一致しないと拒否される")
         void fixedOvertimeIsTheSumOfDailyAndWeekly() {
             rejectedBy("monthly_settlements_variant_check",
                     () -> settlement().overtime(500).insert());
         }
 
         /**
-         * 時間外も同時に正のままだと
-         * {@code monthly_settlements_overtime_shortage_check} に先に捕まり、
-         * <strong>狙った検証にならない</strong>（CLAUDE.md 落とし穴 17）。
-         * 時間外を 0 にして、異常なのは「FIXED なのに不足がある」ことだけにする。
+         * <strong>固定時間制でも不足時間は生じる。</strong>
+         * 第 1 版は {@code FIXED AND shortage_minutes = 0} を制約にしており、
+         * <strong>欠勤のある月をひとつも保存できなかった</strong>
+         * （CLAUDE.md 落とし穴 23・51）。
          */
         @Test
-        @DisplayName("IT-SET-04 FIXED に不足時間を設定すると拒否される")
-        void fixedHasNoShortage() {
-            rejectedBy("monthly_settlements_variant_check", () -> settlement()
+        @DisplayName("IT-SET-04 FIXED に不足時間があっても登録できる（欠勤のある月）")
+        void fixedCanHaveShortage() {
+            accepted(() -> settlement()
                     .dailyOvertime(0).weeklyOvertime(0).overtime(0)
-                    .shortage(600)
+                    .working(9_000).target(9_000).shortage(600)
                     .insert());
+        }
+
+        @Test
+        @DisplayName("IT-SET-21 FLEX に通算分の法定外残業を設定すると拒否される")
+        void flexHasNoCarriedOverOvertime() {
+            rejectedBy("monthly_settlements_variant_check", () -> settlement()
+                    .target(10_700).working(10_700).flex()
+                    .carriedOverOvertime(360).insert());
+        }
+
+        /**
+         * <strong>制度が違えば正当な月である。</strong>
+         * 固定時間制の時間外は日次・週次で確定した実績で、総枠との比較では求めていない。
+         * 忙しい週に残業し、別の週に欠勤しただけの月がこれにあたる。
+         */
+        @Test
+        @DisplayName("IT-SET-22 FIXED なら所定総 ≤ 総枠 の月でも時間外と不足が同時に正で登録できる")
+        void fixedCanHaveBothOvertimeAndShortage() {
+            accepted(() -> settlement()
+                    .working(3_240).target(3_240)
+                    .scheduledTotal(10_080).statutoryLimit(10_628)
+                    .dailyOvertime(360).weeklyOvertime(480).overtime(840)
+                    .shortage(6_840)
+                    .insert());
+        }
+
+        /**
+         * 通算分（BR-07）を含む時間外。
+         * <strong>合計だけでなく由来ごとの内訳を持つ</strong>ので、
+         * 3 つを足したものが合計であることを制約が守る。
+         */
+        @Test
+        @DisplayName("IT-SET-23 FIXED の時間外は 日次 + 週次 + 通算 で登録できる")
+        void fixedOvertimeIncludesCarriedOver() {
+            UUID id = settlement().carriedOverOvertime(360).overtime(760).insert();
+
+            assertThat(jdbc.queryForObject("""
+                    SELECT daily_overtime_minutes + weekly_overtime_minutes
+                           + carried_over_overtime_minutes
+                    FROM monthly_settlements WHERE id = ?
+                    """, Integer.class, id)).isEqualTo(760);
         }
 
         @Test

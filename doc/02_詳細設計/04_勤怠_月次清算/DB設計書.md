@@ -55,6 +55,7 @@ CREATE TABLE monthly_settlements (
 
     daily_overtime_minutes          int         NOT NULL DEFAULT 0,
     weekly_overtime_minutes         int         NOT NULL DEFAULT 0,
+    carried_over_overtime_minutes   int         NOT NULL DEFAULT 0,
     overtime_minutes                int         NOT NULL,
     shortage_minutes                int         NOT NULL DEFAULT 0,
     night_minutes                   int         NOT NULL,
@@ -95,6 +96,7 @@ CREATE TABLE monthly_settlements (
                AND target_working_minutes >= 0 AND scheduled_total_minutes >= 0
                AND statutory_total_limit_minutes > 0
                AND daily_overtime_minutes >= 0 AND weekly_overtime_minutes >= 0
+               AND carried_over_overtime_minutes >= 0
                AND overtime_minutes >= 0 AND shortage_minutes >= 0
                AND night_minutes >= 0 AND core_time_absence_minutes >= 0
                AND annual_agreement_subject_before_minutes >= 0
@@ -113,20 +115,17 @@ CREATE TABLE monthly_settlements (
     CONSTRAINT monthly_settlements_variant_check CHECK (
         (working_time_system = 'FIXED'
              AND overtime_minutes = daily_overtime_minutes + weekly_overtime_minutes
-             AND shortage_minutes = 0
+                                    + carried_over_overtime_minutes
              AND core_time_absence_minutes = 0)
         OR
         (working_time_system = 'FLEX'
              AND daily_overtime_minutes = 0
              AND weekly_overtime_minutes = 0
+             AND carried_over_overtime_minutes = 0
              AND overtime_minutes = greatest(0, target_working_minutes - statutory_total_limit_minutes)
              AND shortage_minutes = greatest(0, scheduled_total_minutes - target_working_minutes))
     ),
 
-    -- ★ 時間外と不足が同時に正になるのは、所定総 > 法定総枠 の月に限る
-    CONSTRAINT monthly_settlements_overtime_shortage_check
-        CHECK (overtime_minutes = 0 OR shortage_minutes = 0
-               OR scheduled_total_minutes > statutory_total_limit_minutes),
 
     -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）
     CONSTRAINT monthly_settlements_monthly_agreement_check
@@ -179,8 +178,62 @@ CREATE INDEX monthly_settlements_agreement_idx
 これは計算するまでもなく他の列から決まる。
 制約にしておけば、集計ロジックが壊れたときに **DB へ到達する前に落ちる。**
 
-固定時間制では `daily + weekly`、フレックスでは総枠との比較というように、
+固定時間制では `daily + weekly + carried_over`、フレックスでは総枠との比較というように、
 **制度によって意味を持つ列が異なる** ことも同時に表現している。
+
+#### 第 2 版で外した 2 つの条件
+
+実装時に、**正当な行を保存できない制約が 2 つある**ことが分かった。
+どちらも「排他を主張する検査は、両方が正になる正当なケースが無いか先に探す」
+（[CLAUDE.md 5 章の落とし穴 23・51](../../../CLAUDE.md)）に反していた。
+
+**1. `variant_check` の `FIXED AND shortage_minutes = 0`**
+
+固定時間制でも不足時間は生じる。所定 21 日の月に 6 日しか働かなければ不足は 114 時間である。
+第 1 版は「固定時間制は所定どおり働くもの」と暗黙に決め打ちしていた。
+**欠勤のある月をひとつも保存できない。**
+
+**2. `overtime_shortage_check` を制度によらず当てていたこと**
+
+フレックスでは時間外を「総枠に対する超過」、不足を「所定総に対する不足」として
+**同じ実績（対象労働時間）から**求めるので、2 つの基準が交差しない月では両方が正になりえない。
+固定時間制はそうではない。時間外は日次・週次で確定した実績で、総枠との比較では求めていない。
+**忙しい週に残業し、別の週に欠勤した月**は正当に両方が正になる。
+
+この制約は**フレックスに限定したうえで、削除した。**
+限定するとフレックスにしか当たらなくなるが、フレックスの行は `variant_check` によって
+
+```
+overtime_minutes = greatest(0, target_working_minutes - statutory_total_limit_minutes)
+shortage_minutes = greatest(0, scheduled_total_minutes - target_working_minutes)
+```
+
+を満たしている。両方が正なら
+`所定総 > 対象労働 > 総枠` が導けるので、**所定総 > 総枠 は自動的に成り立つ。**
+`variant_check` を満たす行はこの制約を必ず満たすので、
+**破れる行が 1 つも存在しない検査**になっていた。
+別の制約で保証されている条件を重ねて書かない
+（[CLAUDE.md 落とし穴 16](../../../CLAUDE.md)）。
+
+固定時間制側を守るものは残らないが、
+そもそも固定時間制では両方が正になるのが正当なので、守るべきものが無い。
+
+#### `carried_over_overtime_minutes` を持つ理由
+
+法定休日から翌暦日へ通算して生じた法定外残業（BR-07）である。
+`daily` / `weekly` と足して `overtime_minutes` になることを `variant_check` が守る。
+
+**合計だけを持たない。** 3 つの由来は割増の根拠が異なり（1 日 8 時間超・週 40 時間超・暦日の通算）、
+給与計算側や労基署の調査で「なぜこの時間外が付いたのか」を説明できる必要がある。
+内訳を捨てると、清算をやり直さないと答えられなくなる。
+
+#### 月 60 時間超（50% 割増）を列にしない
+
+`overtime_minutes` から一意に決まる（`greatest(0, overtime_minutes - 3600)`）ので、
+列として持たない。持つなら食い違いを禁じる `CHECK` が要る
+（[CLAUDE.md 落とし穴 39](../../../CLAUDE.md)）が、
+**導出できる値を状態にしないことでその必要自体を無くす。**
+抽出に使うようになったら生成列にする。
 
 `monthly_settlements_agreement_idx` は部分インデックスで、
 **36 協定の超過者だけを人事が抽出する** 用途に使う。
@@ -305,7 +358,6 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | `monthly_settlements_variant_check` | CHECK | **制度ごとの算出式と、意味を持つ列の充足** |
 | `monthly_settlements_period_check` | CHECK | **清算期間が対象月の内側に収まる半開区間** |
 | `monthly_settlements_statutory_limit_check` | CHECK | **総枠 = 清算期間の暦日数 ÷ 7 × 40 時間** |
-| `monthly_settlements_overtime_shortage_check` | CHECK | **時間外と不足が同時に正なら、所定総 > 総枠 のはず** |
 | `monthly_settlements_monthly_agreement_check` | CHECK | **36 協定の月次判定が他の列から決まる** |
 | `monthly_settlements_annual_agreement_check` | CHECK | **36 協定の年次判定が他の列から決まる** |
 | `monthly_settlements_night_check` | CHECK | 深夜が実労働を超えない |
@@ -338,11 +390,14 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | --- | --- | --- | --- |
 | IT-SET-01 | 対象月を月初日以外で登録 | `month_check` で拒否 | 済 |
 | IT-SET-02 | 対象労働時間が実労働 − 法定休日と一致しない | `target_working_check` で拒否 | 済 |
-| IT-SET-03 | `FIXED` で時間外が日次 + 週次と一致しない | `variant_check` で拒否 | 済 |
-| IT-SET-04 | `FIXED` に不足時間を設定 | `variant_check` で拒否 | 済 |
+| IT-SET-03 | `FIXED` で時間外が日次 + 週次 + 通算と一致しない | `variant_check` で拒否 | 済 |
+| IT-SET-04 | **`FIXED` に不足時間を設定**（欠勤のある月） | **成功する。** 第 1 版では拒否されていた | 済 |
 | IT-SET-05 | `FLEX` に日次残業を設定 | `variant_check` で拒否 | 済 |
+| IT-SET-21 | **`FLEX` に通算分の法定外残業を設定** | `variant_check` で拒否 | 済 |
 | IT-SET-06 | `FLEX` で時間外が総枠超過分と一致しない | `variant_check` で拒否 | 済 |
-| IT-SET-07 | **所定総 ≤ 総枠 の月で時間外と不足を同時に設定** | `overtime_shortage_check` で拒否 | 済 |
+| IT-SET-07 | **`FLEX`・所定総 ≤ 総枠 の月で時間外と不足を同時に設定** | `variant_check` で拒否（算出式に反するため、そもそも作れない） | 済 |
+| IT-SET-22 | **`FIXED`・所定総 ≤ 総枠 の月で時間外と不足を同時に設定** | **成功する。** 制度が違えば正当な月である | 済 |
+| IT-SET-23 | **`FIXED` で通算分を含む時間外**（日次 + 週次 + 通算） | 成功する | 済 |
 | IT-SET-08 | 深夜が実労働を超える | `night_check` で拒否 | 済 |
 | IT-SET-09 | 週の起算日が日曜でない | `start_dow_check` で拒否 | 済 |
 | IT-SET-10 | 週が 7 日間でない | `span_check` で拒否 | 済 |
