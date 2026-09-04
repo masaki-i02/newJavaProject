@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 1 | **残日数の列を持たない** | 付与と配分から導く。列にすると付与・取得・取下げ・時効の 4 か所で更新することになり、1 か所落とすと静かにずれる（落とし穴 39） |
 | 2 | **失効の行も作らない** | 失効は「付与日 + 2 年」だけで決まる。行にするとバッチの実行漏れで残日数が過大になる |
-| 3 | **配分（どの付与から消化したか）は列で持つ** | 再判定で過去に付与が増えたときに、承認済みの配分先が入れ替わらないようにする |
+| 3 | **配分（どの付与から消化したか）は列で持つ** | 再判定で過去に付与が増えたときに、承認済みの配分先が入れ替わらないようにする（[ADR 0006](../../05_ADR/0006_残数は導出し配分だけを行として残す.md)） |
 | 4 | 付与に**判定の根拠**（全労働日・出勤日）を残す | 「なぜ不付与だったか」を後から説明できるようにする |
 | 5 | 不付与の年も行として残す | 「付与処理をしていない」と「法どおり不付与」を区別する |
 | 6 | 状態と付随カラムの整合を CHECK で守る | ドメインの `sealed interface` / `enum` に対応させる |
@@ -52,8 +52,12 @@ CREATE TABLE paid_leave_grants (
     -- 出勤率の根拠。なぜ不付与だったかを後から説明するために残す
     total_working_days integer     NOT NULL,
     attended_days      integer     NOT NULL,
+    -- 人事が申告した出勤扱いの日数（休業・BR-14）。理由は日数が 1 以上なら必須
+    deemed_attended_days integer   NOT NULL DEFAULT 0,
+    deemed_reason      text,
     assessed_at        timestamptz NOT NULL,
-    version            bigint      NOT NULL DEFAULT 0,
+    -- 行の作成時に 1 を入れる。0 は「行が無い」ことだけを指す（05 と同じ約束）
+    version            bigint      NOT NULL DEFAULT 1,
     created_at         timestamptz NOT NULL DEFAULT now(),
     updated_at         timestamptz NOT NULL DEFAULT now(),
 
@@ -68,14 +72,21 @@ CREATE TABLE paid_leave_grants (
     CONSTRAINT paid_leave_grants_days_check
         CHECK (days IS NULL OR days BETWEEN 10 AND 20),
 
-    -- 出勤率の分子は分母を超えない
+    -- 出勤率の分子は分母を超えない。出勤扱いを足しても超えない
     CONSTRAINT paid_leave_grants_rate_check
         CHECK (total_working_days >= 0 AND attended_days >= 0
-               AND attended_days <= total_working_days),
+               AND deemed_attended_days >= 0
+               AND attended_days + deemed_attended_days <= total_working_days),
+    -- ★ 出勤扱いを申告したなら理由が要る。空文字・空白のみも認めない
+    CONSTRAINT paid_leave_grants_deemed_reason_check
+        CHECK (deemed_attended_days = 0
+               OR length(btrim(coalesce(deemed_reason, ''))) > 0),
 
     -- ★ 冪等性の根拠。付与処理を 2 回実行しても二重に付与されない
     CONSTRAINT paid_leave_grants_employee_index_uk UNIQUE (employee_id, grant_index),
-    CONSTRAINT paid_leave_grants_employee_date_uk  UNIQUE (employee_id, granted_on)
+    CONSTRAINT paid_leave_grants_employee_date_uk  UNIQUE (employee_id, granted_on),
+    -- ★ 配分先が「本人の付与」であることを申請側から参照するための複合キー（3.2）
+    CONSTRAINT paid_leave_grants_id_employee_uk    UNIQUE (id, employee_id)
 );
 
 -- 残日数は「その日に有効な付与」を古い順に読む（4.1）
@@ -109,12 +120,15 @@ CREATE TABLE paid_leave_requests (
     status       varchar(20) NOT NULL,
     requested_at timestamptz NOT NULL,
     -- 承認時に確定する配分先。先入先出で選ばれた付与（BR-15）
-    grant_id     uuid        REFERENCES paid_leave_grants (id),
+    grant_id     uuid,
     decided_by   uuid        REFERENCES employees (id),
     decided_at   timestamptz,
     comment      text,
+    -- 取り消した人。本人（取下げ）か、取得日の当日以降なら HR（BR-16）
+    canceled_by  uuid        REFERENCES employees (id),
     canceled_at  timestamptz,
-    version      bigint      NOT NULL DEFAULT 0,
+    -- 行の作成時に 1 を入れる。0 は「行が無い」ことだけを指す（05 と同じ約束）
+    version      bigint      NOT NULL DEFAULT 1,
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now(),
 
@@ -135,15 +149,26 @@ CREATE TABLE paid_leave_requests (
              AND grant_id IS NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL
              AND length(btrim(coalesce(comment, ''))) > 0
              AND canceled_at IS NULL)
-        -- 取下げは本人が行うので decided_by を持たない。配分は外れる
+        -- 取消は配分を外す。承認済みだった場合の decided_by / decided_at は残す
         OR (status = 'CANCELED'
-             AND grant_id IS NULL AND decided_by IS NULL AND decided_at IS NULL
-             AND canceled_at IS NOT NULL)
+             AND grant_id IS NULL
+             AND canceled_by IS NOT NULL AND canceled_at IS NOT NULL)
     ),
 
     -- ★ 自己承認・自己却下の禁止（BR-11）
     CONSTRAINT paid_leave_requests_no_self_decision_check
         CHECK (decided_by IS NULL OR decided_by <> employee_id),
+
+    -- ★ 本人以外が取り消す（人事による当日以降の取消・BR-16）なら理由が要る
+    CONSTRAINT paid_leave_requests_revoke_reason_check
+        CHECK (canceled_by IS NULL OR canceled_by = employee_id
+               OR length(btrim(coalesce(comment, ''))) > 0),
+
+    -- ★ 配分先は「本人の付与」でなければならない。
+    --   単純な id への外部キーだと、他人の付与から自分の年休を消化する行が作れる
+    CONSTRAINT paid_leave_requests_grant_fk
+        FOREIGN KEY (grant_id, employee_id)
+        REFERENCES paid_leave_grants (id, employee_id),
 
     -- 決裁は申請より後
     CONSTRAINT paid_leave_requests_decided_after_requested_check
@@ -168,6 +193,19 @@ CREATE INDEX paid_leave_requests_approved_idx
 **取下げで `grant_id` を外す。** 承認済みの取消は残日数を戻す操作であり、
 配分が残ったままだと**残日数が戻らない。**
 どの付与から戻したかは `paid_leave_request_events` に残る（3.3）。
+
+**`decided_by` / `decided_at` は取消後も残す。** 消すと、
+承認済みだった申請を取り消したときに**誰がいつ承認したのかが行から消える。**
+
+**取り消した人を `canceled_by` として持つ。**
+`decided_by` に入れると、承認者と取消者の区別が付かない。
+本人以外（＝人事）が取り消せるのは取得日の当日以降だけで、そのときは理由が要る（BR-16）。
+
+**配分先は複合外部キーで守る。** `grant_id` だけを `paid_leave_grants (id)` へ
+向けると、**他人の付与から自分の年休を消化する行**が作れる。
+残日数の集計（4.1）は付与側を `employee_id` で絞るので、
+その行はどちらの社員の残日数からも消え、**付与と配分の合計が合わなくなる**
+（[CLAUDE.md 落とし穴 42](../../../CLAUDE.md) と同型）。
 
 **却下と取下げで一意インデックスの対象から外れる。**
 `correction_requests_pending_uk` と同じ形である。
@@ -194,7 +232,7 @@ CREATE TABLE paid_leave_request_events (
     created_at             timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT paid_leave_request_events_kind_check
-        CHECK (event_kind IN ('SUBMIT', 'APPROVE', 'REJECT', 'CANCEL')),
+        CHECK (event_kind IN ('SUBMIT', 'APPROVE', 'REJECT', 'CANCEL', 'REVOKE')),
 
     -- ★ 起きうる遷移だけを記録できる。締め済みと同じく、決裁済みからは戻らない
     CONSTRAINT paid_leave_request_events_transition_check CHECK (
@@ -204,10 +242,13 @@ CREATE TABLE paid_leave_request_events (
         OR (from_status = 'SUBMITTED' AND to_status = 'CANCELED'  AND event_kind = 'CANCEL')
         -- 承認済みの取消。取得日の前日まで本人が行える（BR-16）
         OR (from_status = 'APPROVED'  AND to_status = 'CANCELED'  AND event_kind = 'CANCEL')
+        -- 取得日の当日以降に人事が取り消した（BR-16）。理由が必須
+        OR (from_status = 'APPROVED'  AND to_status = 'CANCELED'  AND event_kind = 'REVOKE')
     ),
 
-    CONSTRAINT paid_leave_request_events_reject_comment_check
-        CHECK (event_kind <> 'REJECT' OR length(btrim(coalesce(comment, ''))) > 0)
+    CONSTRAINT paid_leave_request_events_reason_check
+        CHECK (event_kind NOT IN ('REJECT', 'REVOKE')
+               OR length(btrim(coalesce(comment, ''))) > 0)
 );
 
 CREATE INDEX paid_leave_request_events_target_idx
@@ -286,7 +327,7 @@ CREATE TRIGGER paid_leave_requests_set_updated_at
 ### 4.1 残日数（BR-15）
 
 ```sql
--- その日に有効な付与と、配分済みの日数
+-- 候補：失効しているかもしれないものも含めて、必ず広めに取る
 SELECT g.id,
        g.granted_on,
        g.days,
@@ -297,14 +338,27 @@ SELECT g.id,
  WHERE g.employee_id = :employeeId
    AND g.granted
    AND g.granted_on <= :asOf
-   AND g.granted_on > :asOf - interval '2 years'
+   AND g.granted_on > :asOf - interval '2 years 1 day'
  GROUP BY g.id, g.granted_on, g.days
  ORDER BY g.granted_on;
 ```
 
-**`granted_on > :asOf - interval '2 years'` と書く。**
-`g.granted_on + interval '2 years' > :asOf` と書くと列に関数が掛かり、
-`paid_leave_grants_employee_granted_on_idx` を使えない。
+**失効しているかどうかは、この SQL では判定しない。**
+判定は `PaidLeaveGrant.validPeriod()` の 1 か所だけに置き、
+SQL は候補を**必ず広めに**返すところまでにとどめる
+（時点解決を SQL に写さない・[CLAUDE.md](../../../CLAUDE.md) の確定事項）。
+
+`granted_on + interval '2 years' > :asOf` を移項して
+`granted_on > :asOf - interval '2 years'` と書くと、
+**日付演算のクランプがあるため等価にならない。**
+
+| 付与日 | ドメイン | 移項した SQL |
+| --- | --- | --- |
+| 2024-02-29 | `plusYears(2)` = 2026-02-28。**2026-02-28 は失効** | `2026-02-28 - 2 年 = 2024-02-28` なので **有効** |
+
+`2 years 1 day` と 1 日ぶん広く取るのは、この境界でドメインの判定より
+**先に切り落とさない**ためである。列に関数を掛けないので
+`paid_leave_grants_employee_granted_on_idx` はそのまま効く。
 
 ### 4.2 年 5 日の取得義務（BR-17）
 
@@ -327,6 +381,44 @@ SELECT g.id,
 
 **`r.grant_id` で絞らない。** BR-17 は「その期間中に取得した日数」を数えるもので、
 **どの付与から消化したかは問わない。** 絞ると前年の繰越を使った日が数から漏れる。
+
+### 4.2.1 年 5 日が未達の社員（全社・BR-17）
+
+```sql
+-- 閲覧できる社員だけに絞る。承認者は配下しか見られない（要件 4.1）
+SELECT g.employee_id,
+       g.id,
+       g.granted_on,
+       (SELECT count(*)
+          FROM paid_leave_requests r
+         WHERE r.employee_id = g.employee_id
+           AND r.status = 'APPROVED'
+           AND r.leave_date >= g.granted_on
+           AND r.leave_date <  g.granted_on + interval '1 year') AS taken_days
+  FROM paid_leave_grants g
+ WHERE g.employee_id = ANY(:visibleEmployeeIds)
+   AND g.granted
+   AND g.days >= 10
+   AND g.granted_on <= :asOf
+   AND g.granted_on + interval '1 year' > :asOf
+ ORDER BY g.granted_on, g.employee_id;
+```
+
+**閲覧範囲で絞る。** 絞らないと、一般の承認者が
+**配下でない社員の年休の取得状況**を見られる（要件 4.1）。
+判定は `shared.domain.EmployeeVisibility` が行う。
+
+```sql
+-- 全社の未達一覧が使う。社員 ID の集合で引くので employee_id が先頭
+CREATE INDEX paid_leave_grants_granted_on_idx
+    ON paid_leave_grants (granted_on) WHERE granted;
+```
+
+> **`g.days >= 10` は現状すべての付与が満たす。**
+> 比例付与を対象外にした結果（BR-14）、10 日未満の付与は
+> `paid_leave_grants_days_check` が作らせない。
+> それでも書くのは、**BR-17 が定めているのが「10 日以上を付与された者」**だからで、
+> 比例付与を扱うようになったときにこの行が効く。
 
 ### 4.3 承認待ちの一覧
 
@@ -359,16 +451,20 @@ SELECT leave_date
 | --- | --- | --- |
 | `paid_leave_grants_decision_check` | CHECK | **付与の有無と日数の整合**（不付与なのに日数がある、を防ぐ） |
 | `paid_leave_grants_days_check` | CHECK | 法定の付与日数の範囲（**上限も置く**） |
-| `paid_leave_grants_rate_check` | CHECK | 出勤日 ≤ 全労働日 |
+| `paid_leave_grants_rate_check` | CHECK | 出勤日 + 出勤扱い ≤ 全労働日 |
+| `paid_leave_grants_deemed_reason_check` | CHECK | **出勤扱いを申告したなら理由が必須**（空文字も不可） |
+| `paid_leave_grants_id_employee_uk` | UNIQUE | 申請側から「本人の付与か」を参照するための複合キー |
 | `paid_leave_grants_employee_index_uk` | UNIQUE | **付与処理の冪等性**（二重付与の禁止） |
 | `paid_leave_grants_employee_date_uk` | UNIQUE | 同じ日に 2 回付与されない |
 | `paid_leave_requests_state_check` | CHECK | **状態ごとの列の充足**（承認済みなのに配分先が不明を防ぐ） |
 | `paid_leave_requests_no_self_decision_check` | CHECK | **自己承認の禁止** |
+| `paid_leave_requests_revoke_reason_check` | CHECK | **本人以外による取消は理由が必須**（BR-16） |
+| `paid_leave_requests_grant_fk` | 複合 FK | **配分先が本人の付与であること** |
 | `paid_leave_requests_*_after_requested_check` | CHECK | 決裁・取下げは申請より後 |
 | `paid_leave_requests_active_uk` | 部分 UNIQUE | **同じ日に有効な申請は 1 件まで** |
 | `paid_leave_request_events_transition_check` | CHECK | **起きうる遷移だけが記録される** |
-| `paid_leave_request_events_kind_check` | CHECK | 遷移の種類が定義された 4 種のいずれか |
-| `paid_leave_request_events_reject_comment_check` | CHECK | 却下の理由が必須（**空文字も不可**） |
+| `paid_leave_request_events_kind_check` | CHECK | 遷移の種類が定義された 5 種のいずれか |
+| `paid_leave_request_events_reason_check` | CHECK | 却下と人事による取消の理由が必須（**空文字も不可**） |
 | `approval_events_kind_check`（改訂） | CHECK | `REVERT_BY_LEAVE` を含む 8 種 |
 | `monthly_settlements_paid_leave_days_check` | CHECK | 年休の日数が負にならない |
 | `*_set_updated_at` | TRIGGER | `updated_at` の自動更新 |
@@ -378,6 +474,9 @@ SELECT leave_date
 | 内容 | 守る場所 |
 | --- | --- |
 | **付与日が入社日から導いた日と一致すること** | アプリケーション（`employees.hired_on` を引く CHECK は書けない） |
+| **付与日にその社員が在籍していること** | アプリケーション。退職者に毎年 20 日が積み上がるのを防ぐ（ドメインモデル設計書 2.5） |
+| 出勤扱いの日数が実際の休業日数と一致すること | **確かめる手段が無い**（休業を記録する表が無い）。人事の申告を信頼し、理由を残す |
+| 取消が本人か、当日以降なら `HR` であること | アプリケーション。`canceled_by` が本人でないことは DB で見えるが、`HR` かどうかは `employee_roles` の参照が要る |
 | **出勤率が算定期間の実績と一致すること** | アプリケーション（日次勤怠とカレンダーの集計） |
 | 付与日数が継続勤務年数の表（BR-14）と一致すること | ドメイン（`LeaveEntitlement`）。DB は 10〜20 の範囲だけを守る |
 | **残日数を超えて承認されないこと** | ドメイン（`PaidLeaveBalance`）。付与と配分の集計は `CHECK` に書けない |
@@ -409,7 +508,7 @@ SELECT leave_date
 
 ## 7. 制約の検証
 
-**検証環境**: PostgreSQL 16 / 2026-09-04 実施
+**検証環境**: PostgreSQL 16 / 2026-09-04 実施（設計レビューの指摘を反映して再実施）
 
 | ID | 検証内容 | 期待 | 結果 |
 | --- | --- | --- | --- |
@@ -443,9 +542,32 @@ SELECT leave_date
 | IT-LV-28 | `monthly_settlements.paid_leave_days` が負 | `paid_leave_days_check` で拒否 | 済 |
 | IT-LV-29 | 正常な申請 → 承認 → 取消の 1 巡 | 成功する | 済 |
 | IT-LV-30 | `updated_at` が UPDATE で更新される | トリガにより現在時刻になる | 済 |
+| IT-LV-68 | **出勤日 + 出勤扱いが全労働日を超える** | `rate_check` で拒否 | 済 |
+| IT-LV-69 | **出勤扱いを申告して理由が空** | `deemed_reason_check` で拒否 | 済 |
+| IT-LV-70 | **出勤扱い 0 で理由が空** | 成功する（申告していないので理由は要らない） | 済 |
+| IT-LV-71 | **他人の付与を配分先にする** | `requests_grant_fk` で拒否 | 済 |
+| IT-LV-72 | **本人以外が取り消して理由が空** | `revoke_reason_check` で拒否 | 済 |
+| IT-LV-73 | **本人以外が理由を付けて取り消す**（人事・BR-16） | 成功する | 済 |
+| IT-LV-74 | **取消で `canceled_by` が空** | `requests_state_check` で拒否 | 済 |
+| IT-LV-75 | **承認済みを取り消しても `decided_by` が残る** | 成功し、誰が承認したかを追える | 済 |
+| IT-LV-76 | **`REVOKE` の証跡を理由つきで記録** | 成功し、本人の取下げと区別できる | 済 |
+| IT-LV-77 | **`REVOKE` を理由なしで記録** | `events_reason_check` で拒否 | 済 |
 
 **「拒否された」ではなく「狙った制約で拒否された」ことを確かめる**（落とし穴 17・25）。
 とくに IT-LV-10 は `no_self_decision_check` にも `active_uk` にも掛からない値を使う。
+
+### 7.1 版（`version`）の初期値
+
+**行を作るときは版を 1 から入れる。** 列の既定値（0）に任せない。
+
+`monthly_attendances` と同じ約束にそろえる（[05 DB設計書 6](../05_申請承認と締め/DB設計書.md)）。
+年休の申請は「行が無い」状態を経由しないので落とし穴 57 そのものは起きないが、
+**同じ種類の表で約束が違うほうが危うい。**
+実装が既定値のまま挿入すると、API が返す版と DDL の既定値が食い違う。
+
+`paid_leave_grants.version` を使うのは**再判定**（`reassess`）だけである。
+同じ付与を人事が同時に再判定する場面は稀だが、
+出勤扱いの日数を上書きする操作なので、版で守る。
 
 ---
 
