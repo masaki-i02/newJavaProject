@@ -13,6 +13,7 @@ import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 
 /**
@@ -100,6 +101,31 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
                 .filter(entry -> !entry.getValue().isClosed())
                 .map(java.util.Map.Entry::getKey)
                 .findFirst();
+    }
+
+    /**
+     * その期間に<strong>有効な</strong>打刻がある勤務日。
+     *
+     * <p>取り消された打刻しか無い日は含めない。訂正で全部の打刻が取り消された日は、
+     * 「打刻が無い日」と同じ扱いでよい。
+     */
+    @Override
+    public List<LocalDate> findWorkDatesWithEvents(EmployeeId employeeId, DateRange period) {
+        return jdbc.queryForList("""
+                SELECT DISTINCT e.work_date
+                  FROM time_clock_events e
+                 WHERE e.employee_id = ?
+                   AND e.work_date >= ? AND e.work_date < ?
+                   AND e.entry_type = 'ENTRY'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM time_clock_events r
+                        WHERE r.work_date = e.work_date
+                          AND r.employee_id = e.employee_id
+                          AND r.entry_type = 'REVOCATION'
+                          AND r.revokes_event_id = e.id)
+                 ORDER BY e.work_date
+                """, LocalDate.class, employeeId.value(),
+                period.from(), period.toExclusive());
     }
 
     private static TimeClockEvent toEvent(String eventType, LocalDateTime occurredAt) {

@@ -45,6 +45,37 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
 
     @Override
     public void save(MonthlySettlement settlement) {
+        store(settlement, currentVersion(settlement.employeeId(),
+                settlement.period().month()));
+    }
+
+    @Override
+    public void save(MonthlySettlement settlement, long expectedVersion) {
+        long actual = currentVersion(settlement.employeeId(), settlement.period().month());
+        if (actual != expectedVersion) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "月次清算の版が一致しません: 期待 %d / 現在 %d"
+                            .formatted(expectedVersion, actual));
+        }
+        store(settlement, actual);
+    }
+
+    @Override
+    public long currentVersion(EmployeeId employeeId, YearMonth month) {
+        List<Long> found = jdbc.queryForList("""
+                SELECT version FROM monthly_settlements
+                WHERE employee_id = ? AND target_month = ?
+                """, Long.class, employeeId.value(), month.atDay(1));
+        return found.isEmpty() ? 0L : found.getFirst();
+    }
+
+    /**
+     * 書き込む。<strong>版は 1 つ進める。</strong>
+     *
+     * <p>行をまるごと入れ替えるので、版は自動では上がらない。
+     * 上げないと、再計算しても版が変わらず楽観ロックが効かなくなる。
+     */
+    private void store(MonthlySettlement settlement, long currentVersion) {
         LocalDate targetMonth = settlement.period().month().atDay(1);
         UUID employeeId = settlement.employeeId().value();
 
@@ -66,9 +97,9 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         annual_agreement_subject_before_minutes,
                         monthly_agreement_limit_minutes, annual_agreement_limit_minutes,
                         exceeds_monthly_agreement_limit, exceeds_annual_agreement_limit,
-                        exceeds_combined_single_month_limit, calculated_at)
+                        exceeds_combined_single_month_limit, calculated_at, version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?)
+                        ?, ?)
                 """,
                 id, employeeId, targetMonth,
                 settlement.period().period().from(),
@@ -88,7 +119,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 minutes(usage.monthlyLimit()), minutes(usage.annualLimit()),
                 usage.exceedsMonthly(), usage.exceedsAnnual(),
                 usage.exceedsCombinedSingleMonth(),
-                java.time.OffsetDateTime.now(clock));
+                java.time.OffsetDateTime.now(clock), currentVersion + 1);
 
         for (WeeklyOvertimeCharge week : settlement.weeklyBreakdown()) {
             jdbc.update("""

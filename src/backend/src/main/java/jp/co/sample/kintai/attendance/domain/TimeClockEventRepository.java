@@ -40,4 +40,15 @@ public interface TimeClockEventRepository {
      * @return 開いている勤務日。無ければ空（次の打刻は出勤である）
      */
     java.util.Optional<LocalDate> findOpenWorkDate(EmployeeId employeeId, LocalDate onOrAfter);
+
+    /**
+     * その期間に有効な打刻がある勤務日。
+     *
+     * <p>月次清算の前に<strong>未計算の日が残っていないか</strong>を調べるために使う。
+     * 打刻はあるのに日次勤怠が無い日は、退勤していないか計算に失敗した日である。
+     * 1 日でも欠けたまま清算すると<strong>結果が過少になる。</strong>
+     */
+    java.util.List<LocalDate> findWorkDatesWithEvents(EmployeeId employeeId,
+                                                      jp.co.sample.kintai.shared.domain
+                                                              .DateRange period);
 }

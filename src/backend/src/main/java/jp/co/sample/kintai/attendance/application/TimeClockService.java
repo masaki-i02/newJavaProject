@@ -3,6 +3,7 @@ package jp.co.sample.kintai.attendance.application;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -16,7 +17,10 @@ import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
+import jp.co.sample.kintai.shared.domain.DomainErrorKind;
+import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
@@ -46,13 +50,16 @@ public class TimeClockService {
     private final DailyAttendanceRepository dailyAttendances;
     private final WorkRuleRepository workRules;
     private final CompanyCalendarRepository calendar;
+    private final MonthClosureQuery monthClosure;
     private final Clock clock;
 
     public TimeClockService(TimeClockEventRepository timeClocks,
                             DailyAttendanceRepository dailyAttendances,
                             WorkRuleRepository workRules,
                             CompanyCalendarRepository calendar,
+                            MonthClosureQuery monthClosure,
                             Clock clock) {
+        this.monthClosure = monthClosure;
         this.timeClocks = timeClocks;
         this.dailyAttendances = dailyAttendances;
         this.workRules = workRules;
@@ -82,6 +89,13 @@ public class TimeClockService {
         }
         LocalDateTime at = occurredAt.orElseGet(() -> LocalDateTime.now(clock));
         LocalDate workDate = resolveWorkDate(employeeId, at);
+
+        // ★ 判定に使う月は勤務日が属する月である。
+        //   打刻時刻の月で判定すると、3/31 22:00 出勤 → 4/1 06:00 退勤の退勤打刻が、
+        //   締め済みの 3 月分を 4 月扱いで書き込めてしまう
+        if (!monthClosure.acceptsTimeClock(employeeId, YearMonth.from(workDate))) {
+            throw new MonthNotOpenForTimeClockException(workDate);
+        }
         TimeClockEvent event = type.at(at);
 
         // ★ 並びが不正なら追記しない。ここで例外が出れば打刻は記録されない
@@ -134,5 +148,37 @@ public class TimeClockService {
     /** 現在時刻（会社基準の壁掛け時計）。画面が「今日」を組み立てるのに使う。 */
     public LocalDateTime now() {
         return LocalDateTime.now(clock.withZone(BusinessZone.ID));
+    }
+
+    /**
+     * その月はもう直接打刻を受け付けない（BR-10）。
+     *
+     * <p>提出済み・承認済み・締め済みが該当する。
+     * <strong>状態が変われば通るので {@code CONFLICT}（409）である。</strong>
+     * 権限の問題ではないので 403 にはしない。
+     */
+    public static final class MonthNotOpenForTimeClockException extends DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        MonthNotOpenForTimeClockException(LocalDate workDate) {
+            super("提出済み・締め済みの月には打刻できません: 勤務日 " + workDate);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:month-not-open";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "その月には打刻できません";
+        }
     }
 }

@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import jp.co.sample.kintai.shared.domain.DetailedDomainException;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
 
@@ -50,6 +51,11 @@ public class ApiExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
         problem.setType(URI.create(e.errorCode()));
         problem.setTitle(e.title());
+        // ★ 「どれを直せばよいか」を持っている例外は、その情報も応答へ載せる。
+        //   例外の側が知っているのに応答へ出さないと、利用者は総当たりで探すことになる
+        if (e instanceof DetailedDomainException detailed) {
+            detailed.properties().forEach(problem::setProperty);
+        }
         return problem;
     }
 

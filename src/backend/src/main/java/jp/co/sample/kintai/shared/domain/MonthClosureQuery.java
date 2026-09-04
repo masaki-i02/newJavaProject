@@ -20,6 +20,22 @@ public interface MonthClosureQuery {
     /** 締め済みか。 */
     boolean isClosed(EmployeeId employeeId, YearMonth month);
 
-    /** 打刻・再計算・カレンダーの変更などを受け付けてよい状態か。 */
-    boolean acceptsChanges(EmployeeId employeeId, YearMonth month);
+    /**
+     * 本人が直接打刻してよい状態か。<strong>再計算とカレンダーの変更もこれで判定する。</strong>
+     *
+     * <p><strong>「訂正申請を受け付けるか」と分ける。</strong>
+     * 1 つにまとめると、提出済みの月で {@code true} を返すことになり、
+     * <strong>本人が提出後に直接打刻できてしまう。</strong>
+     * 月次勤怠は提出済みのまま内容だけが変わり、
+     * 承認者が確認した内容と実際に確定される内容が食い違う
+     * （申請・承認と締め ドメインモデル設計書 2.1）。
+     */
+    boolean acceptsTimeClock(EmployeeId employeeId, YearMonth month);
+
+    /**
+     * 訂正申請を受け付けてよい状態か。
+     *
+     * <p>提出済みでも受け付ける。差戻しを待たずに、気づいた誤りを直せるようにする。
+     */
+    boolean acceptsCorrectionRequest(EmployeeId employeeId, YearMonth month);
 }

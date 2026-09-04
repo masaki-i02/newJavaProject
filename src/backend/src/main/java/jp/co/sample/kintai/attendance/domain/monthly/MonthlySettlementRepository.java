@@ -17,6 +17,25 @@ public interface MonthlySettlementRepository {
      */
     void save(MonthlySettlement settlement);
 
+    /**
+     * 版が一致するときだけ保存する。
+     *
+     * <p><strong>人事が画面から再計算するときに使う。</strong>
+     * 画面に出ている値を見て「これを計算し直す」と決めた以上、
+     * その間に別の経路（訂正の承認など）で値が変わっていたら、
+     * 人事が見ていない結果を上書きすることになる。
+     *
+     * <p>システムが契機（提出・訂正の承認）で再計算するときは
+     * {@link #save(MonthlySettlement)} を使う。
+     * 誰かが見ている値ではないので、版を突き合わせる相手がいない。
+     *
+     * @throws org.springframework.dao.OptimisticLockingFailureException 版が一致しない場合
+     */
+    void save(MonthlySettlement settlement, long expectedVersion);
+
+    /** 現在の版。まだ計算されていなければ 0。 */
+    long currentVersion(EmployeeId employeeId, YearMonth month);
+
     Optional<MonthlySettlement> find(EmployeeId employeeId, YearMonth month);
 
     /**
