@@ -160,7 +160,7 @@ class TimeClockSequenceTest {
          * （CLAUDE.md 落とし穴 19）。
          */
         @Test
-        @DisplayName("例外にせず、拘束時間 0 分として扱う")
+        @DisplayName("UT-ATT-30 例外にせず、拘束時間 0 分として扱う")
         void zeroLengthAttendanceIsNotAnError() {
             var sequence = Punches.on("2026-04-06").in("09:00").out("09:00").build();
 
@@ -233,7 +233,7 @@ class TimeClockSequenceTest {
          * 拒否すると働いた事実が残らない（CLAUDE.md 落とし穴 19）。
          */
         @Test
-        @DisplayName("休憩終了と休憩開始が同一時刻でも受け入れる")
+        @DisplayName("UT-ATT-31 休憩終了と休憩開始が同一時刻でも受け入れる")
         void touchingBreaksAreAccepted() {
             var sequence = Punches.on("2026-04-06")
                     .in("09:00").breakFrom("12:00").breakTo("12:45")

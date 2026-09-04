@@ -632,7 +632,7 @@ class DailyAttendanceCalculatorTest {
      * 法定休日労働の判定（暦日で行う）が中日について効かなくなる。
      */
     @Test
-    @DisplayName("3 つの暦日にまたがる勤務は暦日ごとに分割される")
+    @DisplayName("UT-ATT-32 3 つの暦日にまたがる勤務は暦日ごとに分割される")
     void workSpanningThreeCalendarDays() {
         // 月 22:00 出勤 → 水 02:00 退勤。28 時間の連続勤務
         var result = calculate(MON, Punches.on("2026-04-06")
