@@ -20,6 +20,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * @param statutoryTotalLimit 法定労働時間の総枠。上回ると時間外労働
  * @param dailyOvertimeTime   日次で確定した法定外残業（固定時間制のみ）
  * @param weeklyOvertimeTime  週 40 時間超（固定時間制のみ）
+ * @param carriedOverOvertimeTime 法定休日から翌暦日へ通算して生じた法定外残業（固定時間制のみ）
  * @param overtimeTime        時間外労働の合計
  * @param shortageTime        不足時間。欠勤控除の対象
  * @param nightTime           深夜労働の合計
@@ -37,11 +38,21 @@ public record MonthlySettlement(
         Duration statutoryTotalLimit,
         Duration dailyOvertimeTime,
         Duration weeklyOvertimeTime,
+        Duration carriedOverOvertimeTime,
         Duration overtimeTime,
         Duration shortageTime,
         Duration nightTime,
         List<WeeklyOvertime> weeklyBreakdown,
         AgreementUsage agreementUsage) {
+
+    /**
+     * 50% 割増に切り替わる月の時間外労働（労基法 37 条 1 項但書）。
+     *
+     * <p><strong>設定可能にしない。</strong> 法で固定された値であり、
+     * 自由に動かせると割増率の下限だけ守っても 50% の対象そのものが消える
+     * （CLAUDE.md 落とし穴 15）。
+     */
+    public static final Duration HIGH_RATE_THRESHOLD = Duration.ofHours(60);
 
     public MonthlySettlement {
         requireNonNull(employeeId, "社員");
@@ -51,7 +62,8 @@ public record MonthlySettlement(
         requireNonNull(weeklyBreakdown, "週ごとの内訳");
         for (Duration value : List.of(workingTime, legalHolidayTime, targetWorkingTime,
                 scheduledTotalTime, statutoryTotalLimit, dailyOvertimeTime,
-                weeklyOvertimeTime, overtimeTime, shortageTime, nightTime)) {
+                weeklyOvertimeTime, carriedOverOvertimeTime, overtimeTime, shortageTime,
+                nightTime)) {
             requireNonNull(value, "労働時間");
             if (value.isNegative()) {
                 throw new IllegalArgumentException("労働時間を負にはできません: " + value);
@@ -70,19 +82,24 @@ public record MonthlySettlement(
         // ★ 制度ごとに時間外の内訳が決まる
         switch (workingTimeSystem) {
             case FIXED -> {
-                if (!overtimeTime.equals(dailyOvertimeTime.plus(weeklyOvertimeTime))) {
+                Duration breakdown = dailyOvertimeTime.plus(weeklyOvertimeTime)
+                        .plus(carriedOverOvertimeTime);
+                if (!overtimeTime.equals(breakdown)) {
                     throw new IllegalArgumentException(
-                            "時間外労働の内訳が一致しません: 合計 %s / 日次 %s + 週次 %s"
+                            "時間外労働の内訳が一致しません: 合計 %s / 日次 %s + 週次 %s + 通算 %s"
                                     .formatted(overtimeTime, dailyOvertimeTime,
-                                            weeklyOvertimeTime));
+                                            weeklyOvertimeTime, carriedOverOvertimeTime));
                 }
             }
-            // フレックスは清算期間の総枠で判定する。日次・週次を重ねると二重評価になる
+            // フレックスは清算期間の総枠で判定する。日次・週次・通算を重ねると二重評価になる
             case FLEX -> {
-                if (dailyOvertimeTime.isPositive() || weeklyOvertimeTime.isPositive()) {
+                if (dailyOvertimeTime.isPositive() || weeklyOvertimeTime.isPositive()
+                        || carriedOverOvertimeTime.isPositive()) {
                     throw new IllegalArgumentException(
-                            "フレックスに日次・週次の時間外を計上しています: 日次 %s / 週次 %s"
-                                    .formatted(dailyOvertimeTime, weeklyOvertimeTime));
+                            "フレックスに日次・週次・通算の時間外を計上しています: "
+                                    + "日次 %s / 週次 %s / 通算 %s".formatted(
+                                            dailyOvertimeTime, weeklyOvertimeTime,
+                                            carriedOverOvertimeTime));
                 }
             }
         }
@@ -118,6 +135,30 @@ public record MonthlySettlement(
         if (value == null) {
             throw new IllegalArgumentException("%sに null は許されません".formatted(label));
         }
+    }
+
+    /**
+     * 月 60 時間を超えた時間外労働。<strong>50% 割増の対象</strong>（労基法 37 条 1 項但書）。
+     *
+     * <p>25% と 50% を足すのではなく、60 時間を超えた部分の割増率が 50% になる。
+     * 法定内残業（時間外労働ではない）と法定休日労働（36 条の対象だが時間外ではない）は
+     * {@code overtimeTime} に入っていないので、ここにも入らない。
+     *
+     * <p><strong>制度で適用の有無は変わらない。</strong>
+     * 37 条 1 項但書は時間外労働一般に対する規定であり、
+     * フレックスの総枠超過も同じように 60 時間と比べる（要件定義書 0.5 の BR-05）。
+     *
+     * <p>{@code overtimeTime} から一意に決まるので<strong>項目として持たない。</strong>
+     * 持つなら食い違いを禁じる不変条件が要る（CLAUDE.md 落とし穴 39）。
+     */
+    public Duration overtimeOver60Time() {
+        Duration excess = overtimeTime.minus(HIGH_RATE_THRESHOLD);
+        return excess.isNegative() ? Duration.ZERO : excess;
+    }
+
+    /** 50% 割増の対象が生じているか。 */
+    public boolean hasHighRateOvertime() {
+        return overtimeOver60Time().isPositive();
     }
 
     /** 所定どおり働いたか。不足があれば欠勤控除の対象になる。 */

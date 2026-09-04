@@ -63,24 +63,53 @@ public final class WeeklyOvertimeRule {
      * 対象月の中だけを渡すと、月初の週に必要な前月の日が欠けたまま判定してしまう。
      */
     public List<WeeklyOvertime> apply(List<DailyAttendance> days) {
-        if (days == null) {
-            throw new IllegalArgumentException("日次勤怠に null は許されません");
+        return apply(days, List.of());
+    }
+
+    /**
+     * 法定休日からの通算（BR-07）を織り込んで週 40 時間超を求める。
+     *
+     * <p><strong>通算で法定外残業になった時間を、週の法定内労働から引く。</strong>
+     * 引かないと、同じ時間を法定外残業としても週 40 時間超としても数えることになる。
+     * {@link #statutoryInsideTime} が日次の法定外残業を引いているのと同じ理由である。
+     *
+     * <p>引く先は<strong>持ち越された暦日が属する週</strong>とする。
+     * 法定休日を日曜、週の起算も日曜としているので（{@link #WEEK_START}）、
+     * 持ち越し先の暦日は法定休日と同じ週に入り、時間を数えた週と引く週が一致する。
+     * 0 で下限を切ってあるので、他の曜日を法定休日にしても負にはならない。
+     */
+    public List<WeeklyOvertime> apply(List<DailyAttendance> days,
+                                      List<HolidayCarryOver> carryOvers) {
+        if (days == null || carryOvers == null) {
+            throw new IllegalArgumentException("週次判定の引数に null は許されません");
         }
         Map<LocalDate, List<DailyAttendance>> byWeek = new TreeMap<>();
         for (DailyAttendance day : days) {
             byWeek.computeIfAbsent(weekStartOf(day.workDate()), key -> new ArrayList<>())
                     .add(day);
         }
+        Map<LocalDate, Duration> carriedOvertimeByWeek = new TreeMap<>();
+        for (HolidayCarryOver carryOver : carryOvers) {
+            carriedOvertimeByWeek.merge(weekStartOf(carryOver.calendarDate()),
+                    carryOver.additionalOvertime(), Duration::plus);
+        }
+
         List<WeeklyOvertime> weeks = new ArrayList<>();
         byWeek.forEach((weekStart, week) -> {
             Duration inside = week.stream()
                     .map(WeeklyOvertimeRule::statutoryInsideTime)
-                    .reduce(Duration.ZERO, Duration::plus);
+                    .reduce(Duration.ZERO, Duration::plus)
+                    .minus(carriedOvertimeByWeek.getOrDefault(weekStart, Duration.ZERO));
+            inside = floorAtZero(inside);
             Duration excess = inside.minus(statutoryWeekly);
             weeks.add(new WeeklyOvertime(weekStart, weekStart.plusWeeks(1), inside,
-                    excess.isNegative() ? Duration.ZERO : excess));
+                    floorAtZero(excess)));
         });
         return List.copyOf(weeks);
+    }
+
+    private static Duration floorAtZero(Duration value) {
+        return value.isNegative() ? Duration.ZERO : value;
     }
 
     /** 対象月に計上される週 40 時間超の合計。<strong>末日が属する月で振り分ける。</strong> */

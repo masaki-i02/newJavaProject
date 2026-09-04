@@ -63,14 +63,17 @@ public final class MonthlySettlementCalculator {
         Duration nightTime = sum(inPeriod, DailyAttendance::nightTime);
         Duration targetWorkingTime = workingTime.minus(legalHolidayTime);
 
+        // ★ 通算 → 週次 → 月次の順で解く。
+        //   通算で法定外になった時間を週の法定内から引かないと、同じ時間を 2 度数える
+        List<HolidayCarryOver> carryOvers = carryOversFor(workRule, days);
         var weeklyRule = new WeeklyOvertimeRule(workRule.statutoryWeeklyWorkingTime());
-        List<WeeklyOvertime> weeks = weeklyRule.apply(days);
+        List<WeeklyOvertime> weeks = weeklyRule.apply(days, carryOvers);
         Duration statutoryTotalLimit =
                 period.statutoryTotalLimit(workRule.statutoryWeeklyWorkingTime());
 
         Overtime overtime = switch (workRule.workingTimeSystem()) {
             case FixedTimeSystem fixed -> fixedOvertime(inPeriod, weeks, weeklyRule,
-                    period.month());
+                    period.month(), chargedCarryOver(carryOvers, period));
             case FlextimeSystem flex -> flexOvertime(targetWorkingTime, statutoryTotalLimit);
         };
 
@@ -80,7 +83,8 @@ public final class MonthlySettlementCalculator {
         return new MonthlySettlement(employeeId, period, workRule.systemType(),
                 workingTime, legalHolidayTime, targetWorkingTime,
                 scheduledTotalTime, statutoryTotalLimit,
-                overtime.daily(), overtime.weekly(), overtime.total(),
+                overtime.daily(), overtime.weekly(), overtime.carriedOver(),
+                overtime.total(),
                 shortage.isNegative() ? Duration.ZERO : shortage,
                 nightTime, weeks,
                 AgreementUsage.of(overtime.total(), legalHolidayTime, annualUsedBefore));
@@ -94,10 +98,43 @@ public final class MonthlySettlementCalculator {
      */
     private static Overtime fixedOvertime(List<DailyAttendance> inPeriod,
                                           List<WeeklyOvertime> weeks,
-                                          WeeklyOvertimeRule weeklyRule, YearMonth month) {
+                                          WeeklyOvertimeRule weeklyRule, YearMonth month,
+                                          Duration carriedOver) {
         Duration daily = sum(inPeriod, DailyAttendance::overtimeBeyondStatutoryTime);
         Duration weekly = weeklyRule.totalChargedTo(weeks, month);
-        return new Overtime(daily, weekly, daily.plus(weekly));
+        return new Overtime(daily, weekly, carriedOver,
+                daily.plus(weekly).plus(carriedOver));
+    }
+
+    /**
+     * 法定休日から翌暦日への通算（BR-07）。
+     *
+     * <p><strong>固定時間制にだけ適用する。</strong>
+     * フレックスでは持ち越した時間は既に対象労働時間に入っており、清算期間の総枠で判定される。
+     * 日次の 8 時間で重ねて判定すると、同じ労働時間を 2 つの基準で二重に評価することになる
+     * （週 40 時間超を適用しないのと同じ理由）。
+     */
+    private static List<HolidayCarryOver> carryOversFor(WorkRule workRule,
+                                                        List<DailyAttendance> days) {
+        return switch (workRule.workingTimeSystem()) {
+            case FixedTimeSystem ignored ->
+                    new HolidayCarryOverRule(workRule.statutoryDailyWorkingTime()).apply(days);
+            case FlextimeSystem ignored -> List.of();
+        };
+    }
+
+    /**
+     * 対象月に計上する通算分。<strong>暦日が清算期間に入るものだけ。</strong>
+     *
+     * <p>走査範囲は月をはみ出すので（{@link WeeklyOvertimeRule#scanRangeFor}）、
+     * 絞らないと前月末の法定休日から持ち越した分を当月にも計上してしまう。
+     */
+    private static Duration chargedCarryOver(List<HolidayCarryOver> carryOvers,
+                                             SettlementPeriod period) {
+        return carryOvers.stream()
+                .filter(carryOver -> period.period().contains(carryOver.calendarDate()))
+                .map(HolidayCarryOver::additionalOvertime)
+                .reduce(Duration.ZERO, Duration::plus);
     }
 
     /**
@@ -110,7 +147,7 @@ public final class MonthlySettlementCalculator {
     private static Overtime flexOvertime(Duration targetWorkingTime,
                                          Duration statutoryTotalLimit) {
         Duration excess = targetWorkingTime.minus(statutoryTotalLimit);
-        return new Overtime(Duration.ZERO, Duration.ZERO,
+        return new Overtime(Duration.ZERO, Duration.ZERO, Duration.ZERO,
                 excess.isNegative() ? Duration.ZERO : excess);
     }
 
@@ -135,6 +172,7 @@ public final class MonthlySettlementCalculator {
     }
 
     /** 時間外労働の内訳。制度によって埋まる項目が変わる。 */
-    private record Overtime(Duration daily, Duration weekly, Duration total) {
+    private record Overtime(Duration daily, Duration weekly, Duration carriedOver,
+                            Duration total) {
     }
 }

@@ -15,14 +15,17 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
+import jp.co.sample.kintai.attendance.domain.DailyAttendanceCalculator;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.support.DailyAttendances;
+import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
+import jp.co.sample.kintai.workrule.domain.WorkingTimeSystem;
 import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
 /**
@@ -289,7 +292,7 @@ class MonthlySettlementCalculatorTest {
                     WorkingTimeSystemType.FLEX,
                     Duration.ofMinutes(10_000), Duration.ZERO, Duration.ofMinutes(10_000),
                     Duration.ofMinutes(9_600), Duration.ofMinutes(10_628),
-                    Duration.ZERO, Duration.ZERO,
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO,
                     Duration.ofMinutes(10), Duration.ofMinutes(10),
                     Duration.ZERO, List.of(), AgreementUsage.of(Duration.ofMinutes(10),
                             Duration.ZERO, Duration.ZERO)))
@@ -485,6 +488,167 @@ class MonthlySettlementCalculatorTest {
             assertThat(result.scheduledTotalTime())
                     .isEqualTo(Duration.ofHours(8).multipliedBy(workdaysInPeriod));
         }
+    }
+
+    @Nested
+    @DisplayName("月 60 時間超の 50% 割増（BR-04 但書）")
+    class HighRateOvertime {
+
+        /** 時間外の内訳だけを差し替えた固定時間制の清算結果。 */
+        private MonthlySettlement fixedWithOvertime(Duration overtime) {
+            var may = period(2026, 5);
+            return new MonthlySettlement(TARO, may, WorkingTimeSystemType.FIXED,
+                    overtime, Duration.ZERO, overtime,
+                    Duration.ZERO, Duration.ofMinutes(10_628),
+                    overtime, Duration.ZERO, Duration.ZERO, overtime,
+                    Duration.ZERO, Duration.ZERO, List.of(),
+                    AgreementUsage.of(overtime, Duration.ZERO, Duration.ZERO));
+        }
+
+        /**
+         * <strong>境界の内側だけで試さない。</strong>
+         * ちょうど 60 時間で 0、1 分超えて 1 分になることを両方確かめないと、
+         * 比較を {@code <} と {@code <=} のどちらに書いても通ってしまう
+         * （CLAUDE.md 落とし穴 24・43）。
+         */
+        @Test
+        @DisplayName("UT-BR04-11 時間外がちょうど 60 時間なら対象 0、1 分超えると 1 分")
+        void exactlyAtTheThreshold() {
+            assertThat(fixedWithOvertime(Duration.ofHours(60)).overtimeOver60Time())
+                    .isZero();
+            assertThat(fixedWithOvertime(Duration.ofHours(60)).hasHighRateOvertime())
+                    .isFalse();
+            assertThat(fixedWithOvertime(Duration.ofMinutes(3_601)).overtimeOver60Time())
+                    .isEqualTo(Duration.ofMinutes(1));
+        }
+
+        @Test
+        @DisplayName("UT-BR04-12 時間外が 70 時間なら 50% の対象は 10 時間")
+        void tenHoursOverTheThreshold() {
+            var result = fixedWithOvertime(Duration.ofHours(70));
+
+            assertThat(result.overtimeOver60Time()).isEqualTo(Duration.ofHours(10));
+            assertThat(result.hasHighRateOvertime()).isTrue();
+        }
+
+        /**
+         * <strong>法定内残業は時間外労働ではない</strong>ので 60 時間にも数えない。
+         * 所定休日は所定 0 なので、8 時間までの労働はすべて法定内残業になる（BR-07）。
+         */
+        @Test
+        @DisplayName("UT-BR04-13 所定休日の法定内残業だけの月は時間外 0")
+        void withinStatutoryOvertimeIsNotCounted() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            // 5/9 は土曜（所定休日）。9:00–18:00 休憩 1 時間 = 実労働 8 時間
+            var saturday = realDay(LocalDate.of(2026, 5, 9), WorkRules.fixed());
+
+            var result = calculator.calculate(TARO, may, List.of(saturday), fixedRule(),
+                    Duration.ZERO);
+
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(8));
+            assertThat(result.dailyOvertimeTime()).as("8 時間を超えていない").isZero();
+            assertThat(result.overtimeTime()).isZero();
+            assertThat(result.overtimeOver60Time()).isZero();
+        }
+
+        /**
+         * <strong>制度で適用の有無は変わらない</strong>（要件定義書 0.5 の BR-05）。
+         * 37 条 1 項但書は時間外労働一般に対する規定である。
+         */
+        @Test
+        @DisplayName("UT-BR04-14 フレックスの総枠超過 70 時間も 50% の対象になる")
+        void appliesToFlexAsWell() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            // 総枠 10,628 分 + 70 時間（4,200 分）
+            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
+                    Duration.ofMinutes(10_628 + 4_200)));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+
+            assertThat(result.overtimeTime()).isEqualTo(Duration.ofHours(70));
+            assertThat(result.overtimeOver60Time()).isEqualTo(Duration.ofHours(10));
+        }
+    }
+
+    @Nested
+    @DisplayName("法定休日から翌暦日への通算（BR-07）")
+    class CarryOver {
+
+        /** 5/3 は日曜（法定休日）、5/4〜5/8 は平日、5/9 は土曜。 */
+        private static final LocalDate SUNDAY = LocalDate.of(2026, 5, 3);
+
+        /**
+         * <strong>通算で法定外になった時間を、週 40 時間の判定からも引く。</strong>
+         * 引かないと、同じ 6 時間を通算分としても週 40 時間超としても数える。
+         */
+        @Test
+        @DisplayName("UT-BR07-03 通算で法定外になった分を週 40 時間の法定内から引く")
+        void carriedOverTimeIsRemovedFromTheWeeklyBase() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            var days = new ArrayList<DailyAttendance>();
+            // 日曜（法定休日）22:00 → 月曜 06:00。0 時以降の 6 時間が月曜へ持ち越される
+            days.add(realDay(SUNDAY, Punches.on("2026-05-03").in("22:00")
+                    .out("2026-05-04T06:00").build(), WorkRules.fixed()));
+            // 月〜金は 9:00–18:00 休憩 1 時間 = 実労働 8 時間 × 5 日 = 40 時間
+            for (int i = 0; i < 5; i++) {
+                days.add(realDay(LocalDate.of(2026, 5, 4).plusDays(i), WorkRules.fixed()));
+            }
+
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+
+            assertThat(result.carriedOverOvertimeTime())
+                    .as("月曜の暦日は 6 + 8 = 14 時間。8 時間超の 6 時間")
+                    .isEqualTo(Duration.ofHours(6));
+            assertThat(result.dailyOvertimeTime())
+                    .as("どの勤務日も 1 日 8 時間は超えていない").isZero();
+            assertThat(result.weeklyOvertimeTime())
+                    .as("引かないと 46 − 40 = 6 時間を二重に数える").isZero();
+            assertThat(result.overtimeTime()).isEqualTo(Duration.ofHours(6));
+        }
+
+        /**
+         * フレックスでは持ち越し分は既に対象労働時間に入っており、総枠で判定される。
+         * 日次の 8 時間で重ねて判定すると二重評価になる。
+         */
+        @Test
+        @DisplayName("UT-BR07-05 フレックスには通算による法定外残業を計上しない")
+        void flexHasNoCarryOverOvertime() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            var days = List.of(
+                    realDay(SUNDAY, Punches.on("2026-05-03").in("22:00")
+                            .out("2026-05-04T06:00").build(), WorkRules.flex()),
+                    realDay(LocalDate.of(2026, 5, 4), WorkRules.flex()));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+
+            assertThat(result.carriedOverOvertimeTime()).isZero();
+            assertThat(result.dailyOvertimeTime()).isZero();
+            assertThat(result.weeklyOvertimeTime()).isZero();
+        }
+    }
+
+    /** 9:00–18:00（休憩 1 時間）を本番の日次計算に通す。 */
+    private DailyAttendance realDay(LocalDate workDate, WorkingTimeSystem system) {
+        return realDay(workDate, Punches.on(workDate.toString()).in("09:00")
+                .breakFrom("12:00").breakTo("13:00").out("18:00").build(), system);
+    }
+
+    /**
+     * 打刻を<strong>本番の日次計算に通して</strong>日次勤怠を作る。
+     *
+     * <p>通算（BR-07）が読むのは区間に付いた割増区分であり、それを決めているのは日次側である。
+     * 手で組み立てた日次を渡すと、通算の入口にあたる分類そのものを検査しないテストになる。
+     */
+    private DailyAttendance realDay(LocalDate workDate,
+                                    jp.co.sample.kintai.attendance.domain.TimeClockSequence
+                                            punches,
+                                    WorkingTimeSystem system) {
+        return new DailyAttendanceCalculator(calendar)
+                .calculate(workDate, punches, WorkRules.rule(system));
     }
 
     /** その月の土日を休日として登録する。所定労働日数を現実的にするため。 */
