@@ -23,6 +23,7 @@ CONTEXTS = [
     ('03_勤怠_打刻と日次集計', '勤怠（打刻・日次集計）'),
     ('04_勤怠_月次清算', '勤怠（月次清算）'),
     ('05_申請承認と締め', '申請・承認・締め'),
+    ('06_年次有給休暇', '年次有給休暇'),
 ]
 
 TARGETS = [
@@ -49,6 +50,11 @@ def cells(rest):
 EXTRA_SOURCES = [
     ('シナリオ・横断', os.path.join(ROOT, '04_結合テスト', '結合テスト仕様書.md')),
 ]
+
+
+# 重複した ID。警告だけでは見過ごされる（UT-ATT-17〜23 が 7 件、
+# 別々の観点に同じ ID を振ったまま残っていた）。最後に終了コードを 1 にする
+DUPLICATES = []
 
 
 def collect(prefix):
@@ -85,6 +91,7 @@ def collect(prefix):
                     continue
                 print(f'警告: {tid} が重複しています（{seen[tid]} と {source}）',
                       file=sys.stderr)
+                DUPLICATES.append(tid)
             seen[tid] = source
             found.append({
                 'context': label,
@@ -162,6 +169,9 @@ def main():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         io.open(path, 'w', encoding='utf-8').write(render(prefix, title, rows))
         print(f'{prefix}: {len(rows)} 件 → {os.path.relpath(path, ROOT)}')
+    if DUPLICATES:
+        print(f'ID が重複している: {sorted(set(DUPLICATES))}', file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -376,7 +376,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
 
         /** 複数日ぶんたまることもある。<strong>配列で返す。</strong> */
         @Test
-        @DisplayName("UT-ATT-17 未退勤が複数あればすべて返る")
+        @DisplayName("UT-ATT-33 未退勤が複数あればすべて返る")
         void multipleUnclosedDays() throws Exception {
             punch("CLOCK_IN", LocalDate.of(2026, 4, 6).atTime(9, 0).toString());
             punch("CLOCK_IN", LocalDate.of(2026, 4, 8).atTime(9, 0).toString());
@@ -393,7 +393,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
          * 出勤した直後は当然まだ退勤していないので、含めると毎回警告が出る。
          */
         @Test
-        @DisplayName("UT-ATT-18 打刻した当日は警告に含まれない")
+        @DisplayName("UT-ATT-34 打刻した当日は警告に含まれない")
         void currentDayIsNotWarned() throws Exception {
             punch("CLOCK_IN", MON.atTime(9, 0).toString())
                     .andExpect(status().isCreated())
@@ -406,7 +406,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
          * 締め済みの月には未退勤の日が残らないので、そこで探索は止まる。
          */
         @Test
-        @DisplayName("UT-ATT-20 前月の未退勤も、その月が締まっていなければ警告に入る")
+        @DisplayName("UT-ATT-36 前月の未退勤も、その月が締まっていなければ警告に入る")
         void previousMonthIsUnclosed() throws Exception {
             var lastMonth = LocalDate.of(2026, 3, 30);
             var thisMonth = LocalDate.of(2026, 4, 1);
@@ -422,7 +422,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
 
         /** 退勤すれば警告は消える。 */
         @Test
-        @DisplayName("UT-ATT-19 退勤済みの日は警告に入らない")
+        @DisplayName("UT-ATT-35 退勤済みの日は警告に入らない")
         void closedDayIsNotWarned() throws Exception {
             punch("CLOCK_IN", MON.atTime(9, 0).toString());
             punch("CLOCK_OUT", MON.atTime(17, 0).toString());

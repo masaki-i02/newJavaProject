@@ -26,6 +26,7 @@ PLAN = [
     ('V4__attendance.sql', '03_勤怠_打刻と日次集計', '勤怠（打刻・日次集計）'),
     ('V5__settlement.sql', '04_勤怠_月次清算', '勤怠（月次清算）'),
     ('V6__approval.sql', '05_申請承認と締め', '申請・承認・締め'),
+    ('V7__leave.sql', '06_年次有給休暇', '年次有給休暇'),
 ]
 
 # V1 へ切り出すもの。どのコンテキストからも使うため先頭に置く
@@ -53,6 +54,14 @@ FENCE = re.compile(r'^```sql\s*$')
 END = re.compile(r'^```\s*$')
 # 参照用のクエリは DDL ではない
 QUERY = re.compile(r'^\s*(SELECT|WITH|INSERT|UPDATE|DELETE)\b', re.I | re.M)
+# 先頭のコメント行と空行。これを落としてから QUERY を当てる。
+# 落とさないと「-- 候補：… <改行> SELECT …」がクエリと判定されず、
+# プレースホルダ入りの SELECT がマイグレーションに紛れ込む
+LEADING_COMMENT = re.compile(r'^(?:\s*--[^\n]*\n|\s*\n)+')
+
+
+def strip_leading_comments(body):
+    return LEADING_COMMENT.sub('', body)
 
 
 def extract(directory):
@@ -69,7 +78,7 @@ def extract(directory):
         if END.match(line):
             inside = False
             body = ''.join(buf)
-            if not QUERY.match(body.lstrip()):
+            if not QUERY.match(strip_leading_comments(body).lstrip()):
                 blocks.append(body.rstrip())
             continue
         buf.append(line)

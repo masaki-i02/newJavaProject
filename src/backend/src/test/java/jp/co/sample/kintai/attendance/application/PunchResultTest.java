@@ -11,7 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 打刻の結果が持つ不変条件（UT-ATT-21〜23）。
+ * 打刻の結果が持つ不変条件（UT-ATT-37〜39）。
  *
  * <p><strong>強制している当の場所に、破れた値を渡す。</strong>
  * 通常の経路から作ったインスタンスに対して確かめても、
@@ -29,7 +29,7 @@ class PunchResultTest {
      * 含めると毎回「退勤打刻がありません」と出て警告が意味を失う。
      */
     @Test
-    @DisplayName("UT-ATT-21 打刻した勤務日を未退勤の警告に含められない")
+    @DisplayName("UT-ATT-37 打刻した勤務日を未退勤の警告に含められない")
     void currentWorkDateCannotBeWarned() {
         assertThatThrownBy(() -> new PunchResult(WORK_DATE,
                 PunchResult.CalculationStatus.NOT_CLOSED, Optional.empty(),
@@ -39,7 +39,7 @@ class PunchResultTest {
     }
 
     @Test
-    @DisplayName("UT-ATT-22 過去の勤務日は警告に含められる")
+    @DisplayName("UT-ATT-38 過去の勤務日は警告に含められる")
     void pastWorkDatesAreWarned() {
         var result = new PunchResult(WORK_DATE,
                 PunchResult.CalculationStatus.NOT_CLOSED, Optional.empty(),
@@ -51,7 +51,7 @@ class PunchResultTest {
 
     /** 計算の成否と日次勤怠の有無が食い違う状態は作れない。 */
     @Test
-    @DisplayName("UT-ATT-23 計算できたのに日次勤怠が無い状態は作れない")
+    @DisplayName("UT-ATT-39 計算できたのに日次勤怠が無い状態は作れない")
     void calculatedRequiresAttendance() {
         assertThatThrownBy(() -> new PunchResult(WORK_DATE,
                 PunchResult.CalculationStatus.CALCULATED, Optional.empty(), List.of()))
