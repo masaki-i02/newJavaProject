@@ -104,6 +104,10 @@ class EmployeeEntity {
         this.hiredOn = hiredOn;
     }
 
+    long getVersion() {
+        return version;
+    }
+
     LocalDate getRetiredOn() {
         return retiredOn;
     }

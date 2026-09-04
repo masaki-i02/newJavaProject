@@ -27,5 +27,17 @@ interface EmployeeJpaRepository extends JpaRepository<EmployeeEntity, UUID> {
             """)
     List<EmployeeEntity> findActiveOn(@Param("asOf") LocalDate asOf);
 
+    /**
+     * 指定日に退職していない社員。<strong>未来日入社の社員も含む。</strong>
+     *
+     * <p>{@link #findActiveOn} と違い、入社日で絞らない。名簿の用途である。
+     */
+    @Query("""
+            select e from EmployeeEntity e
+             where e.retiredOn is null or e.retiredOn >= :asOf
+             order by e.employeeNumber
+            """)
+    List<EmployeeEntity> findNotRetiredOn(@Param("asOf") LocalDate asOf);
+
     List<EmployeeEntity> findAllByOrderByEmployeeNumber();
 }

@@ -47,6 +47,57 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
         return rows.stream().map(EmployeeRepositoryAdapter::toDomain).toList();
     }
 
+    /**
+     * 版を突き合わせてから保存する。
+     *
+     * <p>読んでから比べる形にしている。{@code @Version} による自動検出は
+     * 「読み込んだ版」と比べるので、<strong>利用者が画面で見ていた版とは比べてくれない。</strong>
+     */
+    @Override
+    public List<Employee> findForDirectory(LocalDate asOf, boolean includeRetired) {
+        List<EmployeeEntity> rows = includeRetired
+                ? jpa.findAllByOrderByEmployeeNumber()
+                : jpa.findNotRetiredOn(asOf);
+        return rows.stream().map(EmployeeRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
+    public void save(Employee employee, long expectedVersion) {
+        long actual = currentVersion(employee.id());
+        if (actual != expectedVersion) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "社員の版が一致しません: 期待 %d / 現在 %d"
+                            .formatted(expectedVersion, actual));
+        }
+        save(employee);
+    }
+
+    @Override
+    public long currentVersion(EmployeeId id) {
+        return jpa.findById(id.value()).map(EmployeeEntity::getVersion).orElse(0L);
+    }
+
+    @Override
+    public boolean existsActiveNumber(EmployeeNumber number) {
+        return jpa.findByEmployeeNumber(number.value())
+                .filter(row -> row.getRetiredOn() == null).isPresent();
+    }
+
+    /**
+     * メールアドレスが在籍者と重複するか。
+     *
+     * <p><strong>ここで大文字小文字を畳まない。</strong>
+     * {@link Email} が生成の時点で小文字へ正規化しており、保存される値も正規化済みである。
+     * ここで {@code equalsIgnoreCase} を使うと同じ規則が 2 か所に現れ、
+     * どちらが正なのか決められなくなる。
+     */
+    @Override
+    public boolean existsActiveEmail(Email email) {
+        return jpa.findAllByOrderByEmployeeNumber().stream()
+                .filter(row -> row.getRetiredOn() == null)
+                .anyMatch(row -> row.getEmail().equals(email.value()));
+    }
+
     @Override
     public void save(Employee employee) {
         UUID id = employee.id().value();

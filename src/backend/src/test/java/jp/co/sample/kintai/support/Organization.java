@@ -125,6 +125,39 @@ public final class Organization {
             }
 
             @Override
+            public void save(Employee employee, long expectedVersion) {
+                // 代役は版を持たない。突き合わせが要るテストは本番のアダプタで書く
+                throw new UnsupportedOperationException("版の突き合わせは代役では扱わない");
+            }
+
+            @Override
+            public long currentVersion(EmployeeId id) {
+                throw new UnsupportedOperationException("版の突き合わせは代役では扱わない");
+            }
+
+            @Override
+            public boolean existsActiveNumber(EmployeeNumber number) {
+                return employees.values().stream()
+                        .anyMatch(e -> e.number().equals(number) && e.retiredOn().isEmpty());
+            }
+
+            @Override
+            public boolean existsActiveEmail(Email email) {
+                return employees.values().stream()
+                        .anyMatch(e -> e.retiredOn().isEmpty()
+                                && e.email().value().equalsIgnoreCase(email.value()));
+            }
+
+            @Override
+            public List<Employee> findForDirectory(LocalDate asOf, boolean includeRetired) {
+                return employees.values().stream()
+                        .filter(e -> includeRetired || e.retiredOn()
+                                .map(retired -> !retired.isBefore(asOf)).orElse(true))
+                        .sorted(java.util.Comparator.comparing(e -> e.number().value()))
+                        .toList();
+            }
+
+            @Override
             public List<Employee> findAll(LocalDate asOf, boolean includeRetired) {
                 return employees.values().stream()
                         .filter(e -> includeRetired || e.isActiveOn(asOf))
