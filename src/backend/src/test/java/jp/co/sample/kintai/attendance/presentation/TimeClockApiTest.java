@@ -331,4 +331,105 @@ class TimeClockApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.length()").value(0));
         }
     }
+
+    /**
+     * 未退勤の勤務日の警告（UT-ATT-15 / 16）。
+     *
+     * <p><strong>打刻は拒まない。</strong>
+     * 別の日の不整合を理由に、その日の労働の記録を止めてはいけない
+     * （CLAUDE.md 落とし穴 19）。警告として返し、画面が訂正申請へ誘導する。
+     */
+    @Nested
+    @DisplayName("未退勤の勤務日")
+    class UnclosedWorkDates {
+
+        @Test
+        @DisplayName("UT-ATT-15 前日が未退勤のまま出勤すると、前日が警告に入る")
+        void previousDayIsUnclosed() throws Exception {
+            // 4/6（月）は出勤したまま退勤していない
+            punch("CLOCK_IN", MON.atTime(9, 0).toString()).andExpect(status().isCreated());
+
+            punch("CLOCK_IN", MON.plusDays(1).atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.workDate").value(MON.plusDays(1).toString()))
+                    .andExpect(jsonPath("$.unclosedWorkDates.length()").value(1))
+                    .andExpect(jsonPath("$.unclosedWorkDates[0]").value(MON.toString()));
+        }
+
+        /**
+         * <strong>前日 1 日だけを見ない。</strong>
+         * 金曜に退勤を打ち忘れて月曜に出勤したケースを取りこぼす。
+         */
+        @Test
+        @DisplayName("UT-ATT-16 金曜が未退勤で月曜に出勤すると、金曜が警告に入る")
+        void previousFridayIsUnclosed() throws Exception {
+            var friday = LocalDate.of(2026, 4, 10);
+            var monday = LocalDate.of(2026, 4, 13);
+
+            punch("CLOCK_IN", friday.atTime(9, 0).toString()).andExpect(status().isCreated());
+
+            punch("CLOCK_IN", monday.atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.workDate").value(monday.toString()))
+                    .andExpect(jsonPath("$.unclosedWorkDates[0]").value(friday.toString()));
+        }
+
+        /** 複数日ぶんたまることもある。<strong>配列で返す。</strong> */
+        @Test
+        @DisplayName("UT-ATT-17 未退勤が複数あればすべて返る")
+        void multipleUnclosedDays() throws Exception {
+            punch("CLOCK_IN", LocalDate.of(2026, 4, 6).atTime(9, 0).toString());
+            punch("CLOCK_IN", LocalDate.of(2026, 4, 8).atTime(9, 0).toString());
+
+            punch("CLOCK_IN", LocalDate.of(2026, 4, 10).atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.unclosedWorkDates.length()").value(2))
+                    .andExpect(jsonPath("$.unclosedWorkDates[0]").value("2026-04-06"))
+                    .andExpect(jsonPath("$.unclosedWorkDates[1]").value("2026-04-08"));
+        }
+
+        /**
+         * <strong>今まさに打刻した日は含めない。</strong>
+         * 出勤した直後は当然まだ退勤していないので、含めると毎回警告が出る。
+         */
+        @Test
+        @DisplayName("UT-ATT-18 打刻した当日は警告に含まれない")
+        void currentDayIsNotWarned() throws Exception {
+            punch("CLOCK_IN", MON.atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.unclosedWorkDates.length()").value(0));
+        }
+
+        /**
+         * <strong>締めていない月まで遡って探す。</strong>
+         * 当月だけを見ると、月末に退勤を打ち忘れて翌月 1 日に出勤したケースを取りこぼす。
+         * 締め済みの月には未退勤の日が残らないので、そこで探索は止まる。
+         */
+        @Test
+        @DisplayName("UT-ATT-20 前月の未退勤も、その月が締まっていなければ警告に入る")
+        void previousMonthIsUnclosed() throws Exception {
+            var lastMonth = LocalDate.of(2026, 3, 30);
+            var thisMonth = LocalDate.of(2026, 4, 1);
+
+            punch("CLOCK_IN", lastMonth.atTime(9, 0).toString())
+                    .andExpect(status().isCreated());
+
+            punch("CLOCK_IN", thisMonth.atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.unclosedWorkDates[0]")
+                            .value(lastMonth.toString()));
+        }
+
+        /** 退勤すれば警告は消える。 */
+        @Test
+        @DisplayName("UT-ATT-19 退勤済みの日は警告に入らない")
+        void closedDayIsNotWarned() throws Exception {
+            punch("CLOCK_IN", MON.atTime(9, 0).toString());
+            punch("CLOCK_OUT", MON.atTime(17, 0).toString());
+
+            punch("CLOCK_IN", MON.plusDays(1).atTime(9, 0).toString())
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.unclosedWorkDates.length()").value(0));
+        }
+    }
 }

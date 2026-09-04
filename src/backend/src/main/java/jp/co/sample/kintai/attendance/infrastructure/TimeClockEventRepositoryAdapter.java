@@ -176,6 +176,22 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
     }
 
     /**
+     * その期間の未退勤の勤務日。
+     *
+     * <p>候補（有効な打刻がある勤務日）を引いてから、
+     * <strong>閉じているかどうかの判定はドメインに任せる。</strong>
+     * SQL に {@code HAVING sum(CLOCK_OUT) = 0} と書くと、
+     * 「退勤したか」の定義が状態機械とここの 2 か所に分かれる。
+     * 候補は 1 か月ぶん程度なので、件数あたりの問い合わせは問題にならない。
+     */
+    @Override
+    public List<LocalDate> findUnclosedWorkDates(EmployeeId employeeId, DateRange period) {
+        return findWorkDatesWithEvents(employeeId, period).stream()
+                .filter(workDate -> !findByWorkDate(employeeId, workDate).isClosed())
+                .toList();
+    }
+
+    /**
      * その期間に<strong>有効な</strong>打刻がある勤務日。
      *
      * <p>取り消された打刻しか無い日は含めない。訂正で全部の打刻が取り消された日は、

@@ -437,8 +437,20 @@ ORDER BY e.occurred_at;
 **締めていない全期間から探す。** 前日 1 日だけを見ると、
 金曜に退勤を打ち忘れて月曜に出勤したケースを取りこぼす。
 
+**「退勤したか」を SQL で判定しない。**
+
+当初は `HAVING sum(CASE WHEN event_type = 'CLOCK_OUT' THEN 1 ELSE 0 END) = 0` と書いていたが、
+これは<strong>状態機械（BR-02）の判定を SQL に写したもの</strong>である。
+`TimeClockSequence.isClosed()` と 2 か所に分かれ、
+片方を直したときにもう片方が古くなる。
+
+SQL は<strong>候補（有効な打刻がある勤務日）を返すところまで</strong>にとどめ、
+閉じているかどうかはドメインが答える。候補は 1 か月ぶん程度なので、
+勤務日ごとに打刻列を引いても問題にならない。
+
 ```sql
-SELECT e.work_date
+-- 候補：その期間に有効な打刻がある勤務日
+SELECT DISTINCT e.work_date
 FROM time_clock_events e
 WHERE e.employee_id = :employeeId
   AND e.work_date >= :searchFrom
@@ -449,12 +461,18 @@ WHERE e.employee_id = :employeeId
                     AND r.employee_id = e.employee_id
                     AND r.entry_type = 'REVOCATION'
                     AND r.revokes_event_id = e.id)
-GROUP BY e.work_date
-HAVING sum(CASE WHEN e.event_type = 'CLOCK_OUT' THEN 1 ELSE 0 END) = 0
 ORDER BY e.work_date;
 ```
 
+```java
+// 閉じているかどうかはドメインが答える
+return findWorkDatesWithEvents(employeeId, period).stream()
+        .filter(workDate -> !findByWorkDate(employeeId, workDate).isClosed())
+        .toList();
+```
+
 `:searchFrom` は「締めていない最も古い月の初日」とする。
+遡る月数には上限（12 か月）を置く。締めが長く滞った社員で全期間を走査しないためである。
 締め済みの月には未退勤の日が残っていないことが保証されているため
 （[05_申請承認と締め](../05_申請承認と締め/ドメインモデル設計書.md) の提出前検査）。
 

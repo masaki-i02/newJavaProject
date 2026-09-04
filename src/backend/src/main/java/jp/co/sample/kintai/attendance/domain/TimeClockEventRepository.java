@@ -73,6 +73,23 @@ public interface TimeClockEventRepository {
     java.util.Optional<LocalDate> findOpenWorkDate(EmployeeId employeeId, LocalDate onOrAfter);
 
     /**
+     * その期間の<strong>未退勤の勤務日</strong>（BR-03）。
+     *
+     * <p><strong>前日 1 日だけを見ない。</strong>
+     * 金曜に退勤を打ち忘れて月曜に出勤したケースを取りこぼす。
+     *
+     * <p>「退勤したか」の判定は {@code TimeClockSequence.isClosed()} に任せる。
+     * SQL で「退勤の打刻があるか」を書くと、
+     * <strong>状態機械の実装が 2 か所に散る。</strong>
+     *
+     * @param period 探す範囲。半開区間。締め済みの月には未退勤の日が残らないので、
+     *               呼び出し側が「締めていない最も古い月の初日」から渡す
+     */
+    java.util.List<LocalDate> findUnclosedWorkDates(EmployeeId employeeId,
+                                                    jp.co.sample.kintai.shared.domain
+                                                            .DateRange period);
+
+    /**
      * その期間に有効な打刻がある勤務日。
      *
      * <p>月次清算の前に<strong>未計算の日が残っていないか</strong>を調べるために使う。
