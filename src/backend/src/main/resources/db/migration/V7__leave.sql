@@ -85,16 +85,16 @@ CREATE TABLE paid_leave_requests (
     CONSTRAINT paid_leave_requests_state_check CHECK (
         (status = 'SUBMITTED'
              AND grant_id IS NULL AND decided_by IS NULL AND decided_at IS NULL
-             AND comment IS NULL AND canceled_at IS NULL)
+             AND comment IS NULL AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 承認済みは必ず配分先を持つ。「消化したのにどの付与から引いたか不明」を作らない
         OR (status = 'APPROVED'
              AND grant_id IS NOT NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL
-             AND canceled_at IS NULL)
+             AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 却下はコメントが必須。空文字・空白のみも認めない
         OR (status = 'REJECTED'
              AND grant_id IS NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL
              AND length(btrim(coalesce(comment, ''))) > 0
-             AND canceled_at IS NULL)
+             AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 取消は配分を外す。承認済みだった場合の decided_by / decided_at は残す
         OR (status = 'CANCELED'
              AND grant_id IS NULL
@@ -193,7 +193,3 @@ CREATE TRIGGER paid_leave_grants_set_updated_at
 CREATE TRIGGER paid_leave_requests_set_updated_at
     BEFORE UPDATE ON paid_leave_requests
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
--- 全社の未達一覧が使う。社員 ID の集合で引くので employee_id が先頭
-CREATE INDEX paid_leave_grants_granted_on_idx
-    ON paid_leave_grants (granted_on) WHERE granted;

@@ -96,8 +96,11 @@ CREATE INDEX paid_leave_grants_employee_granted_on_idx
 
 **失効日（`granted_on + 2 年`）の列を持たない。**
 `granted_on` から一意に決まるので、持つと食い違いを防ぐ CHECK が要る（落とし穴 39）。
-問い合わせは `granted_on > :asOf - interval '2 years'` と書けば
-`paid_leave_grants_employee_granted_on_idx` がそのまま効く。
+
+**失効しているかどうかを SQL で判定しない。** 判定は
+`PaidLeaveGrant.validPeriod()` の 1 か所だけに置く。
+SQL の書き方は [4.1](#41-残日数br-15) を見よ。
+移項した式は日付演算のクランプで等価にならない（落とし穴 91）。
 
 **`(employee_id, grant_index)` と `(employee_id, granted_on)` の両方を一意にする。**
 前者は付与処理の冪等性を、後者は「同じ日に 2 回付与された」状態を防ぐ。
@@ -139,16 +142,16 @@ CREATE TABLE paid_leave_requests (
     CONSTRAINT paid_leave_requests_state_check CHECK (
         (status = 'SUBMITTED'
              AND grant_id IS NULL AND decided_by IS NULL AND decided_at IS NULL
-             AND comment IS NULL AND canceled_at IS NULL)
+             AND comment IS NULL AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 承認済みは必ず配分先を持つ。「消化したのにどの付与から引いたか不明」を作らない
         OR (status = 'APPROVED'
              AND grant_id IS NOT NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL
-             AND canceled_at IS NULL)
+             AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 却下はコメントが必須。空文字・空白のみも認めない
         OR (status = 'REJECTED'
              AND grant_id IS NULL AND decided_by IS NOT NULL AND decided_at IS NOT NULL
              AND length(btrim(coalesce(comment, ''))) > 0
-             AND canceled_at IS NULL)
+             AND canceled_by IS NULL AND canceled_at IS NULL)
         -- 取消は配分を外す。承認済みだった場合の decided_by / decided_at は残す
         OR (status = 'CANCELED'
              AND grant_id IS NULL
@@ -408,11 +411,10 @@ SELECT g.employee_id,
 **配下でない社員の年休の取得状況**を見られる（要件 4.1）。
 判定は `shared.domain.EmployeeVisibility` が行う。
 
-```sql
--- 全社の未達一覧が使う。社員 ID の集合で引くので employee_id が先頭
-CREATE INDEX paid_leave_grants_granted_on_idx
-    ON paid_leave_grants (granted_on) WHERE granted;
-```
+インデックスは既存の `paid_leave_grants_employee_granted_on_idx (employee_id, granted_on)`
+がそのまま効く。**新しいインデックスは置かない。**
+主条件が `employee_id = ANY(...)` なので先頭列が一致する
+（どのクエリにも使われないインデックスを置かない・チェックリスト 4.4）。
 
 > **`g.days >= 10` は現状すべての付与が満たす。**
 > 比例付与を対象外にした結果（BR-14）、10 日未満の付与は
@@ -535,7 +537,7 @@ SELECT leave_date
 | IT-LV-21 | **`CANCELED` からの遷移を記録** | `events_transition_check` で拒否 | 済 |
 | IT-LV-22 | 遷移の組と `event_kind` が食い違う | `events_transition_check` で拒否 | 済 |
 | IT-LV-23 | 未定義の `event_kind` | `events_kind_check` で拒否 | 済 |
-| IT-LV-24 | 却下の理由が空 | `events_reject_comment_check` で拒否 | 済 |
+| IT-LV-24 | 却下の理由が空 | `events_reason_check` で拒否 | 済 |
 | IT-LV-25 | **承認済みからの取消を記録** | 成功する | 済 |
 | IT-LV-26 | **`REVERT_BY_LEAVE` の証跡を理由つきで記録** | 成功し、訂正による差戻しと区別できる | 済 |
 | IT-LV-27 | **`REVERT_BY_LEAVE` を理由なしで記録** | `reason_required_check` で拒否 | 済 |
@@ -558,12 +560,19 @@ SELECT leave_date
 
 ### 7.1 版（`version`）の初期値
 
-**行を作るときは版を 1 から入れる。** 列の既定値（0）に任せない。
+**列の既定値を 1 にする**（`version bigint NOT NULL DEFAULT 1`）。
 
-`monthly_attendances` と同じ約束にそろえる（[05 DB設計書 6](../05_申請承認と締め/DB設計書.md)）。
-年休の申請は「行が無い」状態を経由しないので落とし穴 57 そのものは起きないが、
-**同じ種類の表で約束が違うほうが危うい。**
-実装が既定値のまま挿入すると、API が返す版と DDL の既定値が食い違う。
+`monthly_attendances` は既定値 0 のままアプリケーションが 1 を入れる形だが
+（[05 DB設計書 6](../05_申請承認と締め/DB設計書.md)）、**約束の理由が違う。**
+
+| 表 | 「行が無い」状態があるか | 版の入れ方 |
+| --- | --- | --- |
+| `monthly_attendances` | **ある**（提出時に初めて作られる。行が無い月は下書き相当） | アプリケーションが 1 を入れる。0 は「行が無い」ことだけを指す（落とし穴 57） |
+| `paid_leave_requests` / `paid_leave_grants` | **無い**（申請・付与は必ず行として生まれる） | 既定値で 1 にする |
+
+**どちらも「0 の行は存在しない」という結果は同じである。**
+`monthly_attendances` で既定値に頼れないのは、
+0 を「行が無い」ことを表す値として使っているためで、こちらにはその用途が無い。
 
 `paid_leave_grants.version` を使うのは**再判定**（`reassess`）だけである。
 同じ付与を人事が同時に再判定する場面は稀だが、

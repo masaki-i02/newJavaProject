@@ -30,11 +30,11 @@
 
 ### 1.1 楽観ロック
 
-`version` を必須で受け取るのは、**申請の状態を変える 3 つ**である。
+`version` を必須で受け取るのは、**申請の状態を変える 4 つ**である。
 
 | 操作 | `version` |
 | --- | --- |
-| 承認 / 却下 / 取下げ | **必須** |
+| 承認 / 却下 / 取下げ / 取消（人事） | **必須** |
 | 申請 | 不要（新規作成） |
 | 付与の実行 / 再判定 | 不要（`(employee_id, grant_index)` の一意制約が二重実行を防ぐ） |
 
@@ -59,6 +59,7 @@
 | `urn:kintai:error:not-the-requester` | 403 | 本人以外が申請・取下げをしようとした |
 | `urn:kintai:error:grant-already-granted` | 409 | 付与済みの付与を再判定しようとした |
 | `urn:kintai:error:grant-not-yet-issued` | 409 | **取得日に有効な付与がまだ実体化していない**（承認時） |
+| `urn:kintai:error:leave-date-already-worked` | 409 | **すでに実労働がある日の年休を承認しようとした** |
 | `urn:kintai:error:self-approval` | 403 | **自分の申請を自分で承認・却下しようとした**（BR-11） |
 
 **`month-already-closed` と `month-not-editable` を分ける。**
@@ -96,7 +97,8 @@
       "days": 10,
       "usedDays": 10,
       "remainingDays": 0,
-      "attendanceRate": { "totalWorkingDays": 122, "attendedDays": 120 }
+      "attendanceRate": { "totalWorkingDays": 122, "attendedDays": 120,
+                          "deemedAttendedDays": 0, "deemedReason": null }
     },
     {
       "grantedOn": "2025-10-01",
@@ -105,7 +107,8 @@
       "days": 11,
       "usedDays": 3,
       "remainingDays": 8,
-      "attendanceRate": { "totalWorkingDays": 245, "attendedDays": 240 }
+      "attendanceRate": { "totalWorkingDays": 245, "attendedDays": 240,
+                          "deemedAttendedDays": 0, "deemedReason": null }
     }
   ],
   "obligations": [
@@ -283,6 +286,7 @@ record 全体に付けると `attendanceRate` の内訳まで消える
 | `409 month-not-editable` | **対象月が承認済み**（まだ締めてはいない） |
 | `409 month-already-closed` | 対象月が締め済み |
 | `409 grant-not-yet-issued` | **取得日に有効な付与がまだ実体化していない**。付与日を案内する |
+| `409 leave-date-already-worked` | **取得日に実労働の日次勤怠がある**（すでに働いた日） |
 | `422 insufficient-paid-leave` | **承認の時点で残日数が無くなっていた** |
 
 **`month-not-editable` を落とさない。** 月次勤怠が承認済みの月で年休を承認すると、
@@ -328,9 +332,16 @@ record 全体に付けると `attendanceRate` の内訳まで消える
 | `200 OK` | 取下げ成功。承認済みだった場合は残日数が戻る |
 | `403 not-the-requester` | 本人以外が取り下げた |
 | `409 leave-not-cancelable` | **承認済みで、取得日の当日以降**。人事の取消（3.5）へ案内する |
-| `409 month-already-closed` | 対象月が締め済み |
+| `409 month-not-editable` | **承認済みの年休で、対象月が承認済み** |
+| `409 month-already-closed` | **承認済みの年休で、対象月が締め済み** |
 | `409 optimistic-lock-failure` | `version` が一致しない |
 | `409 invalid-transition` | 既に却下済み・取下げ済み |
+
+**月の状態を見るのは、承認済みの年休を取り消すときだけである。**
+申請中の取下げは残日数も月次清算も動かさないので、
+**締め済み・承認済みの月でも通す**（[ドメインモデル設計書 4.2](ドメインモデル設計書.md)）。
+拒否すると、決裁されないまま取得日と月末が過ぎた申請が
+どの状態にも遷移できないまま残る。
 
 **申請中（未決裁）はいつでも取り下げられる**（BR-16）。
 期限を設けると、承認者が決裁しないまま取得日と月末が過ぎた申請が
@@ -338,14 +349,6 @@ record 全体に付けると `attendanceRate` の内訳まで消える
 
 **承認済みは取得日の前日まで**（BR-16）。当日以降は実績が確定しているので、
 本人ではなく人事が理由を付けて取り消す（3.5）。
-
-**承認済みの取下げも本人が行う。** 承認者の同意を必須にすると、
-承認者が不在の間、本人が予定を変えられなくなる（落とし穴 26）。
-残日数が戻るだけで、誰かに不利益は生じない。
-
-**承認済みを取り下げると月次清算を再計算する。** 承認と対称である。
-再計算しないと、取り消した年休の日が所定総から除かれたままになり、
-**不足時間が 8 時間ぶん過少に出る。**
 
 ### 3.5 `POST /api/paid-leave-requests/{id}/revocation`（人事による取消）
 
@@ -364,6 +367,29 @@ record 全体に付けると `attendanceRate` の内訳まで消える
 | `409 optimistic-lock-failure` | `version` が一致しない |
 | `409 month-already-closed` | 対象月が締め済み |
 | `409 month-not-editable` | 対象月が承認済み |
+
+#### 締め前に気づく経路
+
+この救済は**締め前にしか使えない**（締め済みなら `month-already-closed`）。
+ところが「年休の日に出勤していた」ことに気づく契機は、放っておけば
+月次の突き合わせ＝提出・承認の後になる。**そのときには手遅れである。**
+
+提出の応答に警告として載せる。
+
+```json
+{
+  "status": "SUBMITTED",
+  "warnings": [
+    { "type": "paid-leave-date-worked", "dates": ["2026-04-15"] }
+  ]
+}
+```
+
+| 決定 | 理由 |
+| --- | --- |
+| **提出を止めない**（警告のみ） | 一次証拠の記録も手続きも、不整合を理由に止めない（BR-12 と同じ考え方・落とし穴 19） |
+| **行を持たない。** 承認済みの年休の日と日次勤怠を突き合わせて導く | 導出できる値を列で持たない（落とし穴 39） |
+| 承認者にも見えるようにする | 是正するのは人事だが、気づくのは本人か承認者である |
 
 **なぜ人事なのか。** 予定を変えて出勤した社員は、
 取り消す手段が無いと**年休 1 日を消費したままその日も働く**ことになる。
@@ -401,7 +427,8 @@ BR-16 の第 1 版はこれを訂正申請（BR-09）へ委ねていたが、
   ],
   "withheld": [
     { "employeeId": "...", "grantedOn": "2026-10-01",
-      "attendanceRate": { "totalWorkingDays": 245, "attendedDays": 180 } }
+      "attendanceRate": { "totalWorkingDays": 245, "attendedDays": 180,
+                          "deemedAttendedDays": 0, "deemedReason": null } }
   ],
   "skipped": [
     { "employeeId": "...", "grantedOn": "2026-10-01", "reason": "already-granted" }
@@ -549,6 +576,11 @@ BR-16 の第 1 版はこれを訂正申請（BR-09）へ委ねていたが、
 | IT-LV-91 | **出勤扱いを申告して理由が無い** | `400 validation-failed` | BR-14 |
 | IT-LV-92 | **退職者が付与の対象に入らない** | 付与の実行で `granted` にも `withheld` にも現れない | BR-14 |
 | IT-LV-93 | **年休を取った月を提出できる** | `200 OK`。年休の日は「未確定」ではない | BR-10 / BR-16 |
+| IT-LV-94 | **締め済みの月でも申請中の年休を取り下げられる** | `200 OK`。どの状態にも遷移できない申請を残さない | BR-16 |
+| IT-LV-95 | **承認済みの月では承認済みの年休を取り消せない** | `409 month-not-editable` | BR-16 |
+| IT-LV-96 | **すでに実労働がある日の年休を承認** | `409 leave-date-already-worked` | BR-16 |
+| IT-LV-97 | **年休の日に出勤していると提出の応答に警告が出る** | 提出は成功する（止めない） | BR-16 / BR-12 |
+| IT-LV-98 | **未到来の付与が `availableDays` にも数えられる** | 申請できる日数と表示が一致する | BR-16 |
 
 ---
 
@@ -558,4 +590,4 @@ BR-16 の第 1 版はこれを訂正申請（BR-09）へ委ねていたが、
 | --- | --- | --- |
 | 1 | 日次バッチの実行時刻と、実行結果の通知先 | M2 の実装時 |
 | 2 | 退職時に未消化の年休をどう扱うか（買上げは法定外。要件に無い） | 要件の改訂が要る |
-| 3 | **年休の日に打刻があったことに気づく手段。** 人事の取消（3.5）で是正できるが、気づかなければ是正されない | M2 の実装時 |
+| 3 | ~~年休の日に打刻があったことに気づく手段~~ **解決済み。** 提出の応答に警告として載せる（3.5）。締め後は是正できないので、締め前に必ず気づく経路を作った | 完了 |

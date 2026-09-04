@@ -51,6 +51,9 @@ CREATE TABLE monthly_settlements (
     legal_holiday_minutes           int         NOT NULL,
     target_working_minutes          int         NOT NULL,
     scheduled_total_minutes         int         NOT NULL,
+    -- ★ 所定労働日数から除いた年休の日数（BR-16）。所定総がその値である根拠。
+    --   列そのものは V7（06_年次有給休暇）で追加する。適用済みの V5 は書き換えない
+    -- paid_leave_days              int         NOT NULL DEFAULT 0,
     statutory_total_limit_minutes   int         NOT NULL,
 
     daily_overtime_minutes          int         NOT NULL DEFAULT 0,
