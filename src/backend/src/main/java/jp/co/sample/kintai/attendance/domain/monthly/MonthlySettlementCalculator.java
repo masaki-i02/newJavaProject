@@ -6,6 +6,7 @@ import java.util.List;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
+import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.FixedTimeSystem;
 import jp.co.sample.kintai.workrule.domain.FlextimeSystem;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
@@ -75,7 +76,8 @@ public final class MonthlySettlementCalculator {
         };
 
         Duration scheduledTotalTime = scheduledTotalOf(workRule, period);
-        Duration shortage = scheduledTotalTime.minus(targetWorkingTime);
+        Duration shortage = shortageOf(workRule, inPeriod, targetWorkingTime,
+                scheduledTotalTime);
 
         return new MonthlySettlement(employeeId, period, workRule.seriesId(),
                 workRule.systemType(),
@@ -83,7 +85,7 @@ public final class MonthlySettlementCalculator {
                 scheduledTotalTime, statutoryTotalLimit,
                 overtime.daily(), overtime.weekly(), overtime.carriedOver(),
                 overtime.total(),
-                floorAtZero(shortage),
+                shortage,
                 nightTime, overtime.weeks(),
                 AgreementUsage.of(overtime.total(), legalHolidayTime, annualUsedBefore));
     }
@@ -142,6 +144,45 @@ public final class MonthlySettlementCalculator {
         // 週の内訳も作らない。時間外 0 と主張しながら内訳に時間外が入る状態を作らないため
         return new Overtime(Duration.ZERO, Duration.ZERO, Duration.ZERO,
                 floorAtZero(excess), List.of());
+    }
+
+    /**
+     * 不足時間。<strong>制度によって数え方が違う。</strong>
+     *
+     * <p>フレックスは<strong>清算期間を通算</strong>して過不足を見る制度なので（労基法 32 条の 3）、
+     * ある日の超過が別の日の不足を埋めるのが趣旨そのものである。
+     *
+     * <p>固定時間制はそうではない。<strong>所定は 1 日ごとに約束されている。</strong>
+     * 通算の式を当てると、19 日を 8 時間・1 日を 12 時間働いて 1 日欠勤した月の不足が
+     * 8 時間ではなく 4 時間になり、<strong>4 時間ぶんの欠勤控除が消える。</strong>
+     * その 4 時間には法定外残業として 25% 割増が支払われているので、
+     * 同じ時間が「割増の対象」と「欠勤の穴埋め」に二重に使われることになる。
+     */
+    private Duration shortageOf(WorkRule workRule, List<DailyAttendance> inPeriod,
+                                Duration targetWorkingTime, Duration scheduledTotalTime) {
+        return switch (workRule.workingTimeSystem()) {
+            case FixedTimeSystem fixed -> {
+                // 日ごとに所定で頭を打つ。超過が別の日の不足を埋めなくなる。
+                // 打刻の無い所定労働日は一覧に現れないので、その日の所定がまるごと不足になる
+                Duration fulfilled = inPeriod.stream()
+                        .map(day -> min(day.workingTime(), scheduledOn(day, fixed)))
+                        .reduce(Duration.ZERO, Duration::plus);
+                yield floorAtZero(scheduledTotalTime.minus(fulfilled));
+            }
+            case FlextimeSystem ignored ->
+                    floorAtZero(scheduledTotalTime.minus(targetWorkingTime));
+        };
+    }
+
+    /** その勤務日の所定労働時間。所定休日・法定休日は 0（BR-07）。 */
+    private Duration scheduledOn(DailyAttendance day, FixedTimeSystem fixed) {
+        return calendar.dayTypeOf(day.workDate()) == DayType.WORKDAY
+                ? fixed.scheduledWorkingTime()
+                : Duration.ZERO;
+    }
+
+    private static Duration min(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
     }
 
     /**

@@ -414,8 +414,44 @@ class MonthlySettlementCalculatorTest {
                     .isLessThan(result.statutoryTotalLimit());
             assertThat(result.overtimeTime()).isEqualTo(Duration.ofHours(14));
             assertThat(result.shortageTime())
-                    .as("6 日 × 9 時間 = 54 時間しか働いていない")
-                    .isEqualTo(Duration.ofMinutes(10_080 - 54 * 60));
+                    .as("5/4〜5/8 の平日 5 日は所定を満たす。5/9 は土曜で所定 0。"
+                            + "残り 16 日ぶんが不足")
+                    .isEqualTo(Duration.ofHours(16 * 8));
+        }
+
+        /**
+         * <strong>残業で欠勤を埋めない。</strong>
+         * 通算の式（所定総 − 対象労働）を当てると不足が 4 時間になり、
+         * 4 時間ぶんの欠勤控除が消える。その 4 時間には 25% 割増も支払われているので、
+         * 同じ時間が「割増の対象」と「欠勤の穴埋め」に二重に使われることになる。
+         */
+        @Test
+        @DisplayName("UT-BR04-15 固定時間制の不足時間は日ごとの不就労で数える")
+        void shortageIsCountedPerDay() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            // 2026-05 の平日は 21 日。うち 19 日を 8 時間、1 日を 12 時間、1 日は欠勤
+            var days = new ArrayList<DailyAttendance>();
+            LocalDate date = LocalDate.of(2026, 5, 1);
+            int worked = 0;
+            while (worked < 20) {
+                if (calendar.dayTypeOf(date) == jp.co.sample.kintai.workrule.domain.DayType
+                        .WORKDAY) {
+                    days.add(DailyAttendances.fixedDay(date,
+                            worked == 19 ? Duration.ofHours(12) : Duration.ofHours(8)));
+                    worked++;
+                }
+                date = date.plusDays(1);
+            }
+
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(19 * 8 + 12));
+            assertThat(result.shortageTime())
+                    .as("欠勤したのは 1 日 = 8 時間。通算の式だと 4 時間になってしまう")
+                    .isEqualTo(Duration.ofHours(8));
+            assertThat(result.dailyOvertimeTime())
+                    .as("12 時間の日の 4 時間は法定外残業のまま").isEqualTo(Duration.ofHours(4));
         }
 
         @Test
