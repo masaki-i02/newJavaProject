@@ -50,6 +50,27 @@ public final class DailyAttendances {
         return day(workDate, worked, DayType.LEGAL_HOLIDAY, WorkingTimeSystemType.FIXED);
     }
 
+    /**
+     * フレックスの所定労働日のうち、末尾 {@code night} が深夜帯に入っていた日。
+     *
+     * <p>深夜は労働時間を分割する区分ではなく<strong>重なる属性</strong>なので、
+     * 実労働時間の内訳（所定内）はそのままに、深夜の合計だけが増える。
+     */
+    public static DailyAttendance flexNightDay(LocalDate workDate, Duration worked,
+                                               Duration night) {
+        if (night.compareTo(worked) > 0) {
+            throw new IllegalArgumentException("深夜が実労働を超えています");
+        }
+        LocalDateTime start = workDate.atTime(9, 0);
+        LocalDateTime nightFrom = start.plus(worked).minus(night);
+        List<WorkSlice> slices = new ArrayList<>();
+        addSlice(slices, start, worked.minus(night), Set.of());
+        addSlice(slices, nightFrom, night, Set.of(PremiumType.NIGHT));
+        return new DailyAttendance(workDate, DayType.WORKDAY, WorkingTimeSystemType.FLEX,
+                slices, worked, Duration.ZERO, worked, Duration.ZERO, Duration.ZERO,
+                night, Duration.ZERO);
+    }
+
     /** 打刻の無い日（欠勤）。 */
     public static DailyAttendance absent(LocalDate workDate) {
         return DailyAttendance.absent(workDate, DayType.WORKDAY, WorkingTimeSystemType.FIXED);
