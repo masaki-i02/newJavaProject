@@ -3,8 +3,14 @@ flowchart TD
     attendance["attendance<br/>打刻・労働時間の集計"]
     workrule["workrule<br/>就業規則・カレンダー"]
     employee["employee<br/>社員・組織"]
+    leave["leave<br/>年次有給休暇"]
     shared["shared<br/>共通の型<br/>コンテキストをまたぐポート"]
 
+    leave --> approval
+    leave --> attendance
+    leave --> workrule
+    leave --> employee
+    leave --> shared
     approval --> attendance
     approval --> employee
     attendance --> workrule
@@ -15,3 +21,5 @@ flowchart TD
     employee --> shared
 
     approval -. "MonthClosureQuery を実装" .-> shared
+    attendance -. "CalculatedWorkDates を実装" .-> shared
+    leave -. "PaidLeaveDays を実装" .-> shared

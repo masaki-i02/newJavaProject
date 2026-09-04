@@ -1,0 +1,42 @@
+erDiagram
+    employees ||--o{ paid_leave_grants : "付与される"
+    employees ||--o{ paid_leave_requests : "申請する"
+    paid_leave_grants ||--o{ paid_leave_requests : "承認時に配分（先入先出）"
+    paid_leave_requests ||--o{ paid_leave_request_events : "状態遷移の証跡"
+
+    paid_leave_grants {
+        uuid id PK
+        uuid employee_id FK
+        integer grant_index "何回目か（0 起点）。employee_id との組で一意"
+        date granted_on "付与日。入社日から導く。失効は +2 年（列を持たない）"
+        boolean granted "false は出勤率 8 割未満（BR-14）"
+        integer days "10〜20。不付与なら NULL"
+        integer total_working_days "出勤率の分母。判定の根拠として残す"
+        integer attended_days "出勤率の分子"
+        timestamptz assessed_at "判定した日時"
+        bigint version "楽観ロック"
+    }
+    paid_leave_requests {
+        uuid id PK
+        uuid employee_id FK
+        date leave_date "取得日。1 申請 1 日（BR-16）"
+        varchar status "SUBMITTED / APPROVED / REJECTED / CANCELED"
+        text reason "任意。時季指定は労働者の権利"
+        timestamptz requested_at "申請日時"
+        uuid grant_id FK "承認時に確定する配分先"
+        uuid decided_by FK "承認者・却下者。本人は不可"
+        timestamptz decided_at "決裁日時"
+        text comment "却下の理由（必須）"
+        timestamptz canceled_at "取下げ日時"
+        bigint version "楽観ロック"
+    }
+    paid_leave_request_events {
+        uuid id PK
+        uuid paid_leave_request_id FK
+        varchar event_kind "SUBMIT / APPROVE / REJECT / CANCEL"
+        varchar from_status "遷移元。NONE は行が無かったこと"
+        varchar to_status "遷移先"
+        uuid actor_id FK "実行者"
+        text comment "却下の理由・外れた配分先"
+        timestamptz occurred_at "永続保持する監査証跡"
+    }
