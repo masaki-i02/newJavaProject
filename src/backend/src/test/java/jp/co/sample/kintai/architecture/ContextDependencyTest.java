@@ -38,7 +38,19 @@ class ContextDependencyTest {
     private static final String ROOT = "jp.co.sample.kintai.";
 
     /**
-     * AR-06 <strong>他</strong>コンテキストの内部（実装・API）には触れない。
+     * AR-06 <strong>他</strong>コンテキストの {@code infrastructure} /
+     * {@code presentation} には触れない。
+     *
+     * <p><strong>{@code application} は禁じていない。</strong>
+     * 図にある辺（{@code approval → attendance} など）に沿うかぎり、
+     * 他コンテキストのユースケースを呼ぶことは認める。
+     * 手順そのものを写すほうが害が大きいためで、
+     * たとえば「打刻から日次を作り直す」は複数のリポジトリを束ねる操作であり
+     * {@code domain} には置けない。呼ばずに書き写すと、丸めや勤務日の扱いを直したときに
+     * 片方だけが古くなる（CLAUDE.md 落とし穴 67）。
+     *
+     * <p>禁じているのは {@code infrastructure}（JPA エンティティ・SQL）と
+     * {@code presentation}（DTO・HTTP）で、どちらもそのコンテキストの<strong>実装の都合</strong>である。
      *
      * <p>自コンテキスト内で {@code infrastructure} が {@code Entity} を参照するのは正常なので、
      * 「自分以外の」という条件が要る。ここを落とすと、
@@ -49,8 +61,9 @@ class ContextDependencyTest {
             ArchRuleDefinition.noClasses()
                     .should(dependOnAnotherContextsInternals())
                     .allowEmptyShould(true)
-                    .because("他コンテキストの実装や API に触れると、"
-                            + "内部の変更が境界を越えて伝播する。参照してよいのは domain だけ。"
+                    .because("他コンテキストの永続化と表現に触れると、"
+                            + "内部の変更が境界を越えて伝播する。"
+                            + "ユースケース（application）は図にある辺に沿うかぎり呼んでよい。"
                             + "shared は共有のためのパッケージなので対象外");
 
     /** AR-07 コンテキスト間の依存に循環がない。 */

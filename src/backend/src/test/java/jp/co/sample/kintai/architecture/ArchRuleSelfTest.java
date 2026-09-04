@@ -71,10 +71,24 @@ class ArchRuleSelfTest {
         }
 
         @Test
-        @DisplayName("AR-03 application が実装に依存したら落ちる")
+        @DisplayName("AR-03 application が infrastructure に依存したら落ちる")
         void ar03() {
             assertFails(LayerDependencyTest.AR_03_application_must_not_depend_on_adapters,
                     LAYER_PROBES, "DependsOnAdapter");
+        }
+
+        /**
+         * AR-03 の<strong>もう半分</strong>。
+         *
+         * <p>この規約は {@code infrastructure} と {@code presentation} の 2 つを禁じている。
+         * 前者だけを踏んでいたときは、
+         * <strong>禁止先から {@code presentation} を削っても自己検査が通っていた。</strong>
+         */
+        @Test
+        @DisplayName("AR-03 application が presentation に依存したら落ちる")
+        void ar03Presentation() {
+            assertFails(LayerDependencyTest.AR_03_application_must_not_depend_on_adapters,
+                    LAYER_PROBES, "DependsOnController");
         }
 
         @Test
@@ -123,6 +137,20 @@ class ArchRuleSelfTest {
                     CONTEXT_PROBES, "BetaAdapter");
         }
 
+        /**
+         * AR-06 の<strong>もう半分</strong>を確かめる。
+         *
+         * <p>この規約は {@code infrastructure} と {@code presentation} の 2 つを禁じている。
+         * {@code infrastructure} 側だけを踏んでいたときは、
+         * <strong>禁止先から {@code presentation} を削っても自己検査が通っていた。</strong>
+         */
+        @Test
+        @DisplayName("AR-06 他コンテキストの presentation に触れたら落ちる")
+        void ar06Presentation() {
+            assertFails(ContextDependencyTest.AR_06_contexts_must_not_reach_into_each_other,
+                    CONTEXT_PROBES, "BetaResponse");
+        }
+
         @Test
         @DisplayName("AR-07 コンテキストが循環したら落ちる")
         void ar07() {
@@ -130,11 +158,19 @@ class ArchRuleSelfTest {
                     CONTEXT_PROBES, "Cycle");
         }
 
-        @Test
-        @DisplayName("AR-10 shared がコンテキストを参照したら落ちる")
-        void sharedMustNotDependOnContexts() {
+        /**
+         * AR-10 は<strong>4 つのコンテキストすべて</strong>を禁じている。
+         *
+         * <p>1 つしか踏んでいないと、
+         * <strong>禁止先を 4 個から 1 個に削っても自己検査が通る。</strong>
+         */
+        @org.junit.jupiter.params.ParameterizedTest(name = "AR-10 shared → {0} で落ちる")
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+                "SharedReachesIntoEmployee", "SharedReachesIntoWorkRule",
+                "SharedReachesIntoAttendance", "SharedReachesIntoApproval"})
+        void sharedMustNotDependOnContexts(String probe) {
             assertFails(ContextDependencyTest.AR_10_shared_must_not_depend_on_any_context,
-                    SHARED_PROBES, "SharedReachesIntoContext");
+                    SHARED_PROBES, probe);
         }
 
         /**

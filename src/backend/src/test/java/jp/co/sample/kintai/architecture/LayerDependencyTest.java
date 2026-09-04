@@ -34,7 +34,16 @@ import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
         importOptions = ImportOption.DoNotIncludeTests.class)
 class LayerDependencyTest {
 
-    /** AR-01 ドメインはフレームワークから独立している。 */
+    /**
+     * AR-01 ドメインはフレームワークから独立している。
+     *
+     * <p><strong>禁止先は、違反クラスを 1 つずつ置けるものに限る。</strong>
+     * 当初は {@code io.swagger..} も挙げていたが、
+     * このプロジェクトは springdoc を使っておらず<strong>依存にすら入っていない。</strong>
+     * 違反クラスを書けない禁止先は、効いているかどうかを確かめようがなく、
+     * 「守られている」という見かけだけを増やす（アーキテクチャ設計書 9）。
+     * springdoc を採用するときに、違反クラスと一緒に戻す。
+     */
     @ArchTest
     static final ArchRule AR_01_domain_must_not_depend_on_frameworks =
             noClasses().that().resideInAPackage("..domain..")
@@ -42,7 +51,6 @@ class LayerDependencyTest {
                             "org.springframework..",
                             "jakarta.persistence..",
                             "com.fasterxml.jackson..",
-                            "io.swagger..",
                             "org.hibernate..")
                     .allowEmptyShould(true)
                     .because("ドメインの語彙がフレームワークに縛られると、"
