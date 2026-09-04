@@ -87,6 +87,7 @@ public abstract class WebIntegrationTestBase {
                     company_calendars,
                     managerships,
                     assignments,
+                    departments,
                     employee_roles,
                     employee_credentials,
                     employees

@@ -98,6 +98,19 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
     }
 
     /** 上限が無いか。 */
+    /**
+     * 期間に含まれる日を昇順で。
+     *
+     * <p><strong>無期限の期間には使えない。</strong>
+     * {@code LocalDate.MAX} まで数え上げると終わらない。
+     */
+    public java.util.stream.Stream<LocalDate> dates() {
+        if (isUnbounded() || isUnboundedStart()) {
+            throw new IllegalStateException("無期限の期間は数え上げられません: " + this);
+        }
+        return from.datesUntil(toExclusive);
+    }
+
     public boolean isUnbounded() {
         return UNBOUNDED_END.equals(toExclusive);
     }
