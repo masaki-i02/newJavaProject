@@ -25,4 +25,14 @@ public interface AssignmentRepository {
 
     /** 現在開いている期間を指定日で閉じる。異動・退職で使う。 */
     void close(EmployeeId employeeId, LocalDate toExclusive);
+
+    /**
+     * 指定日で閉じた期間を開き直す。<strong>退職の取消でだけ使う。</strong>
+     *
+     * <p>閉じた日を指定して戻すので、
+     * 退職とは無関係に閉じた過去の所属（異動）を巻き戻すことはない。
+     *
+     * @return 開き直した件数
+     */
+    int reopenClosedAt(EmployeeId employeeId, LocalDate toExclusive);
 }

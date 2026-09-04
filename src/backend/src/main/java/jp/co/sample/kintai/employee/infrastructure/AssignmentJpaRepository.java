@@ -36,4 +36,12 @@ interface AssignmentJpaRepository extends JpaRepository<AssignmentEntity, UUID> 
              where a.employeeId = :employeeId and a.validTo is null
             """)
     List<AssignmentEntity> findOpen(@Param("employeeId") UUID employeeId);
+
+    /** 指定日で閉じられている所属。退職の取消で開き直すために引く。 */
+    @Query("""
+            select a from AssignmentEntity a
+             where a.employeeId = :employeeId and a.validTo = :toExclusive
+            """)
+    List<AssignmentEntity> findClosedAt(@Param("employeeId") UUID employeeId,
+                                        @Param("toExclusive") LocalDate toExclusive);
 }

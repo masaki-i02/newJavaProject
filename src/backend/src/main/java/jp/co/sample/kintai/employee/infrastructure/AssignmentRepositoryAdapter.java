@@ -76,6 +76,16 @@ class AssignmentRepositoryAdapter implements AssignmentRepository {
         });
     }
 
+    @Override
+    public int reopenClosedAt(EmployeeId employeeId, LocalDate toExclusive) {
+        List<AssignmentEntity> closed = jpa.findClosedAt(employeeId.value(), toExclusive);
+        closed.forEach(entity -> {
+            entity.setValidTo(null);
+            jpa.save(entity);
+        });
+        return closed.size();
+    }
+
     private static Assignment toDomain(AssignmentEntity entity) {
         return new Assignment(
                 new EmployeeId(entity.getEmployeeId()),

@@ -237,6 +237,12 @@ public final class Organization {
             }
 
             @Override
+            public int reopenClosedAt(EmployeeId employeeId, LocalDate toExclusive) {
+                // 代役は退職の取消を扱わない。副作用の検証は本番のアダプタで行う
+                throw new UnsupportedOperationException("退職の取消は代役では扱わない");
+            }
+
+            @Override
             public void close(EmployeeId employeeId, LocalDate toExclusive) {
                 for (int i = 0; i < assignments.size(); i++) {
                     Assignment a = assignments.get(i);
@@ -270,6 +276,16 @@ public final class Organization {
             @Override
             public void save(Managership managership) {
                 managerships.add(managership);
+            }
+
+            @Override
+            public int closeByManager(EmployeeId employeeId, LocalDate toExclusive) {
+                throw new UnsupportedOperationException("退職の副作用は代役では扱わない");
+            }
+
+            @Override
+            public int reopenClosedAt(EmployeeId employeeId, LocalDate toExclusive) {
+                throw new UnsupportedOperationException("退職の取消は代役では扱わない");
             }
 
             @Override

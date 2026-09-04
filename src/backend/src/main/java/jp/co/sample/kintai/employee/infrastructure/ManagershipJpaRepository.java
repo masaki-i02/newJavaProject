@@ -35,4 +35,19 @@ interface ManagershipJpaRepository extends JpaRepository<ManagershipEntity, UUID
              where m.departmentId = :departmentId and m.validTo is null
             """)
     List<ManagershipEntity> findOpen(@Param("departmentId") UUID departmentId);
+
+    /** その社員が務めていて、まだ開いている部署長の期間。兼任があるので複数になりうる。 */
+    @Query("""
+            select m from ManagershipEntity m
+             where m.employeeId = :employeeId and m.validTo is null
+            """)
+    List<ManagershipEntity> findOpenByManager(@Param("employeeId") UUID employeeId);
+
+    /** 指定日で閉じられている部署長の期間。退職の取消で開き直すために引く。 */
+    @Query("""
+            select m from ManagershipEntity m
+             where m.employeeId = :employeeId and m.validTo = :toExclusive
+            """)
+    List<ManagershipEntity> findClosedAt(@Param("employeeId") UUID employeeId,
+                                         @Param("toExclusive") LocalDate toExclusive);
 }

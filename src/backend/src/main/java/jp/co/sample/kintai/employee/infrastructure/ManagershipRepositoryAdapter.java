@@ -66,6 +66,26 @@ class ManagershipRepositoryAdapter implements ManagershipRepository {
         });
     }
 
+    @Override
+    public int closeByManager(EmployeeId employeeId, LocalDate toExclusive) {
+        List<ManagershipEntity> open = jpa.findOpenByManager(employeeId.value());
+        open.forEach(entity -> {
+            entity.setValidTo(toExclusive);
+            jpa.save(entity);
+        });
+        return open.size();
+    }
+
+    @Override
+    public int reopenClosedAt(EmployeeId employeeId, LocalDate toExclusive) {
+        List<ManagershipEntity> closed = jpa.findClosedAt(employeeId.value(), toExclusive);
+        closed.forEach(entity -> {
+            entity.setValidTo(null);
+            jpa.save(entity);
+        });
+        return closed.size();
+    }
+
     private static Managership toDomain(ManagershipEntity entity) {
         return new Managership(
                 new DepartmentId(entity.getDepartmentId()),
