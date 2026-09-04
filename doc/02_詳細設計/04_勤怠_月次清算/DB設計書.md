@@ -256,6 +256,7 @@ CREATE TABLE weekly_overtimes (
     week_end_exclusive      date NOT NULL,
     statutory_inside_minutes int NOT NULL,
     overtime_minutes         int NOT NULL,
+    charged_minutes          int NOT NULL DEFAULT 0,
 
     -- 週は必ず 7 日間。上限は半開区間なので +7
     CONSTRAINT weekly_overtimes_span_check
@@ -264,7 +265,11 @@ CREATE TABLE weekly_overtimes (
     CONSTRAINT weekly_overtimes_start_dow_check
         CHECK (extract(isodow FROM week_start) = 7),
     CONSTRAINT weekly_overtimes_non_negative_check
-        CHECK (statutory_inside_minutes >= 0 AND overtime_minutes >= 0),
+        CHECK (statutory_inside_minutes >= 0 AND overtime_minutes >= 0
+               AND charged_minutes >= 0),
+    -- ★ 月をまたぐ週は超過が 2 つの月に分かれる。片方の月が週の全部を引き受けることはない
+    CONSTRAINT weekly_overtimes_charged_check
+        CHECK (charged_minutes <= overtime_minutes),
     -- ★ 40 時間を超えた分が時間外。算出式を制約にする
     CONSTRAINT weekly_overtimes_calculation_check
         CHECK (overtime_minutes = greatest(0, statutory_inside_minutes - 2400)),
@@ -372,6 +377,7 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | `weekly_overtimes_span_check` | CHECK | 週が 7 日間 |
 | `weekly_overtimes_start_dow_check` | CHECK | 週の起算日が日曜 |
 | `weekly_overtimes_calculation_check` | CHECK | **40 時間を超えた分が時間外** |
+| `weekly_overtimes_charged_check` | CHECK | **当該月の計上額が週の超過を超えない** |
 
 ### 5.1 DB では防げないもの
 
@@ -409,6 +415,7 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | IT-SET-09 | 週の起算日が日曜でない | `start_dow_check` で拒否 | 済 |
 | IT-SET-10 | 週が 7 日間でない | `span_check` で拒否 | 済 |
 | IT-SET-11 | 週の時間外が 40 時間超過分と一致しない | `calculation_check` で拒否 | 済 |
+| IT-SET-28 | **週の計上額が週の超過を上回る** | `charged_check` で拒否 | 済 |
 | IT-SET-12 | **正常な `FIXED` の清算結果（所定 < 総枠）** | 成功する | 済 |
 | IT-SET-13 | **正常な `FLEX` の清算結果（所定 < 総枠）** | 成功する | 済 |
 | IT-SET-14 | **`FLEX`・所定総 > 総枠 の月（2026-06）で時間外 115 分・不足 160 分** | **成功する。** 第 1 版では拒否されていた | 済 |
@@ -435,5 +442,4 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | --- | --- | --- |
 | 1 | 週の法定労働時間を設定可能にするか（現在は制約に 40 時間を直書き） | M1-b の実装時 |
 | 2 | 週の起算曜日を設定可能にするか（現在は日曜固定） | M1-b の実装時 |
-| 3 | 月をまたぐ週の計上先（現在は末日基準）を要件に明記する | 要件のレビュー時 |
 | 4 | 36 協定の閾値を `work_rules` 側の設定項目にするか（現在は清算時点の値を写して保存） | M1-b の実装時 |

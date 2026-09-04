@@ -28,7 +28,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * @param overtimeTime        時間外労働の合計
  * @param shortageTime        不足時間。欠勤控除の対象
  * @param nightTime           深夜労働の合計
- * @param weeklyBreakdown     週ごとの内訳
+ * @param weeklyBreakdown     週ごとの内訳。<strong>当該月が引き受ける分</strong>
  * @param agreementUsage      36 協定の消化状況
  */
 public record MonthlySettlement(
@@ -47,7 +47,7 @@ public record MonthlySettlement(
         Duration overtimeTime,
         Duration shortageTime,
         Duration nightTime,
-        List<WeeklyOvertime> weeklyBreakdown,
+        List<WeeklyOvertimeCharge> weeklyBreakdown,
         AgreementUsage agreementUsage) {
 
     /**
@@ -127,6 +127,18 @@ public record MonthlySettlement(
                             + "時間外 %s / 不足 %s / 所定総 %s / 総枠 %s"
                                     .formatted(overtimeTime, shortageTime,
                                             scheduledTotalTime, statutoryTotalLimit));
+        }
+
+        // ★ 週次の時間外は、週ごとの内訳のうち当該月に計上される分の合計そのものである。
+        //   ここを検査しないと、「フレックスに週次の時間外は無い」と主張しながら
+        //   内訳には時間外が入った状態を作れてしまう
+        Duration charged = weeklyBreakdown.stream()
+                .map(WeeklyOvertimeCharge::chargedTime)
+                .reduce(Duration.ZERO, Duration::plus);
+        if (!weeklyOvertimeTime.equals(charged)) {
+            throw new IllegalArgumentException(
+                    "週次の時間外と週ごとの内訳が一致しません: 合計 %s / 内訳 %s"
+                            .formatted(weeklyOvertimeTime, charged));
         }
 
         // ★ 法定休日労働は実労働の一部である

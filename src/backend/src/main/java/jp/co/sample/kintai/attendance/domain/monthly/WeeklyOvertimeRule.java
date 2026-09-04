@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -62,10 +63,6 @@ public final class WeeklyOvertimeRule {
      * <p>渡す日次は {@link #scanRangeFor} の範囲で読むこと。
      * 対象月の中だけを渡すと、月初の週に必要な前月の日が欠けたまま判定してしまう。
      */
-    public List<WeeklyOvertime> apply(List<DailyAttendance> days) {
-        return apply(days, List.of());
-    }
-
     /**
      * 法定休日からの通算（BR-07）を織り込んで週 40 時間超を求める。
      *
@@ -73,50 +70,99 @@ public final class WeeklyOvertimeRule {
      * 引かないと、同じ時間を法定外残業としても週 40 時間超としても数えることになる。
      * {@link #statutoryInsideTime} が日次の法定外残業を引いているのと同じ理由である。
      *
-     * <p>引く先は<strong>持ち越された暦日が属する週</strong>とする。
-     * 法定休日を日曜、週の起算も日曜としているので（{@link #WEEK_START}）、
-     * 持ち越し先の暦日は法定休日と同じ週に入り、時間を数えた週と引く週が一致する。
-     * 0 で下限を切ってあるので、他の曜日を法定休日にしても負にはならない。
+     * <p>引く先は<strong>その時間が属する勤務日の週</strong>である。
+     * 持ち越し先の暦日で引くと、法定休日を日曜以外にした瞬間に
+     * 時間を数えた週と引く週がずれ、防ごうとしていた二重計上が復活する。
+     *
+     * @param days 週次判定の走査範囲で読んだ日次勤怠
      */
     public List<WeeklyOvertime> apply(List<DailyAttendance> days,
                                       List<HolidayCarryOver> carryOvers) {
         if (days == null || carryOvers == null) {
             throw new IllegalArgumentException("週次判定の引数に null は許されません");
         }
+        Map<LocalDate, Duration> carriedByWorkDate = new TreeMap<>();
+        for (HolidayCarryOver carryOver : carryOvers) {
+            carryOver.additionalByWorkDate()
+                    .forEach((workDate, value) ->
+                            carriedByWorkDate.merge(workDate, value, Duration::plus));
+        }
+
         Map<LocalDate, List<DailyAttendance>> byWeek = new TreeMap<>();
         for (DailyAttendance day : days) {
             byWeek.computeIfAbsent(weekStartOf(day.workDate()), key -> new ArrayList<>())
                     .add(day);
         }
-        Map<LocalDate, Duration> carriedOvertimeByWeek = new TreeMap<>();
-        for (HolidayCarryOver carryOver : carryOvers) {
-            carriedOvertimeByWeek.merge(weekStartOf(carryOver.calendarDate()),
-                    carryOver.additionalOvertime(), Duration::plus);
-        }
 
         List<WeeklyOvertime> weeks = new ArrayList<>();
-        byWeek.forEach((weekStart, week) -> {
-            Duration inside = week.stream()
-                    .map(WeeklyOvertimeRule::statutoryInsideTime)
-                    .reduce(Duration.ZERO, Duration::plus)
-                    .minus(carriedOvertimeByWeek.getOrDefault(weekStart, Duration.ZERO));
-            inside = floorAtZero(inside);
-            Duration excess = inside.minus(statutoryWeekly);
-            weeks.add(new WeeklyOvertime(weekStart, weekStart.plusWeeks(1), inside,
-                    floorAtZero(excess)));
-        });
+        byWeek.forEach((weekStart, week) ->
+                weeks.add(weekOf(weekStart, week, carriedByWorkDate)));
         return List.copyOf(weeks);
     }
 
-    private static Duration floorAtZero(Duration value) {
+    /**
+     * 1 週間ぶんを組み立てる。
+     *
+     * <p><strong>超過が発生した日を特定する。</strong>
+     * 週の法定内労働を日付順に積み、40 時間を超えた部分がどの日のものかで振り分ける。
+     * 週の合計だけを持って「末日の属する月」に計上すると、
+     * 月末が金曜の月に退職した社員の最終週が<strong>どの月にも計上されなくなる</strong>。
+     */
+    private WeeklyOvertime weekOf(LocalDate weekStart, List<DailyAttendance> week,
+                                  Map<LocalDate, Duration> carriedByWorkDate) {
+        List<DailyAttendance> ordered = week.stream()
+                .sorted(Comparator.comparing(DailyAttendance::workDate))
+                .toList();
+
+        Duration inside = Duration.ZERO;
+        Duration accumulated = Duration.ZERO;
+        Map<YearMonth, Duration> overtimeByMonth = new TreeMap<>();
+
+        for (DailyAttendance day : ordered) {
+            Duration dayInside = floorAtZero(statutoryInsideTime(day)
+                    .minus(carriedByWorkDate.getOrDefault(day.workDate(), Duration.ZERO)));
+            inside = inside.plus(dayInside);
+
+            Duration excess = excessPartOf(accumulated, dayInside);
+            if (excess.isPositive()) {
+                overtimeByMonth.merge(YearMonth.from(day.workDate()), excess, Duration::plus);
+            }
+            accumulated = accumulated.plus(dayInside);
+        }
+        return new WeeklyOvertime(weekStart, weekStart.plusWeeks(1), inside,
+                floorAtZero(inside.minus(statutoryWeekly)), overtimeByMonth);
+    }
+
+    /**
+     * 累積が {@code accumulated} の位置にある長さ {@code length} の労働のうち、
+     * 週法定労働時間を超えている部分の長さ。
+     */
+    private Duration excessPartOf(Duration accumulated, Duration length) {
+        Duration end = accumulated.plus(length);
+        if (end.compareTo(statutoryWeekly) <= 0) {
+            return Duration.ZERO;
+        }
+        Duration excessStart = accumulated.compareTo(statutoryWeekly) >= 0
+                ? accumulated
+                : statutoryWeekly;
+        return end.minus(excessStart);
+    }
+
+    static Duration floorAtZero(Duration value) {
         return value.isNegative() ? Duration.ZERO : value;
     }
 
-    /** 対象月に計上される週 40 時間超の合計。<strong>末日が属する月で振り分ける。</strong> */
+    /**
+     * 対象月に計上される週 40 時間超の合計。
+     *
+     * <p><strong>超過が発生した暦日の属する月で振り分ける。</strong>
+     * 週の合計を末日の月へ寄せると、7/26(日)〜8/1(土) の週に 7/26〜7/31 だけ働いて
+     * 7/31 に退職した社員の超過が 8 月に計上され、
+     * 8 月の清算は行われないので<strong>誰にも計上されなくなる</strong>。
+     */
     public Duration totalChargedTo(List<WeeklyOvertime> weeks, YearMonth month) {
         return weeks.stream()
-                .filter(week -> week.chargedMonth().equals(month))
-                .map(WeeklyOvertime::overtimeTime)
+                .map(week -> week.overtimeChargedTo(month))
                 .reduce(Duration.ZERO, Duration::plus);
     }
 

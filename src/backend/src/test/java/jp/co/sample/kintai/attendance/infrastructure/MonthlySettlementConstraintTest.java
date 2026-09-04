@@ -16,7 +16,7 @@ import jp.co.sample.kintai.support.Fixtures;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 
 /**
- * 月次清算の制約（IT-SET-01〜27）。
+ * 月次清算の制約（IT-SET-01〜28）。
  *
  * <p>対応する設計は {@code doc/02_詳細設計/04_勤怠_月次清算/DB設計書.md} の 6 章。
  */
@@ -398,11 +398,18 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         }
 
         private void week(LocalDate start, LocalDate endExclusive, int inside, int overtime) {
+            week(start, endExclusive, inside, overtime, overtime);
+        }
+
+        private void week(LocalDate start, LocalDate endExclusive, int inside, int overtime,
+                          int charged) {
             jdbc.update("""
                     INSERT INTO weekly_overtimes (id, monthly_settlement_id, week_start,
-                            week_end_exclusive, statutory_inside_minutes, overtime_minutes)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """, Fixtures.id(), settlementId, start, endExclusive, inside, overtime);
+                            week_end_exclusive, statutory_inside_minutes, overtime_minutes,
+                            charged_minutes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, Fixtures.id(), settlementId, start, endExclusive, inside, overtime,
+                    charged);
         }
 
         @Test
@@ -424,6 +431,25 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         void weeklyOvertimeIsDerived() {
             rejectedBy("weekly_overtimes_calculation_check",
                     () -> week(LocalDate.of(2026, 5, 3), LocalDate.of(2026, 5, 10), 2_520, 60));
+        }
+
+        /**
+         * 月をまたぐ週は超過が 2 つの月に分かれるので、
+         * <strong>片方の月が週の全部を引き受けることはない。</strong>
+         */
+        @Test
+        @DisplayName("IT-SET-28 当該月の計上額が週の超過を上回ると拒否される")
+        void chargedCannotExceedTheWeekTotal() {
+            rejectedBy("weekly_overtimes_charged_check",
+                    () -> week(LocalDate.of(2026, 5, 3), LocalDate.of(2026, 5, 10),
+                            2_520, 120, 180));
+        }
+
+        @Test
+        @DisplayName("月をまたぐ週は超過の一部だけを当該月に計上できる")
+        void partialCharge() {
+            accepted(() -> week(LocalDate.of(2026, 5, 3), LocalDate.of(2026, 5, 10),
+                    2_520, 120, 60));
         }
 
         @Test

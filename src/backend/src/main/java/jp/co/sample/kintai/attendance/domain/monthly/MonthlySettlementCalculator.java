@@ -113,8 +113,14 @@ public final class MonthlySettlementCalculator {
         Duration daily = sum(inPeriod, DailyAttendance::overtimeBeyondStatutoryTime);
         Duration weekly = weeklyRule.totalChargedTo(weeks, period.month());
         Duration carriedOver = chargedCarryOver(carryOvers, period);
+        // 内訳は対象月に触れる週だけ。走査範囲は月をはみ出すので、
+        // 絞らないと前月・翌月だけの週まで内訳に並ぶ
+        List<WeeklyOvertimeCharge> breakdown = weeks.stream()
+                .filter(week -> overlaps(week, period))
+                .map(week -> WeeklyOvertimeCharge.of(week, period.month()))
+                .toList();
         return new Overtime(daily, weekly, carriedOver,
-                daily.plus(weekly).plus(carriedOver), weeks);
+                daily.plus(weekly).plus(carriedOver), breakdown);
     }
 
     /**
@@ -217,6 +223,12 @@ public final class MonthlySettlementCalculator {
      * 内訳を分け忘れる形の欠陥を構造で防ぐ。
      */
     private record Overtime(Duration daily, Duration weekly, Duration carriedOver,
-                            Duration total, List<WeeklyOvertime> weeks) {
+                            Duration total, List<WeeklyOvertimeCharge> weeks) {
+    }
+
+    /** その週が清算期間に 1 日でもかかっているか。 */
+    private static boolean overlaps(WeeklyOvertime week, SettlementPeriod period) {
+        return week.weekStart().isBefore(period.period().toExclusive())
+                && week.weekEndExclusive().isAfter(period.period().from());
     }
 }

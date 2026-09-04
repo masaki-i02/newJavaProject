@@ -3,9 +3,11 @@ package jp.co.sample.kintai.attendance.domain.monthly;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.WorkSlice;
@@ -65,26 +67,73 @@ public final class HolidayCarryOverRule {
 
         List<HolidayCarryOver> result = new ArrayList<>();
         carriedByDate.forEach((date, carried) -> {
-            Duration calendarDayTime = sumOn(days, date,
+            List<Owned> onDate = slicesOn(days, date);
+            Duration calendarDayTime = total(onDate,
                     slice -> !slice.has(PremiumType.LEGAL_HOLIDAY));
-            Duration alreadyBeyond = sumOn(days, date,
+            Duration alreadyBeyond = total(onDate,
                     slice -> slice.has(PremiumType.OVERTIME_BEYOND_STATUTORY));
 
-            // ★ 既に法定外残業として計上済みの分を引く。これが二重計上を防ぐ要である
-            Duration beyond = floorAtZero(calendarDayTime.minus(statutoryDaily));
-            Duration additional = floorAtZero(beyond.minus(alreadyBeyond));
-
-            result.add(new HolidayCarryOver(date, carried, calendarDayTime,
-                    alreadyBeyond, additional));
+            result.add(new HolidayCarryOver(date, carried, calendarDayTime, alreadyBeyond,
+                    additionalByWorkDate(onDate)));
         });
         return List.copyOf(result);
     }
 
-    /** 通算で新たに生じた法定外残業の合計。 */
-    public static Duration totalAdditionalOvertime(List<HolidayCarryOver> carryOvers) {
-        return carryOvers.stream()
-                .map(HolidayCarryOver::additionalOvertime)
-                .reduce(Duration.ZERO, Duration::plus);
+    /**
+     * 通算で新たに法定外残業になった時間を、<strong>勤務日ごとに</strong>求める。
+     *
+     * <p>その暦日の労働を<strong>時系列に</strong>並べて累積し、法定労働時間を超えた部分が
+     * どの勤務日のものかで振り分ける。日次の残業判定（{@code DailyOvertimeRule}）が
+     * 1 勤務日の中で行っていることを、暦日をまたいで行う形になる。
+     *
+     * <p>既に法定外残業として計上済みの分は<strong>勤務日ごとに</strong>引く。
+     * これが二重計上を防ぐ要である。合計で引くと、
+     * 別の勤務日で計上済みの分を差し引いてしまう。
+     */
+    private Map<LocalDate, Duration> additionalByWorkDate(List<Owned> onDate) {
+        Map<LocalDate, Duration> shouldBe = new TreeMap<>();
+        Map<LocalDate, Duration> already = new TreeMap<>();
+        Duration accumulated = Duration.ZERO;
+
+        for (Owned owned : onDate) {
+            WorkSlice slice = owned.slice();
+            if (slice.has(PremiumType.LEGAL_HOLIDAY)) {
+                continue;   // 法定休日労働は時間外労働に算入しない（BR-07）
+            }
+            if (slice.has(PremiumType.OVERTIME_BEYOND_STATUTORY)) {
+                already.merge(owned.workDate(), slice.duration(), Duration::plus);
+            }
+            Duration beyondPart = beyondPartOf(accumulated, slice.duration());
+            if (beyondPart.isPositive()) {
+                shouldBe.merge(owned.workDate(), beyondPart, Duration::plus);
+            }
+            accumulated = accumulated.plus(slice.duration());
+        }
+
+        Map<LocalDate, Duration> additional = new TreeMap<>();
+        shouldBe.forEach((workDate, value) -> {
+            Duration net = floorAtZero(
+                    value.minus(already.getOrDefault(workDate, Duration.ZERO)));
+            if (net.isPositive()) {
+                additional.put(workDate, net);
+            }
+        });
+        return additional;
+    }
+
+    /**
+     * 累積が {@code accumulated} の位置にある長さ {@code length} の区間のうち、
+     * 法定労働時間を超えている部分の長さ。
+     */
+    private Duration beyondPartOf(Duration accumulated, Duration length) {
+        Duration end = accumulated.plus(length);
+        if (end.compareTo(statutoryDaily) <= 0) {
+            return Duration.ZERO;
+        }
+        Duration beyondStart = accumulated.compareTo(statutoryDaily) >= 0
+                ? accumulated
+                : statutoryDaily;
+        return end.minus(beyondStart);
     }
 
     /**
@@ -113,14 +162,31 @@ public final class HolidayCarryOverRule {
         return carried;
     }
 
-    private static Duration sumOn(List<DailyAttendance> days, LocalDate calendarDate,
-                                  java.util.function.Predicate<WorkSlice> filter) {
+    /**
+     * その暦日の区間を、<strong>持ち主の勤務日つきで</strong>時系列に並べる。
+     *
+     * <p>暦日をまたいだ通算では、同じ暦日に 2 つの勤務日の区間が現れる。
+     * どちらのものかを落とすと、超過をどの勤務日（＝どの週）へ振り分けるかが決まらない。
+     */
+    private static List<Owned> slicesOn(List<DailyAttendance> days, LocalDate calendarDate) {
         return days.stream()
-                .flatMap(day -> day.slices().stream())
-                .filter(slice -> slice.calendarDate().equals(calendarDate))
+                .flatMap(day -> day.slices().stream()
+                        .filter(slice -> slice.calendarDate().equals(calendarDate))
+                        .map(slice -> new Owned(day.workDate(), slice)))
+                .sorted(Comparator.comparing(owned -> owned.slice().range().start()))
+                .toList();
+    }
+
+    private static Duration total(List<Owned> slices, Predicate<WorkSlice> filter) {
+        return slices.stream()
+                .map(Owned::slice)
                 .filter(filter)
                 .map(WorkSlice::duration)
                 .reduce(Duration.ZERO, Duration::plus);
+    }
+
+    /** 区間と、その区間が属する勤務日。 */
+    private record Owned(LocalDate workDate, WorkSlice slice) {
     }
 
     private static Duration floorAtZero(Duration value) {

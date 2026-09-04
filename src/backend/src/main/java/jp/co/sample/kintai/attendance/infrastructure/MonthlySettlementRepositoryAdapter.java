@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 import jp.co.sample.kintai.attendance.domain.monthly.AgreementUsage;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlement;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementRepository;
-import jp.co.sample.kintai.attendance.domain.monthly.WeeklyOvertime;
+import jp.co.sample.kintai.attendance.domain.monthly.WeeklyOvertimeCharge;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
@@ -90,14 +90,16 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 usage.exceedsCombinedSingleMonth(),
                 java.time.OffsetDateTime.now(clock));
 
-        for (WeeklyOvertime week : settlement.weeklyBreakdown()) {
+        for (WeeklyOvertimeCharge week : settlement.weeklyBreakdown()) {
             jdbc.update("""
                     INSERT INTO weekly_overtimes (id, monthly_settlement_id, week_start,
-                            week_end_exclusive, statutory_inside_minutes, overtime_minutes)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                            week_end_exclusive, statutory_inside_minutes, overtime_minutes,
+                            charged_minutes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     UUID.randomUUID(), id, week.weekStart(), week.weekEndExclusive(),
-                    minutes(week.statutoryInsideTime()), minutes(week.overtimeTime()));
+                    minutes(week.statutoryInsideTime()), minutes(week.weekOvertimeTime()),
+                    minutes(week.chargedTime()));
         }
     }
 
@@ -171,19 +173,20 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
         return Duration.ofMinutes(total == null ? 0 : total);
     }
 
-    private List<WeeklyOvertime> weeksOf(UUID settlementId) {
+    private List<WeeklyOvertimeCharge> weeksOf(UUID settlementId) {
         return jdbc.query("""
                 SELECT week_start, week_end_exclusive, statutory_inside_minutes,
-                       overtime_minutes
+                       overtime_minutes, charged_minutes
                 FROM weekly_overtimes
                 WHERE monthly_settlement_id = ?
                 ORDER BY week_start
                 """,
-                (rs, rowNum) -> new WeeklyOvertime(
+                (rs, rowNum) -> new WeeklyOvertimeCharge(
                         rs.getObject("week_start", LocalDate.class),
                         rs.getObject("week_end_exclusive", LocalDate.class),
                         of(rs.getInt("statutory_inside_minutes")),
-                        of(rs.getInt("overtime_minutes"))),
+                        of(rs.getInt("overtime_minutes")),
+                        of(rs.getInt("charged_minutes"))),
                 settlementId);
     }
 

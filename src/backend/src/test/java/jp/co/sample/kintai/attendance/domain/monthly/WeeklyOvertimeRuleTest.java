@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -42,7 +43,7 @@ class WeeklyOvertimeRuleTest {
             // 月〜金に 7 時間ずつ = 35 時間
             var week = DailyAttendances.week(SUN.plusDays(1), 5, Duration.ofHours(7));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks).hasSize(1);
             assertThat(weeks.get(0).statutoryInsideTime()).isEqualTo(Duration.ofHours(35));
@@ -56,7 +57,7 @@ class WeeklyOvertimeRuleTest {
             // 月〜土に 7 時間ずつ = 42 時間
             var week = DailyAttendances.week(SUN.plusDays(1), 6, Duration.ofHours(7));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks.get(0).statutoryInsideTime()).isEqualTo(Duration.ofHours(42));
             assertThat(weeks.get(0).overtimeTime()).isEqualTo(Duration.ofHours(2));
@@ -77,7 +78,7 @@ class WeeklyOvertimeRuleTest {
                     DailyAttendances.fixedDay(SUN.plusDays(3), Duration.ofHours(10)),
                     DailyAttendances.fixedDay(SUN.plusDays(4), Duration.ofHours(10)));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks.get(0).statutoryInsideTime())
                     .as("8 時間 × 4 日。超過分は日次で計上済み")
@@ -90,7 +91,7 @@ class WeeklyOvertimeRuleTest {
         void exactlyForty() {
             var week = DailyAttendances.week(SUN.plusDays(1), 5, Duration.ofHours(8));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks.get(0).statutoryInsideTime()).isEqualTo(FORTY_HOURS);
             assertThat(weeks.get(0).overtimeTime()).isZero();
@@ -109,7 +110,7 @@ class WeeklyOvertimeRuleTest {
                     // 日曜（法定休日）に 8 時間
                     DailyAttendances.legalHolidayDay(SUN, Duration.ofHours(8)));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks.get(0).statutoryInsideTime())
                     .as("法定休日の 8 時間は含まない").isEqualTo(FORTY_HOURS);
@@ -122,23 +123,70 @@ class WeeklyOvertimeRuleTest {
     class WeekBoundary {
 
         /**
-         * <strong>末日が属する月に計上する</strong>（設計書 3.2）。
-         * 週の労働時間が確定するのは末日であり、それ以前に時間外を確定できない。
+         * <strong>超過が発生した暦日の属する月に計上する</strong>（設計書 3.2）。
+         *
+         * <p>4/27(月)〜5/2(土) に 7 時間ずつ。40 時間に達するのは 5/1(金) の途中で、
+         * 超過 2 時間は 5/1 の 1 時間と 5/2 の 1 時間に分かれる。どちらも 5 月。
          */
         @Test
-        @DisplayName("UT-BR04-04 月をまたぐ週は末日が属する月に計上される")
-        void chargedToTheMonthOfTheLastDay() {
-            // 2026-04-26(日) 〜 2026-05-02(土) の週。末日は 5 月
+        @DisplayName("UT-BR04-04 月をまたぐ週は超過が発生した日の属する月に計上される")
+        void chargedToTheMonthTheExcessOccurred() {
+            // 2026-04-26(日) 〜 2026-05-02(土) の週
             var weekStart = LocalDate.of(2026, 4, 26);
             var week = DailyAttendances.week(weekStart.plusDays(1), 6, Duration.ofHours(7));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
-            assertThat(weeks.get(0).chargedMonth()).isEqualTo(YearMonth.of(2026, 5));
+            assertThat(weeks.get(0).chargedMonths()).containsExactly(YearMonth.of(2026, 5));
             assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 5)))
                     .isEqualTo(Duration.ofHours(2));
             assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 4)))
-                    .as("4 月には計上されない").isZero();
+                    .as("4 月には超過が発生していない").isZero();
+        }
+
+        /**
+         * <strong>末日基準だと、この週の超過は誰にも計上されない。</strong>
+         * 7/26(日)〜7/31(金) に 8 時間ずつ働き 7/31 に退職した社員を考える。
+         * 週は 8/1(土) に終わるので、末日基準では 8 月に計上されるが、
+         * 8 月は在籍していないので清算そのものが行われない。
+         */
+        @Test
+        @DisplayName("UT-BR04-16 週の末日が翌月でも、超過が当月に発生していれば当月に計上する")
+        void excessInTheCurrentMonthIsChargedToIt() {
+            // 2026-07-26(日) 〜 8/1(土) の週。7/26〜7/31 の 6 日に 8 時間ずつ = 48 時間
+            var week = DailyAttendances.week(LocalDate.of(2026, 7, 26), 6,
+                    Duration.ofHours(8));
+
+            var weeks = rule.apply(week, List.of());
+
+            assertThat(weeks.get(0).weekEndExclusive()).isEqualTo(LocalDate.of(2026, 8, 2));
+            assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 7)))
+                    .as("超過 8 時間は 7/31 に発生している")
+                    .isEqualTo(Duration.ofHours(8));
+            assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 8)))
+                    .as("8 月には 1 分も働いていない").isZero();
+        }
+
+        /**
+         * 週が月をまたぎ、超過も月をまたぐ場合。
+         * <strong>週の合計を片方の月へ寄せない。</strong>
+         */
+        @Test
+        @DisplayName("UT-BR04-17 超過が月をまたぐと、日ごとにそれぞれの月へ分かれる")
+        void excessSplitsAcrossMonths() {
+            // 2026-04-26(日) 〜 5/2(土) に 8 時間ずつ 7 日 = 56 時間。
+            // 40 時間に達するのは 5 日目（4/30）の終わり。超過 16 時間は 5/1 と 5/2 に 8 時間ずつ…
+            // ではなく、4/26 から数えるので 4/26〜4/30 で 40 時間、5/1・5/2 が超過
+            var week = DailyAttendances.week(LocalDate.of(2026, 4, 26), 7,
+                    Duration.ofHours(8));
+
+            var weeks = rule.apply(week, List.of());
+
+            assertThat(weeks.get(0).overtimeTime()).isEqualTo(Duration.ofHours(16));
+            assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 4)))
+                    .as("4/26〜4/30 の 40 時間で上限に達する").isZero();
+            assertThat(rule.totalChargedTo(weeks, YearMonth.of(2026, 5)))
+                    .isEqualTo(Duration.ofHours(16));
         }
 
         /**
@@ -178,7 +226,7 @@ class WeeklyOvertimeRuleTest {
         void weekRunsFromSundayToSaturday() {
             var week = DailyAttendances.week(SUN, 7, Duration.ofHours(1));
 
-            var weeks = rule.apply(week);
+            var weeks = rule.apply(week, List.of());
 
             assertThat(weeks).hasSize(1);
             assertThat(weeks.get(0).weekStart()).isEqualTo(SUN);
@@ -192,7 +240,7 @@ class WeeklyOvertimeRuleTest {
                     DailyAttendances.fixedDay(SUN.plusDays(6), Duration.ofHours(8)),
                     DailyAttendances.fixedDay(SUN.plusDays(7), Duration.ofHours(8)));
 
-            var weeks = rule.apply(days);
+            var weeks = rule.apply(days, List.of());
 
             assertThat(weeks).hasSize(2);
             assertThat(weeks.get(0).weekStart()).isEqualTo(SUN);
@@ -216,7 +264,8 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("時間外が法定内労働を超える値では生成できない")
         void overtimeCannotExceedInside() {
             assertThatThrownBy(() -> new WeeklyOvertime(SUN, SUN.plusDays(7),
-                    Duration.ofHours(10), Duration.ofHours(11)))
+                    Duration.ofHours(10), Duration.ofHours(11),
+                    Map.of(YearMonth.of(2026, 4), Duration.ofHours(11))))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("週の時間外が法定内労働を超えています");
         }
@@ -224,7 +273,7 @@ class WeeklyOvertimeRuleTest {
         @Test
         @DisplayName("日次勤怠が 1 件も無ければ週も無い")
         void noDays() {
-            assertThat(rule.apply(List.of())).isEmpty();
+            assertThat(rule.apply(List.of(), List.of())).isEmpty();
         }
     }
 }

@@ -124,6 +124,7 @@ CREATE TABLE weekly_overtimes (
     week_end_exclusive      date NOT NULL,
     statutory_inside_minutes int NOT NULL,
     overtime_minutes         int NOT NULL,
+    charged_minutes          int NOT NULL DEFAULT 0,
 
     -- 週は必ず 7 日間。上限は半開区間なので +7
     CONSTRAINT weekly_overtimes_span_check
@@ -132,7 +133,11 @@ CREATE TABLE weekly_overtimes (
     CONSTRAINT weekly_overtimes_start_dow_check
         CHECK (extract(isodow FROM week_start) = 7),
     CONSTRAINT weekly_overtimes_non_negative_check
-        CHECK (statutory_inside_minutes >= 0 AND overtime_minutes >= 0),
+        CHECK (statutory_inside_minutes >= 0 AND overtime_minutes >= 0
+               AND charged_minutes >= 0),
+    -- ★ 月をまたぐ週は超過が 2 つの月に分かれる。片方の月が週の全部を引き受けることはない
+    CONSTRAINT weekly_overtimes_charged_check
+        CHECK (charged_minutes <= overtime_minutes),
     -- ★ 40 時間を超えた分が時間外。算出式を制約にする
     CONSTRAINT weekly_overtimes_calculation_check
         CHECK (overtime_minutes = greatest(0, statutory_inside_minutes - 2400)),
