@@ -207,6 +207,18 @@ public final class Organization {
             }
 
             @Override
+            public boolean existsActiveCode(DepartmentCode code) {
+                return departments.values().stream()
+                        .filter(d -> d.abolishedOn().isEmpty())
+                        .anyMatch(d -> d.code().equals(code));
+            }
+
+            @Override
+            public void lockForHierarchyChange() {
+                // 代役は 1 スレッドの中で完結するので、直列化する相手がいない
+            }
+
+            @Override
             public void save(Department department) {
                 departments.put(department.id(), department);
             }

@@ -16,9 +16,12 @@ import jp.co.sample.kintai.employee.domain.DepartmentRepository;
 class DepartmentRepositoryAdapter implements DepartmentRepository {
 
     private final DepartmentJpaRepository jpa;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    DepartmentRepositoryAdapter(DepartmentJpaRepository jpa) {
+    DepartmentRepositoryAdapter(DepartmentJpaRepository jpa,
+                                org.springframework.jdbc.core.JdbcTemplate jdbc) {
         this.jpa = jpa;
+        this.jdbc = jdbc;
     }
 
     @Override
@@ -42,6 +45,27 @@ class DepartmentRepositoryAdapter implements DepartmentRepository {
     public List<Department> findSelfAndDescendants(DepartmentId departmentId) {
         return jpa.findSelfAndDescendants(departmentId.value()).stream()
                 .map(DepartmentRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
+    public boolean existsActiveCode(DepartmentCode code) {
+        return jpa.findAllByOrderByCode().stream()
+                .filter(row -> row.getAbolishedOn() == null)
+                .anyMatch(row -> row.getCode().equals(code.value()));
+    }
+
+    /**
+     * 階層の変更を直列化する。
+     *
+     * <p><strong>{@code SHARE ROW EXCLUSIVE} を取る。</strong>
+     * 同じロックどうしは互いに排他するが、通常の {@code SELECT} は妨げない。
+     * 親の変更が走っている間も、組織図の参照は止まらない。
+     *
+     * <p>ロックはトランザクションの終了で自動的に解放される。
+     */
+    @Override
+    public void lockForHierarchyChange() {
+        jdbc.execute("LOCK TABLE departments IN SHARE ROW EXCLUSIVE MODE");
     }
 
     @Override

@@ -42,7 +42,25 @@ public final class PostgresSupport {
         return System.getProperty(URL_PROPERTY) != null;
     }
 
+    /**
+     * 1 つの Spring コンテキストが握る接続の数。
+     *
+     * <p><strong>既定（10）のままだとテスト全体で接続を使い切る。</strong>
+     * {@code @TestBean} で時計を差し替えるたびに別のコンテキストが作られ、
+     * そのそれぞれが接続プールを持つ。10 個ほど積み上がると
+     * PostgreSQL の {@code max_connections}（既定 100）に届き、
+     * <strong>後から起動したコンテキストが「too many clients」で丸ごと落ちる。</strong>
+     *
+     * <p>テストは 1 スレッドで走るので、1 コンテキストあたり 2 本あれば足りる。
+     */
+    private static final int TEST_POOL_SIZE = 2;
+
     public static void register(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.hikari.maximum-pool-size",
+                () -> String.valueOf(TEST_POOL_SIZE));
+        // 使われていない接続を抱え続けない。別のコンテキストへ早く返す
+        registry.add("spring.datasource.hikari.minimum-idle", () -> "0");
+        registry.add("spring.datasource.hikari.idle-timeout", () -> "10000");
         if (usesExternalDatabase()) {
             registry.add("spring.datasource.url", () -> System.getProperty(URL_PROPERTY));
             registry.add("spring.datasource.username",

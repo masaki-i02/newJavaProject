@@ -21,5 +21,20 @@ public interface DepartmentRepository {
     /** 自分自身と配下すべて。組織図の閲覧範囲の絞り込みに使う。 */
     List<Department> findSelfAndDescendants(DepartmentId departmentId);
 
+    /** その部署コードが<strong>現存する部署</strong>で使われているか。廃止済みは数えない。 */
+    boolean existsActiveCode(DepartmentCode code);
+
+    /**
+     * 階層の変更を直列化する。
+     *
+     * <p><strong>循環検出トリガは他トランザクションの未コミットの変更を見ない。</strong>
+     * 「A の親を C に」「C の親を A に」が同時に走ると、
+     * どちらのトリガも循環を見つけられないまま両方がコミットされ、循環が成立する。
+     *
+     * <p>親の変更は稀な操作なので、テーブルロックで十分である。
+     * {@code application} 層が親を変える前に呼ぶ。
+     */
+    void lockForHierarchyChange();
+
     void save(Department department);
 }
