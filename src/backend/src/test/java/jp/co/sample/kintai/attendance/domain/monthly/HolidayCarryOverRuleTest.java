@@ -20,7 +20,7 @@ import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkingTimeSystem;
 
 /**
- * 法定休日から翌暦日への通算（UT-BR07-01〜08）。
+ * 法定休日から翌暦日への通算（UT-BR07-01〜12）。
  *
  * <p><strong>日次勤怠は本番の {@link DailyAttendanceCalculator} を通して作る。</strong>
  * この規則が読むのは「どの区間に {@code LEGAL_HOLIDAY} が付いているか」
@@ -97,7 +97,7 @@ class HolidayCarryOverRuleTest {
      * 引かないと、同じ時間を日次の法定外残業としても通算分としても数える。
      */
     @Test
-    @DisplayName("既に法定外残業に計上済みの時間を通算で二重に数えない")
+    @DisplayName("UT-BR07-11 既に法定外残業に計上済みの時間を通算で二重に数えない")
     void doesNotDoubleCountAlreadyBeyondTime() {
         // 月曜 9:00–20:00（休憩 1 時間）= 実労働 10 時間 → 日次で 2 時間が法定外残業
         var longMonday = day(MONDAY, Punches.on("2026-05-04").in("09:00")
@@ -225,7 +225,7 @@ class HolidayCarryOverRuleTest {
 
     /** 翌日も法定休日なら持ち越しにならない。区間は暦日で判断されている。 */
     @Test
-    @DisplayName("翌暦日も法定休日なら、その区間は休日労働のままで通算しない")
+    @DisplayName("UT-BR07-12 翌暦日も法定休日なら、その区間は休日労働のままで通算しない")
     void nextCalendarDayIsAlsoALegalHoliday() {
         calendar.legalHoliday(MONDAY);
         var days = List.of(holidayNightShift(WorkRules.fixed()));

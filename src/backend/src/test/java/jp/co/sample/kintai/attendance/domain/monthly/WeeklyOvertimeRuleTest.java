@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.support.DailyAttendances;
+import jp.co.sample.kintai.support.TestCalendar;
 
 /**
  * 週 40 時間超の判定（UT-BR04-01〜07）。
@@ -30,6 +31,20 @@ class WeeklyOvertimeRuleTest {
     private static final Duration FORTY_HOURS = Duration.ofHours(40);
     private final WeeklyOvertimeRule rule = new WeeklyOvertimeRule(FORTY_HOURS);
 
+    /**
+     * 日次は本番の計算を通して作る。
+     * 法定休日として扱う日はカレンダーへ登録しておく（{@code days.legalHolidayDay}）。
+     */
+    private final TestCalendar calendar = TestCalendar.allWorkdays();
+    private final DailyAttendances days = new DailyAttendances(calendar);
+
+    /** カレンダーへ法定休日として登録してから作る。 */
+    private jp.co.sample.kintai.attendance.domain.DailyAttendance legalHolidayOn(
+            LocalDate date, Duration worked) {
+        calendar.legalHoliday(date);
+        return days.legalHolidayDay(date, worked);
+    }
+
     /** 2026-04-05 は日曜。この週は 4/5(日)〜4/11(土)。 */
     private static final LocalDate SUN = LocalDate.of(2026, 4, 5);
 
@@ -41,7 +56,7 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("UT-BR04-01 週の法定内労働が 40 時間以内なら週 40 時間超は 0")
         void withinForty() {
             // 月〜金に 7 時間ずつ = 35 時間
-            var week = DailyAttendances.week(SUN.plusDays(1), 5, Duration.ofHours(7));
+            var week = days.week(SUN.plusDays(1), 5, Duration.ofHours(7));
 
             var weeks = rule.apply(week, List.of());
 
@@ -55,7 +70,7 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("UT-BR04-02 週の法定内労働が 42 時間なら 2 時間が週 40 時間超")
         void overForty() {
             // 月〜土に 7 時間ずつ = 42 時間
-            var week = DailyAttendances.week(SUN.plusDays(1), 6, Duration.ofHours(7));
+            var week = days.week(SUN.plusDays(1), 6, Duration.ofHours(7));
 
             var weeks = rule.apply(week, List.of());
 
@@ -73,10 +88,10 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("UT-BR04-03 1 日 10 時間 × 4 日は週 40 時間超にならない（二重計上しない）")
         void doesNotDoubleCountDailyOvertime() {
             var week = List.of(
-                    DailyAttendances.fixedDay(SUN.plusDays(1), Duration.ofHours(10)),
-                    DailyAttendances.fixedDay(SUN.plusDays(2), Duration.ofHours(10)),
-                    DailyAttendances.fixedDay(SUN.plusDays(3), Duration.ofHours(10)),
-                    DailyAttendances.fixedDay(SUN.plusDays(4), Duration.ofHours(10)));
+                    days.fixedDay(SUN.plusDays(1), Duration.ofHours(10)),
+                    days.fixedDay(SUN.plusDays(2), Duration.ofHours(10)),
+                    days.fixedDay(SUN.plusDays(3), Duration.ofHours(10)),
+                    days.fixedDay(SUN.plusDays(4), Duration.ofHours(10)));
 
             var weeks = rule.apply(week, List.of());
 
@@ -89,7 +104,7 @@ class WeeklyOvertimeRuleTest {
         @Test
         @DisplayName("UT-BR04-06 週の法定内労働がちょうど 40 時間なら 0")
         void exactlyForty() {
-            var week = DailyAttendances.week(SUN.plusDays(1), 5, Duration.ofHours(8));
+            var week = days.week(SUN.plusDays(1), 5, Duration.ofHours(8));
 
             var weeks = rule.apply(week, List.of());
 
@@ -102,13 +117,13 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("UT-BR04-08 法定休日労働は週 40 時間の判定に入れない")
         void legalHolidayIsExcluded() {
             var week = List.of(
-                    DailyAttendances.fixedDay(SUN.plusDays(1), Duration.ofHours(8)),
-                    DailyAttendances.fixedDay(SUN.plusDays(2), Duration.ofHours(8)),
-                    DailyAttendances.fixedDay(SUN.plusDays(3), Duration.ofHours(8)),
-                    DailyAttendances.fixedDay(SUN.plusDays(4), Duration.ofHours(8)),
-                    DailyAttendances.fixedDay(SUN.plusDays(5), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(1), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(2), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(3), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(4), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(5), Duration.ofHours(8)),
                     // 日曜（法定休日）に 8 時間
-                    DailyAttendances.legalHolidayDay(SUN, Duration.ofHours(8)));
+                    legalHolidayOn(SUN, Duration.ofHours(8)));
 
             var weeks = rule.apply(week, List.of());
 
@@ -133,7 +148,7 @@ class WeeklyOvertimeRuleTest {
         void chargedToTheMonthTheExcessOccurred() {
             // 2026-04-26(日) 〜 2026-05-02(土) の週
             var weekStart = LocalDate.of(2026, 4, 26);
-            var week = DailyAttendances.week(weekStart.plusDays(1), 6, Duration.ofHours(7));
+            var week = days.week(weekStart.plusDays(1), 6, Duration.ofHours(7));
 
             var weeks = rule.apply(week, List.of());
 
@@ -154,7 +169,7 @@ class WeeklyOvertimeRuleTest {
         @DisplayName("UT-BR04-16 週の末日が翌月でも、超過が当月に発生していれば当月に計上する")
         void excessInTheCurrentMonthIsChargedToIt() {
             // 2026-07-26(日) 〜 8/1(土) の週。7/26〜7/31 の 6 日に 8 時間ずつ = 48 時間
-            var week = DailyAttendances.week(LocalDate.of(2026, 7, 26), 6,
+            var week = days.week(LocalDate.of(2026, 7, 26), 6,
                     Duration.ofHours(8));
 
             var weeks = rule.apply(week, List.of());
@@ -177,7 +192,7 @@ class WeeklyOvertimeRuleTest {
             // 2026-04-26(日) 〜 5/2(土) に 8 時間ずつ 7 日 = 56 時間。
             // 40 時間に達するのは 5 日目（4/30）の終わり。超過 16 時間は 5/1 と 5/2 に 8 時間ずつ…
             // ではなく、4/26 から数えるので 4/26〜4/30 で 40 時間、5/1・5/2 が超過
-            var week = DailyAttendances.week(LocalDate.of(2026, 4, 26), 7,
+            var week = days.week(LocalDate.of(2026, 4, 26), 7,
                     Duration.ofHours(8));
 
             var weeks = rule.apply(week, List.of());
@@ -224,7 +239,7 @@ class WeeklyOvertimeRuleTest {
         @Test
         @DisplayName("UT-BR04-10 日曜から土曜までが 1 つの週になる")
         void weekRunsFromSundayToSaturday() {
-            var week = DailyAttendances.week(SUN, 7, Duration.ofHours(1));
+            var week = days.week(SUN, 7, Duration.ofHours(1));
 
             var weeks = rule.apply(week, List.of());
 
@@ -236,11 +251,11 @@ class WeeklyOvertimeRuleTest {
         @Test
         @DisplayName("次の日曜からは別の週になる")
         void nextSundayStartsANewWeek() {
-            var days = List.of(
-                    DailyAttendances.fixedDay(SUN.plusDays(6), Duration.ofHours(8)),
-                    DailyAttendances.fixedDay(SUN.plusDays(7), Duration.ofHours(8)));
+            var twoDays = List.of(
+                    days.fixedDay(SUN.plusDays(6), Duration.ofHours(8)),
+                    days.fixedDay(SUN.plusDays(7), Duration.ofHours(8)));
 
-            var weeks = rule.apply(days, List.of());
+            var weeks = rule.apply(twoDays, List.of());
 
             assertThat(weeks).hasSize(2);
             assertThat(weeks.get(0).weekStart()).isEqualTo(SUN);

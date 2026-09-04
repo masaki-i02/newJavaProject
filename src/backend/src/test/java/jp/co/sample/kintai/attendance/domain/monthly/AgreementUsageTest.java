@@ -14,6 +14,10 @@ import org.junit.jupiter.api.Test;
 /**
  * 36 協定の上限監視（UT-BR12-01〜10）。
  *
+ * <p>法定内残業を数えないことは、この record では表現できない。
+ * 法定内残業は日次で別の区分に分けられ {@code overtimeTime} に届かないので、
+ * <strong>月次清算を通して検査する</strong>（UT-BR12-03 / UT-BR04-13）。
+ *
  * <p><strong>2 つの規制で対象が違うことが要点である。</strong>
  * 限度時間（月 45 時間・年 360 時間）の対象は時間外労働だけで、休日労働は含まない
  * （36 条 3 項・4 項）。休日労働を含めるのは 6 項 2 号の単月 100 時間未満である。
@@ -56,25 +60,6 @@ class AgreementUsageTest {
                     .as("6 項の対象は時間外 + 休日").isEqualTo(Duration.ofHours(52));
             assertThat(result.exceedsMonthly()).isFalse();
             assertThat(result.hasWarning()).isFalse();
-        }
-
-        /**
-         * <strong>法定内残業は 36 協定の対象外。</strong>
-         * 所定を超えても法定 8 時間以内なら時間外労働ではない。
-         *
-         * <p>ここは <strong>{@code overtimeTime} に何を渡すかで表現している。</strong>
-         * 法定内残業は日次で {@code OVERTIME_WITHIN_STATUTORY} に分類され、
-         * {@code MonthlySettlement.overtimeTime} には入らないので、
-         * この record にはそもそも届かない。
-         * その事実を月次清算側で検査するのが UT-BR04-13 である。
-         */
-        @Test
-        @DisplayName("UT-BR12-03 法定内残業は時間外労働に含まれないので上限に触れない")
-        void withinStatutoryOvertimeIsNotSubject() {
-            var result = usage(Duration.ZERO, Duration.ZERO);
-
-            assertThat(result.subjectTime()).isZero();
-            assertThat(result.exceedsMonthly()).isFalse();
         }
 
         @Test

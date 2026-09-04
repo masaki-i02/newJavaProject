@@ -22,6 +22,7 @@ import jp.co.sample.kintai.support.DailyAttendances;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
+import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
@@ -48,6 +49,9 @@ class MonthlySettlementCalculatorTest {
     private static final DateRange EMPLOYED = DateRange.startingAt(LocalDate.of(2020, 4, 1));
 
     private final TestCalendar calendar = TestCalendar.allWorkdays();
+
+    /** 日次は本番の計算を通して作る（CLAUDE.md 落とし穴 37）。 */
+    private final DailyAttendances daily = new DailyAttendances(calendar);
     private final MonthlySettlementCalculator calculator =
             new MonthlySettlementCalculator(calendar);
 
@@ -67,15 +71,34 @@ class MonthlySettlementCalculatorTest {
                 WorkRules.fixed(), Duration.ofHours(8), NightWindow.STANDARD);
     }
 
-    /** その月の平日に {@code perDay} ずつ働いた日次を作る。 */
-    private static List<DailyAttendance> flexDays(YearMonth month, int days,
-                                                  Duration perDay) {
+    /**
+     * その月の<strong>所定労働日</strong>に {@code perDay} ずつ働いた日次を {@code days} 日ぶん。
+     *
+     * <p>休日を飛ばす。飛ばさずに日曜へ置くと、本番の規則が法定休日労働と判定し、
+     * 対象労働時間から除かれてしまう（BR-07）。
+     */
+    private List<DailyAttendance> flexDays(YearMonth month, int days, Duration perDay) {
         List<DailyAttendance> result = new ArrayList<>();
         LocalDate date = month.atDay(1);
-        for (int i = 0; i < days; i++) {
-            result.add(DailyAttendances.flexDay(date.plusDays(i), perDay));
+        while (result.size() < days) {
+            if (calendar.dayTypeOf(date) == DayType.WORKDAY) {
+                result.add(daily.flexDay(date, perDay));
+            }
+            date = date.plusDays(1);
         }
         return result;
+    }
+
+    /**
+     * 合計が {@code total} になる実労働を、その月の所定労働日へ 8 時間ずつ配る。
+     *
+     * <p><strong>1 日に押し込まない。</strong>
+     * 「1 区間 177 時間の 1 日」は本番では決して現れず、
+     * 暦日境界も深夜帯もまたがないので、テストが実在しない形の上で回る。
+     */
+    private List<DailyAttendance> flexTotalling(YearMonth month, Duration total,
+                                                Duration perDay) {
+        return daily.flexDaysTotalling(month.atDay(1), total, perDay);
     }
 
     @Nested
@@ -184,8 +207,8 @@ class MonthlySettlementCalculatorTest {
         void exactlyAtTheLimit() {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
-            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
-                    Duration.ofMinutes(10_628)));
+            var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_628),
+                    Duration.ofHours(9));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
@@ -204,8 +227,8 @@ class MonthlySettlementCalculatorTest {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
             // 2026-05 の平日は 21 日。所定総 = 21 × 8 時間 = 10,080 分
-            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
-                    Duration.ofMinutes(10_080)));
+            var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_080),
+                    Duration.ofHours(9));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
@@ -224,9 +247,9 @@ class MonthlySettlementCalculatorTest {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
             var days = List.of(
-                    DailyAttendances.flexNightDay(LocalDate.of(2026, 5, 1),
+                    daily.flexNightDay(LocalDate.of(2026, 5, 1),
                             Duration.ofHours(10), Duration.ofHours(2)),
-                    DailyAttendances.flexNightDay(LocalDate.of(2026, 5, 4),
+                    daily.flexNightDay(LocalDate.of(2026, 5, 4),
                             Duration.ofHours(9), Duration.ofMinutes(30)));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
@@ -269,8 +292,8 @@ class MonthlySettlementCalculatorTest {
         void bothArePositive() {
             var june = period(2026, 6);
             weekdaysOnly(YearMonth.of(2026, 6));
-            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 6, 1),
-                    Duration.ofMinutes(10_400)));
+            var days = flexTotalling(YearMonth.of(2026, 6), Duration.ofMinutes(10_400),
+                    Duration.ofHours(9));
 
             var result = calculator.calculate(TARO, june, days, flexRule(), Duration.ZERO);
 
@@ -321,11 +344,10 @@ class MonthlySettlementCalculatorTest {
             // ★ 閾値をまたぐ数字を選ぶこと。総枠未満の値にすると、
             //   除いても除かなくても時間外 0 で、このテストは何も検査しない
             //   （CLAUDE.md 落とし穴 24・43）。
-            var days = List.of(
-                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
-                            Duration.ofMinutes(10_700)),
-                    DailyAttendances.legalHolidayDay(LocalDate.of(2026, 5, 3),
-                            Duration.ofHours(8)));
+            var days = new ArrayList<DailyAttendance>(
+                    flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_700),
+                            Duration.ofHours(9)));
+            days.add(daily.legalHolidayDay(LocalDate.of(2026, 5, 3), Duration.ofHours(8)));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
@@ -347,7 +369,7 @@ class MonthlySettlementCalculatorTest {
         void legalHolidaySplitsAcrossTheTwoLimits() {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
-            var days = List.of(DailyAttendances.legalHolidayDay(LocalDate.of(2026, 5, 3),
+            var days = List.of(daily.legalHolidayDay(LocalDate.of(2026, 5, 3),
                     Duration.ofHours(8)));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
@@ -376,7 +398,7 @@ class MonthlySettlementCalculatorTest {
             // 日次: 1 時間 × 6 = 6 時間。法定内は 8 時間 × 6 = 48 時間 → 週 8 時間超
             var days = new ArrayList<DailyAttendance>();
             for (int i = 0; i < 6; i++) {
-                days.add(DailyAttendances.fixedDay(LocalDate.of(2026, 5, 4).plusDays(i),
+                days.add(daily.fixedDay(LocalDate.of(2026, 5, 4).plusDays(i),
                         Duration.ofHours(9)));
             }
 
@@ -403,7 +425,7 @@ class MonthlySettlementCalculatorTest {
             weekdaysOnly(YearMonth.of(2026, 5));
             var days = new ArrayList<DailyAttendance>();
             for (int i = 0; i < 6; i++) {
-                days.add(DailyAttendances.fixedDay(LocalDate.of(2026, 5, 4).plusDays(i),
+                days.add(daily.fixedDay(LocalDate.of(2026, 5, 4).plusDays(i),
                         Duration.ofHours(9)));
             }
 
@@ -437,7 +459,7 @@ class MonthlySettlementCalculatorTest {
             while (worked < 20) {
                 if (calendar.dayTypeOf(date) == jp.co.sample.kintai.workrule.domain.DayType
                         .WORKDAY) {
-                    days.add(DailyAttendances.fixedDay(date,
+                    days.add(daily.fixedDay(date,
                             worked == 19 ? Duration.ofHours(12) : Duration.ofHours(8)));
                     worked++;
                 }
@@ -461,7 +483,7 @@ class MonthlySettlementCalculatorTest {
             weekdaysOnly(YearMonth.of(2026, 5));
             var days = new ArrayList<DailyAttendance>();
             for (int i = 0; i < 6; i++) {
-                days.add(DailyAttendances.flexDay(LocalDate.of(2026, 5, 4).plusDays(i),
+                days.add(daily.flexDay(LocalDate.of(2026, 5, 4).plusDays(i),
                         Duration.ofHours(9)));
             }
 
@@ -597,6 +619,32 @@ class MonthlySettlementCalculatorTest {
         }
 
         /**
+         * <strong>法定内残業は 36 協定の対象にもならない。</strong>
+         * 所定を超えても法定 8 時間以内なら時間外労働ではないので、
+         * どれだけ積んでも限度時間には触れない。
+         */
+        @Test
+        @DisplayName("UT-BR12-03 法定内残業だけの月は 36 協定の対象時間が 0")
+        void withinStatutoryOvertimeIsNotSubjectToTheAgreement() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            // 5/9・5/16・5/23・5/30 は土曜（所定休日・所定 0）。8 時間ずつで法定内残業 32 時間
+            var days = new ArrayList<DailyAttendance>();
+            for (int i = 0; i < 4; i++) {
+                days.add(daily.fixedDay(LocalDate.of(2026, 5, 9).plusWeeks(i),
+                        Duration.ofHours(8)));
+            }
+
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+
+            assertThat(result.workingTime()).isEqualTo(Duration.ofHours(32));
+            assertThat(result.overtimeTime()).isZero();
+            assertThat(result.agreementUsage().subjectTime())
+                    .as("法定内残業は 36 協定の対象ではない").isZero();
+            assertThat(result.hasAgreementWarning()).isFalse();
+        }
+
+        /**
          * <strong>制度で適用の有無は変わらない</strong>（要件定義書 0.5 の BR-05）。
          * 37 条 1 項但書は時間外労働一般に対する規定である。
          */
@@ -605,9 +653,9 @@ class MonthlySettlementCalculatorTest {
         void appliesToFlexAsWell() {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
-            // 総枠 10,628 分 + 70 時間（4,200 分）
-            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
-                    Duration.ofMinutes(10_628 + 4_200)));
+            // 総枠 10,628 分 + 70 時間（4,200 分）を平日 21 日へ配る
+            var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_628 + 4_200),
+                    Duration.ofHours(12));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
@@ -709,8 +757,8 @@ class MonthlySettlementCalculatorTest {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
             var days = List.of(
-                    DailyAttendances.flexDay(LocalDate.of(2026, 4, 30), Duration.ofHours(8)),
-                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
+                    daily.flexDay(LocalDate.of(2026, 4, 30), Duration.ofHours(8)),
+                    daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
@@ -747,8 +795,8 @@ class MonthlySettlementCalculatorTest {
         void duplicateWorkDateIsRejected() {
             var may = period(2026, 5);
             var days = List.of(
-                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)),
-                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
+                    daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)),
+                    daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
 
             assertThatThrownBy(() ->
                     calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
@@ -761,7 +809,7 @@ class MonthlySettlementCalculatorTest {
         void daysOutsideTheScanRangeAreRejected() {
             var may = period(2026, 5);
             var days = List.of(
-                    DailyAttendances.flexDay(LocalDate.of(2026, 3, 2), Duration.ofHours(8)));
+                    daily.flexDay(LocalDate.of(2026, 3, 2), Duration.ofHours(8)));
 
             assertThatThrownBy(() ->
                     calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
@@ -775,8 +823,8 @@ class MonthlySettlementCalculatorTest {
         void annualUsedBeforeReachesTheAgreement() {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
-            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
-                    Duration.ofMinutes(10_628 + 60)));
+            var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_628 + 60),
+                    Duration.ofHours(9));
 
             var result = calculator.calculate(TARO, may, days, flexRule(),
                     Duration.ofHours(359));
