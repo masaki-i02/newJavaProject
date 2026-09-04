@@ -695,6 +695,157 @@ class MonthlySettlementCalculatorTest {
                 .calculate(workDate, punches, WorkRules.rule(system));
     }
 
+    @Nested
+    @DisplayName("清算期間と走査範囲")
+    class Range {
+
+        /**
+         * <strong>集計は清算期間の中だけ。</strong>
+         * 走査範囲は月をはみ出すので、絞らないと前月・翌月の労働時間が合計に混じる。
+         */
+        @Test
+        @DisplayName("UT-BR05-22 走査範囲の外側の日は集計に入らない")
+        void daysOutsideThePeriodAreNotSummed() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            var days = List.of(
+                    DailyAttendances.flexDay(LocalDate.of(2026, 4, 30), Duration.ofHours(8)),
+                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+
+            assertThat(result.workingTime())
+                    .as("4/30 の 8 時間は 5 月の実労働ではない").isEqualTo(Duration.ofHours(8));
+        }
+
+        /**
+         * <strong>前月末の法定休日から持ち越した分を当月に計上しない。</strong>
+         * 持ち越し先の暦日が前月なら、それは前月の清算が引き受ける。
+         */
+        @Test
+        @DisplayName("UT-BR05-23 走査範囲に入る前月の通算分を当月に計上しない")
+        void carryOverIntoThePreviousMonthIsNotCharged() {
+            // 2026-06 の走査範囲は 5/31(日) から。5/31 は法定休日
+            var june = period(2026, 6);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            weekdaysOnly(YearMonth.of(2026, 6));
+            var days = new ArrayList<DailyAttendance>();
+            // 5/31(日・法定休日) 22:00 → 6/1(月) 06:00 は 6 月へ持ち越す
+            days.add(realDay(LocalDate.of(2026, 5, 31), Punches.on("2026-05-31").in("22:00")
+                    .out("2026-06-01T06:00").build(), WorkRules.fixed()));
+            days.add(realDay(LocalDate.of(2026, 6, 1), WorkRules.fixed()));
+
+            var result = calculator.calculate(TARO, june, days, fixedRule(), Duration.ZERO);
+
+            assertThat(result.carriedOverOvertimeTime())
+                    .as("持ち越し先の暦日 6/1 は 6 月なので 6 月が引き受ける")
+                    .isEqualTo(Duration.ofHours(6));
+        }
+
+        @Test
+        @DisplayName("UT-BR05-24 同じ勤務日の日次勤怠を 2 件渡すと例外になる")
+        void duplicateWorkDateIsRejected() {
+            var may = period(2026, 5);
+            var days = List.of(
+                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)),
+                    DailyAttendances.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
+
+            assertThatThrownBy(() ->
+                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("同じ勤務日の日次勤怠が 2 件以上あります");
+        }
+
+        @Test
+        @DisplayName("UT-BR05-25 走査範囲の外の日次勤怠を渡すと例外になる")
+        void daysOutsideTheScanRangeAreRejected() {
+            var may = period(2026, 5);
+            var days = List.of(
+                    DailyAttendances.flexDay(LocalDate.of(2026, 3, 2), Duration.ofHours(8)));
+
+            assertThatThrownBy(() ->
+                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("走査範囲の外の日次勤怠");
+        }
+
+        /** 年度累計は計算に渡された値がそのまま 36 協定の判定に効く。 */
+        @Test
+        @DisplayName("UT-BR05-26 当月より前の年度累計が 36 協定の判定に効く")
+        void annualUsedBeforeReachesTheAgreement() {
+            var may = period(2026, 5);
+            weekdaysOnly(YearMonth.of(2026, 5));
+            var days = List.of(DailyAttendances.flexDay(LocalDate.of(2026, 5, 1),
+                    Duration.ofMinutes(10_628 + 60)));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(),
+                    Duration.ofHours(359));
+
+            assertThat(result.agreementUsage().annualUsedBefore())
+                    .isEqualTo(Duration.ofHours(359));
+            assertThat(result.agreementUsage().exceedsAnnual())
+                    .as("359 + 1 = 360 ちょうどでは超えない").isFalse();
+            assertThat(result.hasAgreementWarning()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("不変条件")
+    class Invariants {
+
+        @Test
+        @DisplayName("UT-BR05-27 固定時間制で時間外が 日次 + 週次 + 通算 と一致しないと生成できない")
+        void fixedBreakdownMustMatch() {
+            assertThatThrownBy(() -> settlement(WorkingTimeSystemType.FIXED,
+                    Duration.ofHours(1), Duration.ofHours(1), Duration.ofHours(1),
+                    Duration.ofHours(2), List.of()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("時間外労働の内訳が一致しません");
+        }
+
+        @Test
+        @DisplayName("UT-BR05-28 フレックスに日次・週次・通算の時間外を計上できない")
+        void flexHasNoBreakdown() {
+            assertThatThrownBy(() -> settlement(WorkingTimeSystemType.FLEX,
+                    Duration.ofHours(1), Duration.ZERO, Duration.ZERO,
+                    Duration.ofHours(1), List.of()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("フレックスに日次・週次・通算の時間外を計上しています");
+        }
+
+        /**
+         * <strong>これがフレックスに週の内訳が付く欠陥を捕まえる。</strong>
+         * 「フレックスに週次の時間外は無い」と主張しながら、
+         * 内訳には時間外が入った状態を作れてしまっていた。
+         */
+        @Test
+        @DisplayName("UT-BR05-29 週次の時間外と週ごとの内訳が食い違うと生成できない")
+        void weeklyBreakdownMustMatchTheTotal() {
+            var week = new WeeklyOvertimeCharge(LocalDate.of(2026, 5, 3),
+                    LocalDate.of(2026, 5, 10), Duration.ofHours(46), Duration.ofHours(6),
+                    Duration.ofHours(6));
+
+            assertThatThrownBy(() -> settlement(WorkingTimeSystemType.FIXED,
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO, Duration.ZERO,
+                    List.of(week)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("週次の時間外と週ごとの内訳が一致しません");
+        }
+
+        /** 時間外の内訳だけを差し替えた清算結果を作る。 */
+        private MonthlySettlement settlement(WorkingTimeSystemType system, Duration daily,
+                                             Duration weekly, Duration carriedOver,
+                                             Duration total,
+                                             List<WeeklyOvertimeCharge> breakdown) {
+            return new MonthlySettlement(TARO, period(2026, 5), SERIES, system,
+                    Duration.ofHours(100), Duration.ZERO, Duration.ofHours(100),
+                    Duration.ZERO, Duration.ofMinutes(10_628),
+                    daily, weekly, carriedOver, total,
+                    Duration.ZERO, Duration.ZERO, breakdown,
+                    AgreementUsage.of(total, Duration.ZERO, Duration.ZERO));
+        }
+    }
+
     /** その月の土日を休日として登録する。所定労働日数を現実的にするため。 */
     private void weekdaysOnly(YearMonth month) {
         for (LocalDate d = month.atDay(1); d.isBefore(month.plusMonths(1).atDay(1));

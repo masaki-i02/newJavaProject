@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.attendance.domain.monthly;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.LocalDate;
@@ -192,6 +193,34 @@ class HolidayCarryOverRuleTest {
         assertThat(monday.additionalByWorkDate())
                 .as("暦日の 8 時間超はすべて月曜の勤務中。うち 2 時間は計上済み")
                 .containsExactly(java.util.Map.entry(MONDAY, Duration.ofHours(6)));
+    }
+
+    @org.junit.jupiter.api.Nested
+    @DisplayName("不変条件")
+    class Invariants {
+
+        @Test
+        @DisplayName("UT-BR07-09 持ち越しがその暦日の労働時間を超える値では生成できない")
+        void carriedCannotExceedTheCalendarDay() {
+            assertThatThrownBy(() -> new HolidayCarryOver(MONDAY, Duration.ofHours(10),
+                    Duration.ofHours(6), Duration.ZERO, java.util.Map.of()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("持ち越しがその暦日の労働時間を超えています");
+        }
+
+        /**
+         * 追加分と計上済み分の合計がその暦日の労働を超えるのは、
+         * <strong>同じ時間を 2 か所で法定外残業に数えている</strong>ということである。
+         */
+        @Test
+        @DisplayName("UT-BR07-10 追加分と計上済みの合計が暦日の労働を超える値では生成できない")
+        void overtimeCannotExceedTheCalendarDay() {
+            assertThatThrownBy(() -> new HolidayCarryOver(MONDAY, Duration.ofHours(6),
+                    Duration.ofHours(10), Duration.ofHours(6),
+                    java.util.Map.of(MONDAY, Duration.ofHours(6))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("法定外残業が暦日の労働時間を超えています");
+        }
     }
 
     /** 翌日も法定休日なら持ち越しにならない。区間は暦日で判断されている。 */

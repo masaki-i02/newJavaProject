@@ -1,9 +1,13 @@
 package jp.co.sample.kintai.attendance.domain.monthly;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
 import jp.co.sample.kintai.workrule.domain.DayType;
@@ -51,6 +55,8 @@ public final class MonthlySettlementCalculator {
                 || annualUsedBefore == null) {
             throw new IllegalArgumentException("月次清算の引数に null は許されません");
         }
+        requireOnePerWorkDate(days);
+        requireInsideScanRange(days, period);
 
         // 集計は清算期間の中の日だけで行う。走査範囲の外側（前月・翌月）は週の判定にしか使わない
         List<DailyAttendance> inPeriod = days.stream()
@@ -150,6 +156,44 @@ public final class MonthlySettlementCalculator {
         // 週の内訳も作らない。時間外 0 と主張しながら内訳に時間外が入る状態を作らないため
         return new Overtime(Duration.ZERO, Duration.ZERO, Duration.ZERO,
                 floorAtZero(excess), List.of());
+    }
+
+    /**
+     * 同じ勤務日の日次勤怠が 2 件以上ないことを確かめる。
+     *
+     * <p>{@code DailyAttendance} は<strong>誰のものかを持たない</strong>ので、
+     * 2 人ぶんを混ぜて渡されても型では止められない。
+     * せめて重複だけは検出する。素通りさせると労働時間が二重に合計され、
+     * <strong>実在しない残業に割増が付く。</strong>
+     */
+    private static void requireOnePerWorkDate(List<DailyAttendance> days) {
+        Set<LocalDate> seen = new HashSet<>();
+        for (DailyAttendance day : days) {
+            if (!seen.add(day.workDate())) {
+                throw new IllegalArgumentException(
+                        "同じ勤務日の日次勤怠が 2 件以上あります: " + day.workDate());
+            }
+        }
+    }
+
+    /**
+     * 渡された日次が走査範囲に収まっていることを確かめる。
+     *
+     * <p>範囲より<strong>広い</strong>と、週の判定に対象外の週が混じる。
+     * 範囲より狭い（＝月初の週の前月分が欠けている）ことは、
+     * <strong>「打刻が無い日」と区別がつかないので検出できない。</strong>
+     * 呼び出し側が {@link WeeklyOvertimeRule#scanRangeFor} で読む責務を負う。
+     */
+    private static void requireInsideScanRange(List<DailyAttendance> days,
+                                               SettlementPeriod period) {
+        DateRange scanRange = WeeklyOvertimeRule.scanRangeFor(period.period());
+        for (DailyAttendance day : days) {
+            if (!scanRange.contains(day.workDate())) {
+                throw new IllegalArgumentException(
+                        "走査範囲の外の日次勤怠が渡されました: 勤務日 %s / 走査範囲 %s"
+                                .formatted(day.workDate(), scanRange));
+            }
+        }
     }
 
     /**

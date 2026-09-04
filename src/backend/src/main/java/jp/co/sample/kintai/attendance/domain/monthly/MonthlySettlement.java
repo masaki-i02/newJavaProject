@@ -132,6 +132,9 @@ public record MonthlySettlement(
         // ★ 週次の時間外は、週ごとの内訳のうち当該月に計上される分の合計そのものである。
         //   ここを検査しないと、「フレックスに週次の時間外は無い」と主張しながら
         //   内訳には時間外が入った状態を作れてしまう
+        // ★ 週次の時間外は、週ごとの内訳のうち当該月に計上される分の合計そのものである。
+        //   ここを検査しないと、「フレックスに週次の時間外は無い」と主張しながら
+        //   内訳には時間外が入った状態を作れてしまう
         Duration charged = weeklyBreakdown.stream()
                 .map(WeeklyOvertimeCharge::chargedTime)
                 .reduce(Duration.ZERO, Duration::plus);
@@ -141,12 +144,10 @@ public record MonthlySettlement(
                             .formatted(weeklyOvertimeTime, charged));
         }
 
-        // ★ 法定休日労働は実労働の一部である
-        if (legalHolidayTime.compareTo(workingTime) > 0) {
-            throw new IllegalArgumentException(
-                    "法定休日労働が実労働時間を超えています: 法定休日 %s / 実労働 %s"
-                            .formatted(legalHolidayTime, workingTime));
-        }
+        // 「法定休日労働 ≤ 実労働」は書かない。
+        // 対象労働時間 = 実労働 − 法定休日 を強制したうえで全項目の非負を検査しているので、
+        // 法定休日が実労働を上回る入力は必ず先に「対象労働時間の算出が一致しません」で落ちる。
+        // ここに書いても到達しない（CLAUDE.md 落とし穴 16）
     }
 
     private static void requireNonNull(Object value, String label) {
