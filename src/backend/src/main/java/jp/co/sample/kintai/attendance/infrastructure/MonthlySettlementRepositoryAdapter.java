@@ -66,8 +66,9 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         annual_agreement_subject_before_minutes,
                         monthly_agreement_limit_minutes, annual_agreement_limit_minutes,
                         exceeds_monthly_agreement_limit, exceeds_annual_agreement_limit,
-                        calculated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        exceeds_combined_single_month_limit, calculated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?)
                 """,
                 id, employeeId, targetMonth,
                 settlement.period().period().from(),
@@ -86,6 +87,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 minutes(usage.annualUsedBefore()),
                 minutes(usage.monthlyLimit()), minutes(usage.annualLimit()),
                 usage.exceedsMonthly(), usage.exceedsAnnual(),
+                usage.exceedsCombinedSingleMonth(),
                 java.time.OffsetDateTime.now(clock));
 
         for (WeeklyOvertime week : settlement.weeklyBreakdown()) {
@@ -154,16 +156,15 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
     /**
      * 当年度の、指定月より前の 36 協定対象時間の累計。
      *
-     * <p>対象時間は保存していないので {@code overtime + legal_holiday} で数え直す。
-     * <strong>導出できる値を列として持つと、食い違いを DB で禁じる制約が要る</strong>
-     * （CLAUDE.md 落とし穴 39）。数え直す方が安い。
+     * <p><strong>限度時間の対象は時間外労働だけ</strong>で、休日労働は含まない（36 条 3 項）。
+     * 休日労働を足すのは 6 項 2 号の単月 100 時間の判定であり、別の規制である。
      */
     @Override
     public Duration annualSubjectTimeBefore(EmployeeId employeeId, YearMonth month) {
         // 年度の起算はドメイン（AgreementUsage）が決める。ここで数え直すと 2 か所になる
         LocalDate fiscalStart = AgreementUsage.fiscalYearStartOf(month);
         Integer total = jdbc.queryForObject("""
-                SELECT coalesce(sum(overtime_minutes + legal_holiday_minutes), 0)
+                SELECT coalesce(sum(overtime_minutes), 0)
                 FROM monthly_settlements
                 WHERE employee_id = ? AND target_month >= ? AND target_month < ?
                 """, Integer.class, employeeId.value(), fiscalStart, month.atDay(1));

@@ -1,7 +1,6 @@
 package jp.co.sample.kintai.attendance.domain.monthly;
 
 import java.time.Duration;
-import java.time.YearMonth;
 import java.util.List;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
@@ -11,7 +10,6 @@ import jp.co.sample.kintai.workrule.domain.FixedTimeSystem;
 import jp.co.sample.kintai.workrule.domain.FlextimeSystem;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
-import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
 /**
  * 月次の清算を行う（BR-04 / BR-05 / BR-12）。
@@ -63,18 +61,17 @@ public final class MonthlySettlementCalculator {
         Duration nightTime = sum(inPeriod, DailyAttendance::nightTime);
         Duration targetWorkingTime = workingTime.minus(legalHolidayTime);
 
-        // ★ 通算 → 週次 → 月次の順で解く。
-        //   通算で法定外になった時間を週の法定内から引かないと、同じ時間を 2 度数える
-        List<HolidayCarryOver> carryOvers = carryOversFor(workRule, days);
-        var weeklyRule = new WeeklyOvertimeRule(workRule.statutoryWeeklyWorkingTime());
-        List<WeeklyOvertime> weeks = weeklyRule.apply(days, carryOvers);
         Duration statutoryTotalLimit =
                 period.statutoryTotalLimit(workRule.statutoryWeeklyWorkingTime());
 
+        // ★ 制度で変わるものを 1 か所の switch にまとめる。
+        //   時間外だけを分岐して週の内訳を分岐し忘れると、
+        //   「フレックスに週次の時間外は無い」と主張しながら週の内訳には
+        //   時間外が入った状態を作れてしまう（CLAUDE.md 落とし穴 22）
         Overtime overtime = switch (workRule.workingTimeSystem()) {
-            case FixedTimeSystem fixed -> fixedOvertime(inPeriod, weeks, weeklyRule,
-                    period.month(), chargedCarryOver(carryOvers, period));
-            case FlextimeSystem flex -> flexOvertime(targetWorkingTime, statutoryTotalLimit);
+            case FixedTimeSystem ignored -> fixedOvertime(inPeriod, days, period, workRule);
+            case FlextimeSystem ignored ->
+                    flexOvertime(targetWorkingTime, statutoryTotalLimit);
         };
 
         Duration scheduledTotalTime = scheduledTotalOf(workRule, period);
@@ -86,42 +83,36 @@ public final class MonthlySettlementCalculator {
                 scheduledTotalTime, statutoryTotalLimit,
                 overtime.daily(), overtime.weekly(), overtime.carriedOver(),
                 overtime.total(),
-                shortage.isNegative() ? Duration.ZERO : shortage,
-                nightTime, weeks,
+                floorAtZero(shortage),
+                nightTime, overtime.weeks(),
                 AgreementUsage.of(overtime.total(), legalHolidayTime, annualUsedBefore));
     }
 
     /**
      * 固定時間制の時間外労働。
      *
-     * <p>日次で確定した法定外残業と、週 40 時間超の合計。
+     * <p>日次で確定した法定外残業・週 40 時間超・法定休日からの通算の合計。
      * 週次分は<strong>末日が対象月に属する週だけ</strong>を計上する。
+     *
+     * <p>通算 → 週次 の順で解く。
+     * 通算で法定外になった時間を週の法定内から引かないと、同じ時間を 2 度数える。
+     *
+     * @param inPeriod 清算期間の中の日次。集計に使う
+     * @param days     走査範囲の日次。<strong>週と暦日の判定に使う</strong>
      */
     private static Overtime fixedOvertime(List<DailyAttendance> inPeriod,
-                                          List<WeeklyOvertime> weeks,
-                                          WeeklyOvertimeRule weeklyRule, YearMonth month,
-                                          Duration carriedOver) {
-        Duration daily = sum(inPeriod, DailyAttendance::overtimeBeyondStatutoryTime);
-        Duration weekly = weeklyRule.totalChargedTo(weeks, month);
-        return new Overtime(daily, weekly, carriedOver,
-                daily.plus(weekly).plus(carriedOver));
-    }
+                                          List<DailyAttendance> days,
+                                          SettlementPeriod period, WorkRule workRule) {
+        List<HolidayCarryOver> carryOvers =
+                new HolidayCarryOverRule(workRule.statutoryDailyWorkingTime()).apply(days);
+        var weeklyRule = new WeeklyOvertimeRule(workRule.statutoryWeeklyWorkingTime());
+        List<WeeklyOvertime> weeks = weeklyRule.apply(days, carryOvers);
 
-    /**
-     * 法定休日から翌暦日への通算（BR-07）。
-     *
-     * <p><strong>固定時間制にだけ適用する。</strong>
-     * フレックスでは持ち越した時間は既に対象労働時間に入っており、清算期間の総枠で判定される。
-     * 日次の 8 時間で重ねて判定すると、同じ労働時間を 2 つの基準で二重に評価することになる
-     * （週 40 時間超を適用しないのと同じ理由）。
-     */
-    private static List<HolidayCarryOver> carryOversFor(WorkRule workRule,
-                                                        List<DailyAttendance> days) {
-        return switch (workRule.workingTimeSystem()) {
-            case FixedTimeSystem ignored ->
-                    new HolidayCarryOverRule(workRule.statutoryDailyWorkingTime()).apply(days);
-            case FlextimeSystem ignored -> List.of();
-        };
+        Duration daily = sum(inPeriod, DailyAttendance::overtimeBeyondStatutoryTime);
+        Duration weekly = weeklyRule.totalChargedTo(weeks, period.month());
+        Duration carriedOver = chargedCarryOver(carryOvers, period);
+        return new Overtime(daily, weekly, carriedOver,
+                daily.plus(weekly).plus(carriedOver), weeks);
     }
 
     /**
@@ -148,8 +139,9 @@ public final class MonthlySettlementCalculator {
     private static Overtime flexOvertime(Duration targetWorkingTime,
                                          Duration statutoryTotalLimit) {
         Duration excess = targetWorkingTime.minus(statutoryTotalLimit);
+        // 週の内訳も作らない。時間外 0 と主張しながら内訳に時間外が入る状態を作らないため
         return new Overtime(Duration.ZERO, Duration.ZERO, Duration.ZERO,
-                excess.isNegative() ? Duration.ZERO : excess);
+                floorAtZero(excess), List.of());
     }
 
     /**
@@ -172,8 +164,18 @@ public final class MonthlySettlementCalculator {
         return days.stream().map(of).reduce(Duration.ZERO, Duration::plus);
     }
 
-    /** 時間外労働の内訳。制度によって埋まる項目が変わる。 */
+    /** その月の負の値を 0 に丸める。時間外・不足はどちらも負にならない。 */
+    static Duration floorAtZero(Duration value) {
+        return value.isNegative() ? Duration.ZERO : value;
+    }
+
+    /**
+     * 時間外労働の内訳。<strong>制度によって埋まる項目が変わる。</strong>
+     *
+     * <p>週の内訳も同じ record に入れる。時間外の合計だけを制度で分け、
+     * 内訳を分け忘れる形の欠陥を構造で防ぐ。
+     */
     private record Overtime(Duration daily, Duration weekly, Duration carriedOver,
-                            Duration total) {
+                            Duration total, List<WeeklyOvertime> weeks) {
     }
 }

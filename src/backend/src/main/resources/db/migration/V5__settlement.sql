@@ -32,6 +32,7 @@ CREATE TABLE monthly_settlements (
     annual_agreement_limit_minutes  int         NOT NULL DEFAULT 21600,
     exceeds_monthly_agreement_limit boolean     NOT NULL,
     exceeds_annual_agreement_limit  boolean     NOT NULL,
+    exceeds_combined_single_month_limit boolean NOT NULL DEFAULT false,
 
     calculated_at                   timestamptz NOT NULL,
     version                         bigint      NOT NULL DEFAULT 0,
@@ -92,23 +93,28 @@ CREATE TABLE monthly_settlements (
              AND shortage_minutes = greatest(0, scheduled_total_minutes - target_working_minutes))
     ),
 
-    -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）
+    -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）。
+    --   限度時間（36 条 3 項・4 項）の対象は時間外労働だけで、休日労働を含まない
     CONSTRAINT monthly_settlements_monthly_agreement_check
         CHECK (exceeds_monthly_agreement_limit
-               = (overtime_minutes + legal_holiday_minutes
-                  > monthly_agreement_limit_minutes)),
+               = (overtime_minutes > monthly_agreement_limit_minutes)),
     CONSTRAINT monthly_settlements_annual_agreement_check
         CHECK (exceeds_annual_agreement_limit
-               = (annual_agreement_subject_before_minutes
-                  + overtime_minutes + legal_holiday_minutes
+               = (annual_agreement_subject_before_minutes + overtime_minutes
                   > annual_agreement_limit_minutes)),
+
+    -- ★ 36 条 6 項 2 号は時間外 + 休日で 100 時間「未満」。ちょうど 100 時間で違反になる
+    CONSTRAINT monthly_settlements_combined_limit_check
+        CHECK (exceeds_combined_single_month_limit
+               = (overtime_minutes + legal_holiday_minutes >= 6000)),
 
     CONSTRAINT monthly_settlements_employee_month_uk UNIQUE (employee_id, target_month)
 );
 
 CREATE INDEX monthly_settlements_agreement_idx
     ON monthly_settlements (target_month)
-    WHERE exceeds_monthly_agreement_limit OR exceeds_annual_agreement_limit;
+    WHERE exceeds_monthly_agreement_limit OR exceeds_annual_agreement_limit
+       OR exceeds_combined_single_month_limit;
 
 CREATE TABLE weekly_overtimes (
     id                      uuid PRIMARY KEY,

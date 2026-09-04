@@ -66,6 +66,7 @@ CREATE TABLE monthly_settlements (
     annual_agreement_limit_minutes  int         NOT NULL DEFAULT 21600,
     exceeds_monthly_agreement_limit boolean     NOT NULL,
     exceeds_annual_agreement_limit  boolean     NOT NULL,
+    exceeds_combined_single_month_limit boolean NOT NULL DEFAULT false,
 
     calculated_at                   timestamptz NOT NULL,
     version                         bigint      NOT NULL DEFAULT 0,
@@ -127,23 +128,28 @@ CREATE TABLE monthly_settlements (
     ),
 
 
-    -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）
+    -- ★ 36 協定の判定は他の列から一意に決まる（BR-12）。
+    --   限度時間（36 条 3 項・4 項）の対象は時間外労働だけで、休日労働を含まない
     CONSTRAINT monthly_settlements_monthly_agreement_check
         CHECK (exceeds_monthly_agreement_limit
-               = (overtime_minutes + legal_holiday_minutes
-                  > monthly_agreement_limit_minutes)),
+               = (overtime_minutes > monthly_agreement_limit_minutes)),
     CONSTRAINT monthly_settlements_annual_agreement_check
         CHECK (exceeds_annual_agreement_limit
-               = (annual_agreement_subject_before_minutes
-                  + overtime_minutes + legal_holiday_minutes
+               = (annual_agreement_subject_before_minutes + overtime_minutes
                   > annual_agreement_limit_minutes)),
+
+    -- ★ 36 条 6 項 2 号は時間外 + 休日で 100 時間「未満」。ちょうど 100 時間で違反になる
+    CONSTRAINT monthly_settlements_combined_limit_check
+        CHECK (exceeds_combined_single_month_limit
+               = (overtime_minutes + legal_holiday_minutes >= 6000)),
 
     CONSTRAINT monthly_settlements_employee_month_uk UNIQUE (employee_id, target_month)
 );
 
 CREATE INDEX monthly_settlements_agreement_idx
     ON monthly_settlements (target_month)
-    WHERE exceeds_monthly_agreement_limit OR exceeds_annual_agreement_limit;
+    WHERE exceeds_monthly_agreement_limit OR exceeds_annual_agreement_limit
+       OR exceeds_combined_single_month_limit;
 ```
 
 #### 清算期間を列で持つ理由
@@ -360,6 +366,7 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | `monthly_settlements_statutory_limit_check` | CHECK | **総枠 = 清算期間の暦日数 ÷ 7 × 40 時間** |
 | `monthly_settlements_monthly_agreement_check` | CHECK | **36 協定の月次判定が他の列から決まる** |
 | `monthly_settlements_annual_agreement_check` | CHECK | **36 協定の年次判定が他の列から決まる** |
+| `monthly_settlements_combined_limit_check` | CHECK | **時間外 + 休日の単月 100 時間未満（36 条 6 項 2 号）** |
 | `monthly_settlements_night_check` | CHECK | 深夜が実労働を超えない |
 | `monthly_settlements_employee_month_uk` | UNIQUE | 社員・対象月の一意性 |
 | `weekly_overtimes_span_check` | CHECK | 週が 7 日間 |
@@ -410,6 +417,8 @@ ORDER BY (s.overtime_minutes + s.legal_holiday_minutes) DESC;
 | IT-SET-17 | **総枠が清算期間の暦日数と一致しない** | `statutory_limit_check` で拒否 | 済 |
 | IT-SET-18 | **時間外 40h + 法定休日 6h で `exceeds_monthly = false`** | `monthly_agreement_check` で拒否 | 済 |
 | IT-SET-19 | **年度累計が上限を超えるのに `exceeds_annual = false`** | `annual_agreement_check` で拒否 | 済 |
+| IT-SET-26 | **時間外 44 時間 + 法定休日 8 時間で `exceeds_monthly = false`** | **成功する。** 限度時間の対象は時間外だけ（第 2 版では拒否されていた） | 済 |
+| IT-SET-27 | **時間外 + 休日がちょうど 100 時間なのに `exceeds_combined = false`** | `combined_limit_check` で拒否（「以下」ではなく「未満」） | 済 |
 | IT-SET-20 | `updated_at` が UPDATE で更新される | トリガにより現在時刻になる | 済 |
 
 **IT-SET-14 が今回のレビューで最も重要な検証である。**

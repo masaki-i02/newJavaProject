@@ -12,11 +12,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * 36 協定の上限監視（UT-BR12-01〜04）。
+ * 36 協定の上限監視（UT-BR12-01〜10）。
  *
- * <p><strong>対象に何を含めるかが要点である。</strong>
- * 法定内残業は時間外労働ではないので含めない。
- * 法定休日労働は時間外労働に算入しない（BR-07）が、36 協定の時間数には算入する。
+ * <p><strong>2 つの規制で対象が違うことが要点である。</strong>
+ * 限度時間（月 45 時間・年 360 時間）の対象は時間外労働だけで、休日労働は含まない
+ * （36 条 3 項・4 項）。休日労働を含めるのは 6 項 2 号の単月 100 時間未満である。
+ * 法定内残業はどちらにも含めない。時間外労働ではないため。
  */
 @DisplayName("36 協定の上限監視（BR-12）")
 class AgreementUsageTest {
@@ -40,27 +41,36 @@ class AgreementUsageTest {
         }
 
         /**
-         * <strong>法定休日労働を足して初めて超える。</strong>
-         * 時間外だけを見ていると 40 時間なので警告が立たず、超過を見逃す。
+         * <strong>休日労働は限度時間の対象ではない</strong>（36 条 3 項）。
+         * 第 1 版は合算しており、月 1 回の休日出勤があるだけで
+         * <strong>適法な月に偽の警告が立っていた。</strong>
          */
         @Test
-        @DisplayName("UT-BR12-02 時間外 40 時間 + 法定休日 6 時間で警告が立つ")
-        void legalHolidayCountsTowardTheLimit() {
-            var result = usage(Duration.ofHours(40), Duration.ofHours(6));
+        @DisplayName("UT-BR12-02 時間外 44 時間 + 法定休日 8 時間では限度時間の警告が立たない")
+        void legalHolidayIsNotSubjectToTheLimit() {
+            var result = usage(Duration.ofHours(44), Duration.ofHours(8));
 
-            assertThat(result.subjectTime()).isEqualTo(Duration.ofHours(46));
-            assertThat(result.exceedsMonthly()).isTrue();
+            assertThat(result.subjectTime())
+                    .as("限度時間の対象は時間外労働だけ").isEqualTo(Duration.ofHours(44));
+            assertThat(result.combinedTime())
+                    .as("6 項の対象は時間外 + 休日").isEqualTo(Duration.ofHours(52));
+            assertThat(result.exceedsMonthly()).isFalse();
+            assertThat(result.hasWarning()).isFalse();
         }
 
         /**
          * <strong>法定内残業は 36 協定の対象外。</strong>
-         * 所定を超えても法定 8 時間以内なら時間外労働ではないので、
-         * どれだけ積んでも上限には触れない。
+         * 所定を超えても法定 8 時間以内なら時間外労働ではない。
+         *
+         * <p>ここは <strong>{@code overtimeTime} に何を渡すかで表現している。</strong>
+         * 法定内残業は日次で {@code OVERTIME_WITHIN_STATUTORY} に分類され、
+         * {@code MonthlySettlement.overtimeTime} には入らないので、
+         * この record にはそもそも届かない。
+         * その事実を月次清算側で検査するのが UT-BR04-13 である。
          */
         @Test
-        @DisplayName("UT-BR12-03 法定内残業だけ 50 時間でも警告は立たない")
+        @DisplayName("UT-BR12-03 法定内残業は時間外労働に含まれないので上限に触れない")
         void withinStatutoryOvertimeIsNotSubject() {
-            // 法定内残業は overtimeTime に含めない。渡すのは法定外残業だけ
             var result = usage(Duration.ZERO, Duration.ZERO);
 
             assertThat(result.subjectTime()).isZero();
@@ -73,6 +83,35 @@ class AgreementUsageTest {
             assertThat(usage(Duration.ofHours(45), Duration.ZERO).exceedsMonthly()).isFalse();
             assertThat(usage(Duration.ofHours(45).plusMinutes(1), Duration.ZERO)
                     .exceedsMonthly()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("時間外 + 休日の単月上限（100 時間未満・36 条 6 項 2 号）")
+    class CombinedSingleMonth {
+
+        /**
+         * <strong>「以下」ではなく「未満」。</strong> ちょうど 100 時間で違反になる。
+         * 限度時間（45 時間を「超えた」場合）と向きが違うので、
+         * 同じ書き方をすると 1 か月ぶん見逃す。
+         */
+        @Test
+        @DisplayName("UT-BR12-08 時間外 44 時間 + 法定休日 56 時間（ちょうど 100 時間）で触れる")
+        void exactlyAtTheCombinedLimit() {
+            var result = usage(Duration.ofHours(44), Duration.ofHours(56));
+
+            assertThat(result.exceedsMonthly()).as("限度時間は超えていない").isFalse();
+            assertThat(result.exceedsCombinedSingleMonth()).isTrue();
+            assertThat(result.hasWarning()).isTrue();
+        }
+
+        @Test
+        @DisplayName("UT-BR12-09 合計 99 時間ならどちらの警告も立たない")
+        void justBelowTheCombinedLimit() {
+            var result = usage(Duration.ofHours(44), Duration.ofHours(55));
+
+            assertThat(result.exceedsCombinedSingleMonth()).isFalse();
+            assertThat(result.hasWarning()).isFalse();
         }
     }
 
@@ -91,6 +130,18 @@ class AgreementUsageTest {
             assertThat(result.exceedsMonthly())
                     .as("その月だけなら 30 時間なので月次上限は超えない").isFalse();
             assertThat(result.hasWarning()).isTrue();
+        }
+
+        /** 年次上限も限度時間なので、休日労働は数えない。 */
+        @Test
+        @DisplayName("UT-BR12-10 年度累計に法定休日労働を数えない")
+        void legalHolidayIsNotCountedTowardTheAnnualLimit() {
+            var result = AgreementUsage.of(Duration.ofHours(20), Duration.ofHours(100),
+                    Duration.ofHours(340));
+
+            assertThat(result.annualUsed())
+                    .as("時間外 20 時間だけを足す").isEqualTo(Duration.ofHours(360));
+            assertThat(result.exceedsAnnual()).isFalse();
         }
 
         @Test

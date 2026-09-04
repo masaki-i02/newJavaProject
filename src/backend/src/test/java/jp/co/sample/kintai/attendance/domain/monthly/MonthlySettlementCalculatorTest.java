@@ -338,10 +338,13 @@ class MonthlySettlementCalculatorTest {
                     .isEqualTo(Duration.ofMinutes(10_700 - 10_628));
         }
 
-        /** 36 協定の時間数には法定休日労働を算入する。 */
+        /**
+         * <strong>法定休日労働は限度時間の対象ではない</strong>（36 条 3 項）。
+         * 数えるのは 6 項 2 号の単月 100 時間の方である。
+         */
         @Test
-        @DisplayName("法定休日労働は 36 協定の対象時間に算入される")
-        void countsTowardTheAgreement() {
+        @DisplayName("UT-BR12-11 法定休日労働は限度時間には数えず、単月 100 時間には数える")
+        void legalHolidaySplitsAcrossTheTwoLimits() {
             var may = period(2026, 5);
             weekdaysOnly(YearMonth.of(2026, 5));
             var days = List.of(DailyAttendances.legalHolidayDay(LocalDate.of(2026, 5, 3),
@@ -349,7 +352,10 @@ class MonthlySettlementCalculatorTest {
 
             var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
 
-            assertThat(result.agreementUsage().subjectTime()).isEqualTo(Duration.ofHours(8));
+            assertThat(result.agreementUsage().subjectTime())
+                    .as("限度時間の対象は時間外労働だけ").isZero();
+            assertThat(result.agreementUsage().combinedTime())
+                    .as("6 項の対象には入る").isEqualTo(Duration.ofHours(8));
         }
     }
 

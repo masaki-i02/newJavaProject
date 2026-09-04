@@ -16,7 +16,7 @@ import jp.co.sample.kintai.support.Fixtures;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 
 /**
- * 月次清算の制約（IT-SET-01〜23）。
+ * 月次清算の制約（IT-SET-01〜27）。
  *
  * <p>対応する設計は {@code doc/02_詳細設計/04_勤怠_月次清算/DB設計書.md} の 6 章。
  */
@@ -59,6 +59,7 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         int annualBefore = 0;
         boolean exceedsMonthly = false;
         boolean exceedsAnnual = false;
+        boolean exceedsCombined = false;
 
         Settlement month(LocalDate v) { month = v; return this; }
         Settlement period(LocalDate f, LocalDate t) { from = f; toExclusive = t; return this; }
@@ -76,6 +77,7 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         Settlement annualBefore(int v) { annualBefore = v; return this; }
         Settlement exceedsMonthly(boolean v) { exceedsMonthly = v; return this; }
         Settlement exceedsAnnual(boolean v) { exceedsAnnual = v; return this; }
+        Settlement exceedsCombined(boolean v) { exceedsCombined = v; return this; }
 
         /** フレックスの正常形へ切り替える。日次・週次の残業は 0 になる。 */
         Settlement flex() {
@@ -102,14 +104,14 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
                         night_minutes, core_time_absence_minutes,
                         annual_agreement_subject_before_minutes,
                         exceeds_monthly_agreement_limit, exceeds_annual_agreement_limit,
-                        calculated_at)
+                        exceeds_combined_single_month_limit, calculated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                            now())
+                            ?, now())
                     """, id, employee, month, from, toExclusive, series, system, working,
                     legalHoliday, target, scheduledTotal, statutoryLimit, dailyOvertime,
                     weeklyOvertime, carriedOverOvertime, overtime, shortage, night,
                     coreAbsence, annualBefore,
-                    exceedsMonthly, exceedsAnnual);
+                    exceedsMonthly, exceedsAnnual, exceedsCombined);
             return id;
         }
     }
@@ -335,11 +337,11 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
     class Agreement {
 
         @Test
-        @DisplayName("IT-SET-18 月次上限を超えているのに false だと拒否される")
+        @DisplayName("IT-SET-18 限度時間の月次上限を超えているのに false だと拒否される")
         void monthlyFlagIsDerived() {
             rejectedBy("monthly_settlements_monthly_agreement_check", () -> settlement()
-                    .working(13_000).legalHoliday(360).target(12_640)
-                    .dailyOvertime(2_400).weeklyOvertime(0).overtime(2_400)
+                    .working(13_000).target(13_000)
+                    .dailyOvertime(2_760).weeklyOvertime(0).overtime(2_760)
                     .exceedsMonthly(false)
                     .insert());
         }
@@ -348,9 +350,38 @@ class MonthlySettlementConstraintTest extends IntegrationTestBase {
         @DisplayName("IT-SET-19 年次上限を超えているのに false だと拒否される")
         void annualFlagIsDerived() {
             rejectedBy("monthly_settlements_annual_agreement_check", () -> settlement()
-                    .working(13_000).legalHoliday(360).target(12_640)
-                    .dailyOvertime(2_400).weeklyOvertime(0).overtime(2_400)
+                    .working(13_000).target(13_000)
+                    .dailyOvertime(2_760).weeklyOvertime(0).overtime(2_760)
                     .annualBefore(21_000).exceedsMonthly(true).exceedsAnnual(false)
+                    .insert());
+        }
+
+        /**
+         * <strong>限度時間の対象は時間外労働だけ</strong>（36 条 3 項）。
+         * 第 2 版は休日労働を合算しており、時間外 44 時間 + 法定休日 8 時間という
+         * <strong>適法な月を「上限超過」と記録していた。</strong>
+         */
+        @Test
+        @DisplayName("IT-SET-26 時間外 44 時間 + 法定休日 8 時間は限度時間を超えない")
+        void legalHolidayIsNotSubjectToTheLimit() {
+            accepted(() -> settlement()
+                    .working(13_000).legalHoliday(480).target(12_520)
+                    .dailyOvertime(2_640).weeklyOvertime(0).overtime(2_640)
+                    .exceedsMonthly(false)
+                    .insert());
+        }
+
+        /**
+         * 36 条 6 項 2 号は時間外 + 休日で <strong>100 時間「未満」</strong>。
+         * 「以下」と書くと、ちょうど 100 時間の月を見逃す。
+         */
+        @Test
+        @DisplayName("IT-SET-27 時間外 + 休日がちょうど 100 時間なのに false だと拒否される")
+        void combinedFlagIsDerived() {
+            rejectedBy("monthly_settlements_combined_limit_check", () -> settlement()
+                    .working(13_000).legalHoliday(3_360).target(9_640)
+                    .dailyOvertime(2_640).weeklyOvertime(0).overtime(2_640)
+                    .exceedsMonthly(false).exceedsCombined(false)
                     .insert());
         }
     }
