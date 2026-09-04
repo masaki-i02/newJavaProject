@@ -418,7 +418,7 @@ ORDER BY r.requested_at DESC, i.sequence_no;
 | --- | --- |
 | 訂正申請の `work_date` と項目の `occurred_at` の日付の関係 | ドメイン。**BR-03 の日跨ぎ勤務では一致しないのが正しい**ので、DB では判定できない |
 | 訂正を適用した後の打刻列が状態機械として妥当であること | ドメイン（申請時に検証） |
-| 提出時に対象月の末日が到来し、全勤務日の日次勤怠が確定していること | アプリケーション |
+| 提出時に対象月の末日が到来し、**打刻があるのに日次勤怠が無い勤務日が残っていない**こと | アプリケーション（`MonthlySettlementService.requireCalculable`） |
 | 承認者が BR-11 の承認者と一致すること | ドメイン（`ApproverPolicy`）。DB は自己承認の禁止だけを守る |
 | `approved_by` / `closed_by` が `HR` ロールまたは BR-11 の承認者であること | アプリケーション（`employee_roles` の参照は `CHECK` で書けない） |
 | `submitted_by` が本人、または本人が在籍していない場合の `HR` であること | アプリケーション |

@@ -8,9 +8,7 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,17 +27,12 @@ import jp.co.sample.kintai.attendance.application.MonthlySettlementService;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
-import jp.co.sample.kintai.shared.domain.CalculatedWorkDates;
-import jp.co.sample.kintai.shared.domain.DateRange;
-import jp.co.sample.kintai.shared.domain.DetailedDomainException;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
-import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
-import jp.co.sample.kintai.workrule.domain.DayType;
 
 /**
  * 月次勤怠の提出・承認・締め（BR-10 / BR-11）。
@@ -55,8 +48,6 @@ public class MonthlyAttendanceService {
     private final ApprovalEventRepository events;
     private final ApproverPolicy approverPolicy;
     private final EmployeeRepository employees;
-    private final CompanyCalendar calendar;
-    private final CalculatedWorkDates calculatedWorkDates;
     private final EmployeeVisibility visibility;
     private final MonthlySettlementService settlements;
     private final Clock clock;
@@ -65,8 +56,6 @@ public class MonthlyAttendanceService {
                                     ApprovalEventRepository events,
                                     ApproverPolicy approverPolicy,
                                     EmployeeRepository employees,
-                                    CompanyCalendar calendar,
-                                    CalculatedWorkDates calculatedWorkDates,
                                     EmployeeVisibility visibility,
                                     MonthlySettlementService settlements,
                                     Clock clock) {
@@ -74,8 +63,6 @@ public class MonthlyAttendanceService {
         this.events = events;
         this.approverPolicy = approverPolicy;
         this.employees = employees;
-        this.calendar = calendar;
-        this.calculatedWorkDates = calculatedWorkDates;
         this.visibility = visibility;
         this.settlements = settlements;
         this.clock = clock;
@@ -108,7 +95,12 @@ public class MonthlyAttendanceService {
         }
 
         requireMonthFinished(month, today);
-        requireAllWorkDatesCalculated(employee, month);
+
+        // ★ 未計算の勤務日が残っていないかを確かめる。
+        //   判定は attendance が持つ（落とし穴 67）。確かめるのは
+        //   「打刻があるのに日次勤怠が無い日」であって「打刻が無い日」ではない。
+        //   欠勤の日を未確定に数えると、1 日でも休んだ月を永久に提出できなくなる
+        settlements.requireCalculable(employeeId, month);
 
         // ★ 提出を契機に月次清算を計算し直す（月次清算 API設計書 3.1）。
         //   ここで行わないと、承認者は日次だけが直った古い月次を見て承認することになる。
@@ -307,38 +299,6 @@ public class MonthlyAttendanceService {
         }
     }
 
-    /**
-     * 全勤務日の日次勤怠が確定しているか。
-     *
-     * <p>勤務日の一覧は会社カレンダーから引く。
-     * <strong>欠勤の日は「打刻が無い」ことが確定した状態</strong>であり未確定ではないが、
-     * 日次勤怠としては計算されるので、ここでは同じに扱える。
-     */
-    /**
-     * 全勤務日の日次勤怠が確定しているか（ドメインモデル設計書 2.3）。
-     *
-     * <p><strong>範囲は暦月ではなく、その社員が在籍していた期間との重なりである。</strong>
-     * 暦月をそのまま見ると、月中入社の初月では入社前の勤務日が、
-     * 月中退職の最終月では退職後の勤務日が「未確定」になる。
-     * その日に働くことはありえないので確定させる手段が無く、
-     * <strong>初月と最終月を永久に提出できない。</strong>
-     *
-     * <p><strong>どの日が欠けているかを返す。</strong>
-     * 「提出できません」だけでは、利用者はどの日を直せばよいか分からない。
-     */
-    private void requireAllWorkDatesCalculated(Employee employee, YearMonth month) {
-        DateRange period = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
-        Set<LocalDate> calculated = calculatedWorkDates.of(employee.id(), period);
-        List<LocalDate> missing = period.dates()
-                .filter(employee::isActiveOn)
-                .filter(date -> calendar.dayTypeOf(date) == DayType.WORKDAY)
-                .filter(date -> !calculated.contains(date))
-                .toList();
-        if (!missing.isEmpty()) {
-            throw new AttendanceIncompleteException(missing);
-        }
-    }
-
     private void requireHumanResources(Requester requester) {
         if (!requester.has(Role.HR)) {
             throw new AccessDeniedException();
@@ -415,40 +375,4 @@ public class MonthlyAttendanceService {
         }
     }
 
-    /** 日次勤怠が未確定の勤務日が残っている。<strong>どの日かを返す。</strong> */
-    public static final class AttendanceIncompleteException extends DomainException
-            implements DetailedDomainException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        private final List<LocalDate> incompleteDates;
-
-        AttendanceIncompleteException(List<LocalDate> incompleteDates) {
-            super("%s の日次勤怠が確定していません".formatted(incompleteDates.stream()
-                    .map(LocalDate::toString).collect(Collectors.joining(", "))));
-            this.incompleteDates = List.copyOf(incompleteDates);
-        }
-
-        @Override
-        public java.util.Map<String, Object> properties() {
-            return java.util.Map.of("incompleteDates",
-                    incompleteDates.stream().map(LocalDate::toString).toList());
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:daily-attendance-incomplete";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "日次勤怠が未計算の日があります";
-        }
-    }
 }

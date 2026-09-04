@@ -176,6 +176,18 @@ public class MonthlySettlementService {
     }
 
     /**
+     * 未計算の勤務日が残っていないか（提出の事前条件・BR-10）。
+     *
+     * <p><strong>提出も同じ判定を使う。</strong> 月次勤怠の提出は
+     * 「その月の日次が出そろっている」ことを求めるが、その定義を
+     * {@code approval} 側に写すと、片方だけが古くなる（CLAUDE.md 落とし穴 67）。
+     */
+    @Transactional(readOnly = true)
+    public void requireCalculable(EmployeeId employeeId, YearMonth month) {
+        requireAllDaysCalculated(employeeId, periodOf(employeeId, month));
+    }
+
+    /**
      * 未計算の勤務日が残っていないか。
      *
      * <p>探す範囲は<strong>清算期間そのものではなく、週次判定に必要な範囲</strong>である。

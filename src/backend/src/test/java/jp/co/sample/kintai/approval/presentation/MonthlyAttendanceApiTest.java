@@ -463,6 +463,29 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                             .value("urn:kintai:error:daily-attendance-incomplete"))
                     .andExpect(jsonPath("$.incompleteDates[0]").value("2026-04-02"));
         }
+
+        /**
+         * <strong>欠勤は「未確定」ではない。</strong>
+         *
+         * <p>第 1 版は「在籍中の所定労働日すべてに日次勤怠の行があること」を
+         * 事前条件にしていた。日次勤怠の行は打刻がそろった日にしか作られないので、
+         * <strong>1 日でも欠勤すると、その月を永久に提出できなかった。</strong>
+         * 欠勤の日を確定させる手段はどこにも無い（打刻を足せば虚偽の労働記録になる）。
+         *
+         * <p>確かめるべきは「打刻があるのに日次勤怠が無い日」であって、
+         * 「打刻が無い日」ではない（CLAUDE.md 落とし穴 19・70 と同型）。
+         */
+        @Test
+        @DisplayName("IT-APV-81 欠勤した勤務日があっても提出できる")
+        void absenceDoesNotBlockSubmission() throws Exception {
+            // 4/2 の打刻と日次をまるごと消す。＝ その日は出勤しなかった
+            jdbc.update("DELETE FROM daily_attendances WHERE work_date = '2026-04-02'");
+            jdbc.update("DELETE FROM time_clock_events WHERE work_date = '2026-04-02'");
+
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("SUBMITTED"));
+        }
     }
 
     @Nested
