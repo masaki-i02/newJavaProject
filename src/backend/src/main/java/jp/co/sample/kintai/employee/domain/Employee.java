@@ -9,6 +9,7 @@ import java.util.Set;
 import jp.co.sample.kintai.shared.domain.BusinessRuleViolationException;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
 
 /**
  * 社員。

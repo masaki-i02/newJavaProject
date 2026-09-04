@@ -5,6 +5,7 @@ import java.time.YearMonth;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,6 +16,7 @@ import jp.co.sample.kintai.attendance.application.AttendanceQueryService;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
+import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 
 /** 日次勤怠の API。 */
 @RestController
@@ -33,17 +35,20 @@ public class AttendanceController {
      * <p>計算済みの日だけが返る。打刻が無い日・未退勤の日は含まれない。
      */
     @GetMapping
-    public List<DailyAttendanceResponse> list(@PathVariable UUID employeeId,
-                                              @RequestParam YearMonth month) {
-        return attendances.findByMonth(new EmployeeId(employeeId), month).stream()
+    public List<DailyAttendanceResponse> list(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId, @RequestParam YearMonth month) {
+        return attendances.findByMonth(principal.toRequester(),
+                        new EmployeeId(employeeId), month).stream()
                 .map(DailyAttendanceResponse::from).toList();
     }
 
     /** 指定日の日次勤怠（内訳つき）。 */
     @GetMapping("/{workDate}")
-    public DailyAttendanceResponse get(@PathVariable UUID employeeId,
-                                       @PathVariable LocalDate workDate) {
-        return attendances.find(new EmployeeId(employeeId), workDate)
+    public DailyAttendanceResponse get(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId, @PathVariable LocalDate workDate) {
+        return attendances.find(principal.toRequester(), new EmployeeId(employeeId), workDate)
                 .map(DailyAttendanceResponse::from)
                 .orElseThrow(() -> new AttendanceNotFoundException(workDate));
     }

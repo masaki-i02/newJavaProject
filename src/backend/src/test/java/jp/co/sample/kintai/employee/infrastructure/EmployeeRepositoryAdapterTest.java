@@ -10,12 +10,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-
 import jp.co.sample.kintai.employee.domain.Assignment;
 import jp.co.sample.kintai.employee.domain.AssignmentRepository;
 import jp.co.sample.kintai.employee.domain.Department;
@@ -29,9 +23,14 @@ import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
 import jp.co.sample.kintai.employee.domain.OrganizationChart;
-import jp.co.sample.kintai.employee.domain.Role;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.IntegrationTestBase;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 社員・組織の永続化アダプタ（IT-EMP-15〜24）。

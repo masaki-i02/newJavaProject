@@ -1,5 +1,6 @@
 package jp.co.sample.kintai.architecture;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.simpleNameEndingWith;
 import static com.tngtech.archunit.core.domain.properties.CanBeAnnotated.Predicates.annotatedWith;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
@@ -87,7 +88,10 @@ class LayerDependencyTest {
     static final ArchRule AR_05_entities_must_stay_inside_infrastructure =
             noClasses().that().resideOutsideOfPackage("..infrastructure..")
                     .should().dependOnClassesThat(
-                            simpleNameEndingWith("Entity")
+                            // ★ 名前の規約は自分たちのパッケージにだけ当てる。
+                            //   Spring の ResponseEntity も "Entity" で終わる
+                            resideInAPackage("jp.co.sample..")
+                                    .and(simpleNameEndingWith("Entity"))
                                     .or(annotatedWith(jakarta.persistence.Entity.class)))
                     .allowEmptyShould(true)
                     .because("JPA エンティティはパッケージプライベートに保つ（CLAUDE.md 4.3）");

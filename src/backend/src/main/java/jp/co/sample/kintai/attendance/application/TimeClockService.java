@@ -15,7 +15,9 @@ import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
+import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
@@ -61,12 +63,23 @@ public class TimeClockService {
     /**
      * 打刻する。
      *
+     * <p><strong>打刻できるのは本人だけである</strong>（要件定義書 4 章）。
+     * 上長も人事も他人の打刻はできない。打刻は<strong>一次証拠</strong>であり、
+     * 本人以外が作れると「その時刻にその人がいた」という記録の意味が消える。
+     * 代理で直す必要があるときは訂正申請（BR-09）を通す。
+     *
+     * @param requester  依頼者。<strong>「誰の依頼か」を引数で受け取る</strong>
+     *                   （CLAUDE.md 落とし穴 42）
      * @param occurredAt 打刻時刻。空なら {@link Clock} から解決する。
      *                   <strong>プレゼンテーション層で埋めない</strong>（AR-09）
      */
     @Transactional
-    public PunchResult punch(EmployeeId employeeId, TimeClockEvent.Type type,
+    public PunchResult punch(Requester requester, EmployeeId employeeId,
+                             TimeClockEvent.Type type,
                              Optional<LocalDateTime> occurredAt) {
+        if (!requester.isSelf(employeeId)) {
+            throw new AccessDeniedException();
+        }
         LocalDateTime at = occurredAt.orElseGet(() -> LocalDateTime.now(clock));
         LocalDate workDate = resolveWorkDate(employeeId, at);
         TimeClockEvent event = type.at(at);

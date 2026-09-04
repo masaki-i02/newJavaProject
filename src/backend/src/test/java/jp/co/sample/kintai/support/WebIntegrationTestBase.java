@@ -1,5 +1,10 @@
 package jp.co.sample.kintai.support;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+
+import java.util.Set;
+
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -8,7 +13,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+
+import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
+import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 // Spring Boot 4 は Jackson 3 を使う。ObjectMapper のパッケージが
 // com.fasterxml.jackson.databind から tools.jackson.databind へ変わっている
@@ -40,6 +50,21 @@ public abstract class WebIntegrationTestBase {
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
         PostgresSupport.register(registry);
+    }
+
+    /**
+     * その社員として認証済みにする。
+     *
+     * <p>CSRF トークンも一緒に載せる。<strong>2 つを別々に書かせない。</strong>
+     * 片方だけを付け忘れたテストは 403 で落ちるが、
+     * 「認可の欠陥を見つけた」のか「テストの書き忘れ」なのか区別できない。
+     */
+    protected RequestPostProcessor as(EmployeeId employeeId, String employeeNumber,
+                                      Role... roles) {
+        var principal = new AuthenticatedEmployee(employeeId, employeeNumber,
+                employeeNumber + " の人", Set.of(roles));
+        return request -> csrf().postProcessRequest(
+                user(principal).postProcessRequest(request));
     }
 
     @BeforeEach

@@ -12,19 +12,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
-
 import jp.co.sample.kintai.employee.domain.Email;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
-import jp.co.sample.kintai.employee.domain.Role;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.WebIntegrationTestBase;
 import jp.co.sample.kintai.support.WorkRules;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
@@ -32,6 +25,12 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 
 /**
  * 打刻と日次勤怠の API（IT-API-01〜12）。
@@ -56,6 +55,11 @@ class TimeClockApiTest extends WebIntegrationTestBase {
 
     private EmployeeId taro;
 
+    /** 太郎として認証済みにする。CSRF トークンも載る。 */
+    private org.springframework.test.web.servlet.request.RequestPostProcessor asTaro() {
+        return as(taro, "E0001", Role.EMPLOYEE);
+    }
+
     @BeforeEach
     void setUpMasterData() {
         taro = new EmployeeId(UUID.randomUUID());
@@ -75,6 +79,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
                 ? "{\"type\":\"%s\"}".formatted(type)
                 : "{\"type\":\"%s\",\"occurredAt\":\"%s\"}".formatted(type, at);
         return mockMvc.perform(post("/api/employees/{id}/time-clocks", taro.value())
+                .with(asTaro())
                 .contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
@@ -197,7 +202,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_IN", "2026-04-06T09:00:00").andExpect(status().isCreated());
 
             mockMvc.perform(get("/api/employees/{id}/attendances/{date}",
-                            taro.value(), "2026-04-06"))
+                            taro.value(), "2026-04-06").with(asTaro()))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:resource-not-found"))
@@ -208,6 +213,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
         @DisplayName("IT-API-08 打刻種別を欠くと 400 validation-failed")
         void missingType() throws Exception {
             mockMvc.perform(post("/api/employees/{id}/time-clocks", taro.value())
+                            .with(asTaro())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"occurredAt\":\"2026-04-06T09:00:00\"}"))
                     .andExpect(status().isBadRequest())
@@ -229,12 +235,14 @@ class TimeClockApiTest extends WebIntegrationTestBase {
                     Set.of(Role.EMPLOYEE)));
 
             mockMvc.perform(post("/api/employees/{id}/time-clocks", jiro.value())
+                            .with(as(jiro, "E0003", Role.EMPLOYEE))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"type\":\"CLOCK_IN\","
                                     + "\"occurredAt\":\"2026-04-06T09:00:00\"}"))
                     .andExpect(status().isCreated());
 
             mockMvc.perform(post("/api/employees/{id}/time-clocks", jiro.value())
+                            .with(as(jiro, "E0003", Role.EMPLOYEE))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"type\":\"CLOCK_OUT\","
                                     + "\"occurredAt\":\"2026-04-06T18:00:00\"}"))
@@ -261,7 +269,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_OUT", "2026-04-07T02:00:00");
 
             mockMvc.perform(get("/api/employees/{id}/attendances/{date}",
-                            taro.value(), "2026-04-06"))
+                            taro.value(), "2026-04-06").with(asTaro()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.workDate").value("2026-04-06"))
                     .andExpect(jsonPath("$.dayType").value("WORKDAY"))
@@ -288,6 +296,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_IN", "2026-04-08T09:00:00");
 
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
                             .param("month", "2026-04"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()").value(1))
@@ -305,6 +314,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_OUT", "2026-04-30T18:00:00");
 
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
                             .param("month", "2026-04"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()").value(1))
@@ -315,6 +325,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
         @DisplayName("計算された勤怠が無い月は空の配列を返す")
         void emptyMonth() throws Exception {
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
                             .param("month", "2026-05"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.length()").value(0));

@@ -1,10 +1,5 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
-import java.time.LocalDate;
-import java.util.LinkedHashSet;
-import java.util.Set;
-import java.util.UUID;
-
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -16,8 +11,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import java.time.LocalDate;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.UUID;
 
-import jp.co.sample.kintai.employee.domain.Role;
+import jp.co.sample.kintai.shared.domain.Role;
 
 /**
  * 社員の永続化。<strong>パッケージプライベートに保つ</strong>（CLAUDE.md 4.3・AR-05）。

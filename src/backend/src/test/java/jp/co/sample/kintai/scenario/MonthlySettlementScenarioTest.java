@@ -11,12 +11,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-
 import jp.co.sample.kintai.attendance.application.MonthlySettlementService;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceCalculator;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
@@ -27,8 +21,8 @@ import jp.co.sample.kintai.employee.domain.Email;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
-import jp.co.sample.kintai.employee.domain.Role;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 import jp.co.sample.kintai.support.WorkRules;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
@@ -39,6 +33,11 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 機能をまたいだ通しの確認（IT-SCN-20〜25）。

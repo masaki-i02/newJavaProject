@@ -2,40 +2,77 @@ package jp.co.sample.kintai.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
 /**
- * 認証・認可の設定。
+ * 認証・認可の設定（要件定義書 4 章 / API 設計書 3.9）。
  *
- * <p><strong>M1-a の時点では認証をかけていない。</strong>
- * 認証・認可は M1-c のスコープ（要件定義書 4 章・BR-11）であり、
- * ここで中途半端に入れると「誰として打刻しているか」の判定が
- * 2 か所（この設定と後で入れる本実装）に散る。
- *
- * <p>そのかわり <strong>この状態が本番へ出ないことを型と設定で担保できない</strong>ので、
- * 未決事項として残す（[CLAUDE.md 7 章] #7）。
- * M1-c では次を入れる。
- * <ul>
- *   <li>社員番号によるフォームログイン（メールは退職者の再割り当てと衝突する）</li>
- *   <li>ロールによる認可（{@code EMPLOYEE} / {@code APPROVER} / {@code HR} / {@code ADMIN}）</li>
- *   <li>閲覧範囲の判定（本人・上長・人事）。<strong>これは業務判断なので
- *       {@code application} 層に置き、ここには置かない</strong></li>
- * </ul>
+ * <p><strong>ここに置くのは「ロールを持っているか」までである。</strong>
+ * 「配下部署の社員か」「本人か」は組織の状態に依存する業務判断なので、
+ * {@code application} 層が {@code OrganizationChart} を引いて行う。
+ * 認可の判断が 2 か所に散ると、片方だけを直した状態が生まれる。
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http,
+                                    SecurityContextRepository securityContextRepository)
+            throws Exception {
+        var csrfHandler = new CsrfTokenRequestAttributeHandler();
+        // SPA は XSRF-TOKEN クッキーを読んで X-XSRF-TOKEN ヘッダへ載せる。
+        // ヘッダの値をそのまま使うので BREACH 対策の難読化は行わない
+        csrfHandler.setCsrfRequestAttributeName(null);
+
         return http
-                // API は状態を持たないので CSRF トークンを使わない。
-                // M1-c でセッション認証を入れるときに、あわせて有効化する
-                .csrf(csrf -> csrf.disable())
-                .authorizeHttpRequests(requests -> requests.anyRequest().permitAll())
+                // ★ Cookie でセッションを持つので CSRF 対策を外せない。
+                //   M1-a では API に認証が無かったため無効にしていた
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRequestHandler(csrfHandler)
+                        // ログインの時点ではまだトークンを配っていない
+                        .ignoringRequestMatchers("/api/sessions"))
+                .securityContext(context -> context
+                        .securityContextRepository(securityContextRepository))
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                .authorizeHttpRequests(requests -> requests
+                        // ログインは未認証で通す。それ以外の /api は必ず認証を要求する
+                        .requestMatchers("/api/sessions").permitAll()
+                        .requestMatchers("/api/**").authenticated()
+                        .anyRequest().denyAll())
+                // ★ 未認証は 401。既定のままだとログイン画面へ 302 になり、
+                //   fetch から見ると「成功した HTML」が返る
+                .exceptionHandling(handling -> handling
+                        .authenticationEntryPoint(
+                                new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())
                 .build();
+    }
+
+    /**
+     * 認証結果の置き場所。
+     *
+     * <p>{@code SessionController} が明示的に保存する。
+     * 既定のフォームログインを使わないので、保存も自分で行う。
+     */
+    @Bean
+    SecurityContextRepository securityContextRepository() {
+        return new HttpSessionSecurityContextRepository();
     }
 
     /**

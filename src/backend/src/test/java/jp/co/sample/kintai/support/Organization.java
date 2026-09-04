@@ -23,8 +23,8 @@ import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
 import jp.co.sample.kintai.employee.domain.OrganizationChart;
 import jp.co.sample.kintai.employee.domain.RepositoryBackedOrganizationChart;
-import jp.co.sample.kintai.employee.domain.Role;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
 
 /**
  * 組織をメモリ上に組み立てる。

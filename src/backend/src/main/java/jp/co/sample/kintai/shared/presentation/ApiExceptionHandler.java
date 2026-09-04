@@ -45,6 +45,7 @@ public class ApiExceptionHandler {
             case CONFLICT -> HttpStatus.CONFLICT;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case UNAUTHENTICATED -> HttpStatus.UNAUTHORIZED;
         };
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
         problem.setType(URI.create(e.errorCode()));

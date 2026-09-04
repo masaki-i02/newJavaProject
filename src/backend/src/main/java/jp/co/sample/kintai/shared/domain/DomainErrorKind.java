@@ -24,6 +24,15 @@ public enum DomainErrorKind {
     /** 対象が存在しない。 */
     NOT_FOUND,
 
-    /** 権限または閲覧範囲が足りない。 */
-    FORBIDDEN
+    /** 権限または閲覧範囲が足りない。<strong>誰であるかは分かっている。</strong> */
+    FORBIDDEN,
+
+    /**
+     * 誰であるかが分かっていない。
+     *
+     * <p>{@link #FORBIDDEN} と分ける。
+     * 401 は「ログインし直せば通るかもしれない」、403 は「ログインし直しても通らない」であり、
+     * 画面の出し分けが変わる。
+     */
+    UNAUTHENTICATED
 }

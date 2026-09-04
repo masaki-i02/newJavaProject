@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.Organization;
 
 /**

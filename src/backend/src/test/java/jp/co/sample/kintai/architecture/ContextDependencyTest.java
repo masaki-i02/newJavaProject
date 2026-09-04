@@ -50,7 +50,8 @@ class ContextDependencyTest {
                     .should(dependOnAnotherContextsInternals())
                     .allowEmptyShould(true)
                     .because("他コンテキストの実装や API に触れると、"
-                            + "内部の変更が境界を越えて伝播する。参照してよいのは domain だけ");
+                            + "内部の変更が境界を越えて伝播する。参照してよいのは domain だけ。"
+                            + "shared は共有のためのパッケージなので対象外");
 
     /** AR-07 コンテキスト間の依存に循環がない。 */
     @ArchTest
@@ -72,6 +73,9 @@ class ContextDependencyTest {
                     .because("shared が個別のコンテキストを知ると、"
                             + "すべてのコンテキストが間接的に結合する");
 
+    /** 業務コンテキストではない、共有のためのパッケージ。 */
+    private static final String SHARED = "shared";
+
     private static ArchCondition<JavaClass> dependOnAnotherContextsInternals() {
         return new ArchCondition<>("他コンテキストの infrastructure / presentation に依存する") {
             @Override
@@ -83,7 +87,13 @@ class ContextDependencyTest {
                 for (Dependency dependency : item.getDirectDependenciesFromSelf()) {
                     String target = dependency.getTargetClass().getPackageName();
                     Optional<String> other = contextOf(target);
-                    boolean crossesContext = other.isPresent() && !other.get().equals(own.get());
+                    // ★ shared は業務コンテキストではない。共有するために置いてある。
+                    //   ここを除かないと、全コンテキストが使う ApiExceptionHandler や
+                    //   認証済み利用者（shared.presentation）を参照できない。
+                    //   shared が個別のコンテキストへ依存しないことは AR-10 が守る
+                    boolean crossesContext = other.isPresent()
+                            && !other.get().equals(own.get())
+                            && !other.get().equals(SHARED);
                     boolean touchesInternals = target.contains(".infrastructure")
                             || target.contains(".presentation");
                     if (crossesContext && touchesInternals) {
