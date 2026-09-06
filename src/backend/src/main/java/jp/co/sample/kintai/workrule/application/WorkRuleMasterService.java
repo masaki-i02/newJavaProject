@@ -324,11 +324,25 @@ public class WorkRuleMasterService {
      *
      * <p>閾値は法から出す。<strong>「登録日数が 100 日未満なら」のような数字を置かない</strong>
      * （CLAUDE.md「法定値の制約」）。
+     *
+     * <p><strong>週の数は切り上げる。</strong>
+     * 32 条が定めるのは 1 週の上限であって年間の上限ではない。
+     * 年度は週の整数倍ではないので（365 日 = 52 週 + 1 日）、
+     * {@code 暦日数 ÷ 7} で数えると<strong>端数の週を数え落とす。</strong>
+     * 土日を休みにしただけの正当なカレンダーが
+     * 261 日 × 8 時間 = 2,088 時間となり、切り捨てた総枠 2,085 時間 42 分を超えて
+     * <strong>拒否されてしまう</strong>（落とし穴 23・51）。
+     * 端数の週も 1 週と数えて 53 週 = 2,120 時間を上限にする。
+     *
+     * <p>この上限は緩い。狙いは
+     * <strong>全日を所定労働日として登録した年度</strong>（2,920 時間）のような
+     * 明らかな誤りを捕まえることであり、週ごとの上限は
+     * {@code schedule-exceeds-statutory-limit} の警告が別に担う。
      */
     private void requireWithinStatutoryYear(int fiscalYear, DateRange period,
                                             Duration annualTotal) {
-        Duration limit = WorkRule.STATUTORY_WEEKLY
-                .multipliedBy(period.days()).dividedBy(7);
+        long weeks = (period.days() + 6) / 7;
+        Duration limit = WorkRule.STATUTORY_WEEKLY.multipliedBy(weeks);
         if (annualTotal.compareTo(limit) > 0) {
             throw new CalendarExceedsStatutoryYearException(fiscalYear, annualTotal, limit);
         }
