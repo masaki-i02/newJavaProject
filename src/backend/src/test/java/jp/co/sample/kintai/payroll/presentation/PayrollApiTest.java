@@ -42,7 +42,7 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
 
 /**
- * 給与連携の API（IT-PAY-28〜51・BR-18）。
+ * 給与連携の API（IT-PAY-27〜51・BR-18）。
  *
  * <p>出力は<strong>締め済みの月次清算を読むだけ</strong>なので、
  * 前提として打刻 → 提出 → 承認 → 締め までを本番の経路で作る。
@@ -140,6 +140,79 @@ class PayrollApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.excluded[?(@.employeeNumber=='E0900')].reason")
                             .value("NO_ATTENDANCE_RECORD"))
                     .andExpect(jsonPath("$.monthlyAverageMinutes").value(10_440));
+        }
+
+        @Test
+        @DisplayName("IT-PAY-27 締め済みの月を出力すると在籍者ぶんの結果が返る")
+        void closedMonthIsExported() throws Exception {
+            workAndClose(taro, MAY);
+            workAndClose(boss, MAY);
+
+            mockMvc.perform(post("/api/payroll/exports")
+                            .contentType("application/json")
+                            .content("{\"month\":\"2026-05\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.rowCount").value(2))
+                    .andExpect(jsonPath("$.excluded.length()").value(1));
+        }
+
+        @Test
+        @DisplayName("IT-PAY-30 その月の打刻が 1 件も無い社員は休業か打刻漏れとして返る")
+        void noAttendanceRecord() throws Exception {
+            mockMvc.perform(post("/api/payroll/exports")
+                            .contentType("application/json")
+                            .content("{\"month\":\"2026-05\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.excluded[?(@.employeeNumber=='E0001')].reason")
+                            .value("NO_ATTENDANCE_RECORD"));
+        }
+
+        /** 状態ごとに違う案内を返す。まとめると人事が次に何をすべきか分からない。 */
+        @Test
+        @DisplayName("IT-PAY-32 提出済みは未承認、承認済みは未締めとして分けて返る")
+        void submittedAndApprovedAreDistinguished() throws Exception {
+            workAllMonth(taro, MAY);
+            attendances.submit(new Requester(taro, Set.of(Role.EMPLOYEE)), taro, MAY,
+                    Optional.empty(), 0L);
+
+            workAllMonth(boss, MAY);
+            Requester humanResources = new Requester(hr, Set.of(Role.EMPLOYEE, Role.HR));
+            attendances.submit(new Requester(boss, Set.of(Role.EMPLOYEE)), boss, MAY,
+                    Optional.empty(), 0L);
+            attendances.approve(humanResources, boss, MAY,
+                    attendances.currentVersion(humanResources, boss, MAY));
+
+            mockMvc.perform(post("/api/payroll/exports")
+                            .contentType("application/json")
+                            .content("{\"month\":\"2026-05\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.excluded[?(@.employeeNumber=='E0001')].reason")
+                            .value("NOT_APPROVED"))
+                    .andExpect(jsonPath("$.excluded[?(@.employeeNumber=='E0500')].reason")
+                            .value("NOT_CLOSED"));
+        }
+
+        /**
+         * <strong>月中入社の社員の清算期間は在籍期間との交差になる。</strong>
+         * 暦月で数えると、入社前の日まで所定労働日に数えて不足時間が水増しされる。
+         */
+        @Test
+        @DisplayName("IT-PAY-39 月中入社の社員も対象になる")
+        void hiredMidMonth() throws Exception {
+            EmployeeId newcomer = hire("E0004", LocalDate.of(2026, 5, 18),
+                    Optional.empty(), Role.EMPLOYEE);
+            series.assign(newcomer, standard, LocalDate.of(2026, 5, 18));
+
+            mockMvc.perform(post("/api/payroll/exports")
+                            .contentType("application/json")
+                            .content("{\"month\":\"2026-05\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.excluded[?(@.employeeNumber=='E0004')]")
+                            .isNotEmpty());
         }
 
         /**
@@ -320,6 +393,62 @@ class PayrollApiTest extends WebIntegrationTestBase {
                     .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
             assertThat(csv.lines().count()).as("記録した対象社員に閉じる").isEqualTo(2);
+        }
+
+        /**
+         * <strong>CSV の値は保存済みの月次清算そのものである。</strong>
+         * 出力のたびに計算し直すと、会社カレンダーの過去分が変わったときに値が動く。
+         */
+        @Test
+        @DisplayName("IT-PAY-46 CSV の値が保存済みの月次清算と一致する")
+        void csvMatchesTheStoredSettlement() throws Exception {
+            workAndClose(taro, MAY);
+            String id = createExport();
+
+            String csv = mockMvc.perform(get("/api/payroll/exports/" + id)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            String[] columns = csv.lines().skip(1).findFirst().orElseThrow().split(",");
+
+            Integer stored = jdbc.queryForObject("""
+                    SELECT working_minutes FROM monthly_settlements
+                     WHERE employee_id = ? AND target_month = DATE '2026-05-01'
+                    """, Integer.class, taro.value());
+            assertThat(Integer.parseInt(columns[9])).isEqualTo(stored);
+        }
+
+        /**
+         * <strong>法定休日には所定が無いので、法定休日労働は必ず所定超に入る。</strong>
+         * 1.0 + 0.35 が支払われる。
+         */
+        @Test
+        @DisplayName("IT-PAY-48 法定休日に働いた月は所定超と法定休日の両方に入る")
+        void legalHolidayWorkAppearsInBothColumns() throws Exception {
+            workAllMonth(taro, MAY);
+            // 5/10 は日曜（法定休日）
+            LocalDate sunday = LocalDate.of(2026, 5, 10);
+            punch(taro, sunday, TimeClockEvent.Type.CLOCK_IN, 9);
+            punch(taro, sunday, TimeClockEvent.Type.CLOCK_OUT, 17);
+            Requester self = new Requester(taro, Set.of(Role.EMPLOYEE));
+            Requester humanResources = new Requester(hr, Set.of(Role.EMPLOYEE, Role.HR));
+            Requester approver = new Requester(boss, Set.of(Role.EMPLOYEE, Role.APPROVER));
+            attendances.submit(self, taro, MAY, Optional.empty(), 0L);
+            attendances.approve(approver, taro, MAY,
+                    attendances.currentVersion(humanResources, taro, MAY));
+            attendances.close(humanResources, taro, MAY,
+                    attendances.currentVersion(humanResources, taro, MAY));
+            String id = createExport();
+
+            String csv = mockMvc.perform(get("/api/payroll/exports/" + id)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            String[] columns = csv.lines().skip(1).findFirst().orElseThrow().split(",");
+
+            assertThat(Integer.parseInt(columns[14]))
+                    .as("法定休日労働 8 時間").isEqualTo(480);
+            assertThat(Integer.parseInt(columns[11]))
+                    .as("法定休日の所定は 0 なので、所定超にも 8 時間が入る")
+                    .isGreaterThanOrEqualTo(480);
         }
 
         @Test

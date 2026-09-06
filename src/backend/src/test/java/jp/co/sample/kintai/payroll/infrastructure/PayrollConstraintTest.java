@@ -15,7 +15,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 
 /**
- * 給与連携の記録の制約（IT-PAY-18〜27・BR-18）。
+ * 給与連携の記録の制約（IT-PAY-18〜26・52・BR-18）。
  *
  * <p><strong>「拒否された」ではなく「狙った制約で拒否された」ことを確かめる。</strong>
  * 別の制約に先に引っかかると、狙った検証は行われていない（CLAUDE.md 落とし穴 17・25）。
@@ -55,7 +55,7 @@ class PayrollConstraintTest extends IntegrationTestBase {
      * 月平均だけを残すと、それがどの日数から出たのかを後から言えない。
      */
     @Test
-    @DisplayName("IT-PAY-27 月平均が年間の所定 ÷ 12 と食い違うと拒否される")
+    @DisplayName("IT-PAY-52 月平均が年間の所定 ÷ 12 と食い違うと拒否される")
     void monthlyAverageMustBeDerived() {
         assertThatThrownBy(() -> jdbc.update("""
                 INSERT INTO payroll_exports (id, target_month, exported_by, fiscal_year,

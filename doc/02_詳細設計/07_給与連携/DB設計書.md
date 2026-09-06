@@ -229,14 +229,14 @@ VALUES (:id, :targetMonth, :exportedBy, :fiscalYear,
 
 ## 6. 制約の検証
 
-**検証環境**: PostgreSQL 16 / 2026-09-06 実施。
+**検証環境**: PostgreSQL 16 / 2026-09-06 実施。実装後は `PayrollConstraintTest` が同じ観点を自動で確かめる。
 V1〜V8 を空のデータベースへ順に適用し、`psql` から直接確かめた。
 
 | ID | 観点 | 期待 | 結果 |
 | --- | --- | --- | --- |
 | IT-PAY-18 | 対象月に月初日以外を入れる | `payroll_exports_month_check` で拒否 | 確認 |
 | IT-PAY-19 | 月平均を 0 にする | `payroll_exports_average_check` で拒否 | 確認 |
-| IT-PAY-27 | **月平均が年間の所定 ÷ 12 と食い違う** | `payroll_exports_average_derivation_check` で拒否 | 未実施（0.3 で追加）|
+| IT-PAY-52 | **月平均が年間の所定 ÷ 12 と食い違う** | `payroll_exports_average_derivation_check` で拒否 | 確認 |
 | IT-PAY-20 | 実在しない社員を実行者にする | `payroll_exports_exported_by_fkey` で拒否 | 確認 |
 | IT-PAY-21 | **同じ月を 2 回記録する** | 通る。再出力は正当である | 確認 |
 | IT-PAY-22 | `exported_at` を渡さずに挿入 | DB の `now()` が入る | 確認 |
