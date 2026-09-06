@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import jp.co.sample.kintai.approval.application.MonthlyAttendanceService;
 import jp.co.sample.kintai.approval.domain.Approver;
 import jp.co.sample.kintai.approval.domain.ApproverPolicy;
+import jp.co.sample.kintai.approval.domain.NotApproverException;
 import jp.co.sample.kintai.attendance.application.MonthlySettlementService;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
@@ -24,7 +25,9 @@ import jp.co.sample.kintai.leave.domain.LeaveRequestEventKind;
 import jp.co.sample.kintai.leave.domain.LeaveRequestStatus;
 import jp.co.sample.kintai.leave.domain.NotTheRequesterException;
 import jp.co.sample.kintai.leave.domain.PaidLeaveBalance;
+import jp.co.sample.kintai.leave.domain.PaidLeaveGrant;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantId;
+import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequestId;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequestRepository;
@@ -48,6 +51,7 @@ import jp.co.sample.kintai.workrule.domain.DayType;
 public class PaidLeaveRequestService {
 
     private final PaidLeaveRequestRepository requests;
+    private final PaidLeaveGrantRepository grants;
     private final PaidLeaveBalanceService balances;
     private final EmployeeRepository employees;
     private final DailyAttendanceRepository dailyAttendances;
@@ -60,6 +64,7 @@ public class PaidLeaveRequestService {
     private final Clock clock;
 
     public PaidLeaveRequestService(PaidLeaveRequestRepository requests,
+                                   PaidLeaveGrantRepository grants,
                                    PaidLeaveBalanceService balances,
                                    EmployeeRepository employees,
                                    DailyAttendanceRepository dailyAttendances,
@@ -71,6 +76,7 @@ public class PaidLeaveRequestService {
                                    CompanyCalendar calendar,
                                    Clock clock) {
         this.requests = requests;
+        this.grants = grants;
         this.balances = balances;
         this.employees = employees;
         this.dailyAttendances = dailyAttendances;
@@ -126,8 +132,8 @@ public class PaidLeaveRequestService {
      * </ol>
      */
     @Transactional
-    public PaidLeaveRequest approve(Requester requester, PaidLeaveRequestId id,
-                                    long expectedVersion) {
+    public LeaveDecisionResult approve(Requester requester, PaidLeaveRequestId id,
+                                       long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
         YearMonth month = YearMonth.from(request.leaveDate());
         requireMonthEditable(request.employeeId(), month);
@@ -154,13 +160,13 @@ public class PaidLeaveRequestService {
         record(approved, Optional.of(LeaveRequestStatus.SUBMITTED),
                 LeaveRequestEventKind.APPROVE, requester.employeeId(), Optional.empty(), at);
         applySideEffects(request, requester, id);
-        return approved;
+        return resultOf(approved);
     }
 
     /** 却下する（BR-16）。理由が必須。 */
     @Transactional
-    public PaidLeaveRequest reject(Requester requester, PaidLeaveRequestId id,
-                                   String comment, long expectedVersion) {
+    public LeaveDecisionResult reject(Requester requester, PaidLeaveRequestId id,
+                                      String comment, long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
         // ★ 締め済みの月でも却下できる。却下は残日数も月次清算も動かさないので、
         //   拒否すると遷移先の無い申請が残るだけである
@@ -173,7 +179,7 @@ public class PaidLeaveRequestService {
         record(rejected, Optional.of(LeaveRequestStatus.SUBMITTED),
                 LeaveRequestEventKind.REJECT, requester.employeeId(),
                 Optional.of(comment), at);
-        return rejected;
+        return resultOf(rejected);
     }
 
     /**
@@ -185,8 +191,8 @@ public class PaidLeaveRequestService {
      * どの状態にも遷移できなくなる（落とし穴 93）。
      */
     @Transactional
-    public PaidLeaveRequest cancel(Requester requester, PaidLeaveRequestId id,
-                                   long expectedVersion) {
+    public LeaveDecisionResult cancel(Requester requester, PaidLeaveRequestId id,
+                                      long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
         boolean wasApproved = request.status() == LeaveRequestStatus.APPROVED;
         if (wasApproved) {
@@ -205,7 +211,7 @@ public class PaidLeaveRequestService {
         if (wasApproved) {
             applySideEffects(request, requester, id);
         }
-        return canceled;
+        return resultOf(canceled);
     }
 
     /**
@@ -216,8 +222,8 @@ public class PaidLeaveRequestService {
      * <strong>年休を 1 日消費したままその日も働く</strong>ことになる。
      */
     @Transactional
-    public PaidLeaveRequest revoke(Requester requester, PaidLeaveRequestId id,
-                                   String comment, long expectedVersion) {
+    public LeaveDecisionResult revoke(Requester requester, PaidLeaveRequestId id,
+                                      String comment, long expectedVersion) {
         if (!requester.has(Role.HR)) {
             throw new AccessDeniedException();
         }
@@ -232,7 +238,7 @@ public class PaidLeaveRequestService {
                 LeaveRequestEventKind.REVOKE, requester.employeeId(),
                 Optional.of(comment), at);
         applySideEffects(request, requester, id);
-        return revoked;
+        return resultOf(revoked);
     }
 
     /**
@@ -271,6 +277,34 @@ public class PaidLeaveRequestService {
                 .filter(request -> visibility.canView(requester, request.employeeId(),
                         request.leaveDate()))
                 .toList();
+    }
+
+    /**
+     * 遷移の結果を組み立てる。
+     *
+     * <p><strong>版は読み直す。</strong> 更新は SQL 側で 1 つ進めるので、
+     * 手元の集約は古い版を持ったままである。画面はこの版で次の操作を出すので、
+     * 返さないと必ず 1 回 {@code 409} を踏む。
+     */
+    private LeaveDecisionResult resultOf(PaidLeaveRequest request) {
+        return new LeaveDecisionResult(request, requests.currentVersion(request.id()),
+                allocatedGrantDateOf(request),
+                monthlyAttendances.stateOf(request.employeeId(),
+                        YearMonth.from(request.leaveDate())));
+    }
+
+    /**
+     * どの付与から消化したかの<strong>付与日</strong>。
+     *
+     * <p>識別子ではなく日付を返す。<strong>失効時期に直結する</strong>ので、
+     * 「残 3 日」とだけ示されても、それが今月末に失効するのかは分からない。
+     */
+    private Optional<LocalDate> allocatedGrantDateOf(PaidLeaveRequest request) {
+        return request.grantId().flatMap(grantId ->
+                grants.findAll(request.employeeId()).stream()
+                        .filter(grant -> grant.id().equals(grantId))
+                        .map(PaidLeaveGrant::grantedOn)
+                        .findFirst());
     }
 
     /**
@@ -357,7 +391,7 @@ public class PaidLeaveRequestService {
                                  YearMonth month) {
         Approver approver = approverPolicy.resolve(employeeId, month, LocalDate.now(clock));
         if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new AccessDeniedException();
+            throw new NotApproverException();
         }
     }
 
@@ -380,7 +414,7 @@ public class PaidLeaveRequestService {
             return;
         }
         if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new AccessDeniedException();
+            throw new NotApproverException();
         }
     }
 

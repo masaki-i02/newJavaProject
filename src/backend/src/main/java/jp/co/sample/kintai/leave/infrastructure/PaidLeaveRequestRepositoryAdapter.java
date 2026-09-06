@@ -113,6 +113,14 @@ class PaidLeaveRequestRepositoryAdapter implements PaidLeaveRequestRepository {
     }
 
     @Override
+    public long currentVersion(PaidLeaveRequestId id) {
+        List<Long> found = jdbc.queryForList(
+                "SELECT version FROM paid_leave_requests WHERE id = ?",
+                Long.class, id.value());
+        return found.isEmpty() ? 0L : found.getFirst();
+    }
+
+    @Override
     public List<PaidLeaveRequest> findPending() {
         return jdbc.query(SELECT + " WHERE status = 'SUBMITTED'"
                 + " ORDER BY leave_date, requested_at", this::toRequest);

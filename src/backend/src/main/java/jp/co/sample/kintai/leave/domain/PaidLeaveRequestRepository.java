@@ -17,6 +17,14 @@ public interface PaidLeaveRequestRepository {
 
     Optional<PaidLeaveRequest> find(PaidLeaveRequestId id);
 
+    /**
+     * いまの版。<strong>行が無ければ 0。</strong>
+     *
+     * <p>更新は SQL 側で版を 1 つ進めるので、遷移させた集約は古い版を持ったままである。
+     * 画面はこの版で次の操作を出すので、読み直して返す。
+     */
+    long currentVersion(PaidLeaveRequestId id);
+
     /** その社員の申請をすべて読む。残日数の計算に使う。 */
     List<PaidLeaveRequest> findByEmployee(EmployeeId employeeId);
 

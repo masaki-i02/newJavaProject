@@ -70,8 +70,13 @@ public abstract class WebIntegrationTestBase {
     @BeforeEach
     void setUpWeb() {
         jdbc = new JdbcTemplate(dataSource);
+        // ★ 年休の 3 表も明示して消す。employees の CASCADE で連鎖はするが、
+        //   何を消しているかを一覧から読めるようにする（IntegrationTestBase と同じ形）
         jdbc.execute("""
                 TRUNCATE TABLE
+                    paid_leave_request_events,
+                    paid_leave_requests,
+                    paid_leave_grants,
                     approval_events,
                     time_clock_correction_items,
                     time_clock_correction_requests,

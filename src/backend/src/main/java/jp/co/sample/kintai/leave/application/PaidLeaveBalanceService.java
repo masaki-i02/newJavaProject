@@ -2,6 +2,7 @@ package jp.co.sample.kintai.leave.application;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -86,6 +87,45 @@ public class PaidLeaveBalanceService {
                 actual.remainingDays(date),
                 projected.availableDays(requestableWindow(date), pendingDatesOf(requested)),
                 all, actual.remainingByGrant(), obligationsOf(all, requested, date));
+    }
+
+    /**
+     * 年 5 日の取得義務が未達の社員（BR-17）。
+     *
+     * <p><strong>閲覧範囲で絞る。</strong> 絞らないと、一般の承認者が
+     * 配下でない社員の年休の取得状況を見られる（要件 4.1）。
+     * 絞りを SQL に写さないのは、「配下部署か」が組織と基準日に依存するからである
+     * （訂正申請・年休の承認待ち一覧と同じ形）。
+     *
+     * <p><strong>基準日はその義務期間に含まれるかで判定する。</strong>
+     * 「いま進行中の 1 年」を対象にするので、
+     * 付与日から 1 年を過ぎた義務（もう是正できないもの）は出さない。
+     *
+     * @param onlyShortfall 未達の社員だけに絞るか。{@code false} なら充足も返す
+     */
+    @Transactional(readOnly = true)
+    public ObligationList obligationsFor(Requester requester, Optional<LocalDate> asOf,
+                                         boolean onlyShortfall) {
+        LocalDate date = asOf.orElseGet(() -> LocalDate.now(clock));
+        List<ObligationSummary> result = new ArrayList<>();
+        for (Employee employee : employees.findForDirectory(date, false)) {
+            if (!visibility.canView(requester, employee.id(), date)) {
+                continue;
+            }
+            List<PaidLeaveRequest> requested = requests.findByEmployee(employee.id());
+            for (AnnualObligation obligation
+                    : obligationsOf(grants.findAll(employee.id()), requested, date)) {
+                if (!obligation.period().contains(date)) {
+                    continue;
+                }
+                if (onlyShortfall && obligation.isFulfilled()) {
+                    continue;
+                }
+                result.add(new ObligationSummary(employee.id(), obligation,
+                        (int) ChronoUnit.DAYS.between(date, obligation.period().toExclusive())));
+            }
+        }
+        return new ObligationList(date, result);
     }
 
     /**

@@ -65,7 +65,7 @@
 | `urn:kintai:error:daily-attendance-incomplete` | 409 | 未確定の日次勤怠が残っている |
 | `urn:kintai:error:month-already-closed` | 409 | 締め済みの月 |
 | `urn:kintai:error:month-not-editable` | 409 | 承認済みまたは締め済みで変更できない |
-| `urn:kintai:error:not-approver` | 403 | BR-11 の承認者ではない |
+| `urn:kintai:error:not-approver` | 403 | BR-11 の承認者ではない。**一般の権限不足（`forbidden`）と分ける。** 承認者は組織と基準日から導かれるので、「ロールが足りない」のではなく「その月のその社員の承認者ではない」である。誰に頼めばよいかを聞く先が変わる |
 | `urn:kintai:error:pending-correction-exists` | 409 | 同じ勤務日に未処理の訂正申請がある |
 
 **状態遷移を「サブリソースの生成」として表現する。**

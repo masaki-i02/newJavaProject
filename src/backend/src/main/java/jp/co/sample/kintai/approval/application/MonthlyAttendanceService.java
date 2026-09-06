@@ -19,6 +19,7 @@ import jp.co.sample.kintai.approval.domain.ApprovalEventRepository;
 import jp.co.sample.kintai.approval.domain.Approver;
 import jp.co.sample.kintai.approval.domain.AttendanceState;
 import jp.co.sample.kintai.approval.domain.ApproverPolicy;
+import jp.co.sample.kintai.approval.domain.NotApproverException;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceId;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceRepository;
@@ -348,7 +349,7 @@ public class MonthlyAttendanceService {
         Approver approver = approverPolicy.resolve(employeeId, month,
                 LocalDate.now(clock));
         if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new AccessDeniedException();
+            throw new NotApproverException();
         }
     }
 

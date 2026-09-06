@@ -22,6 +22,7 @@ import org.springframework.test.context.bean.override.convention.TestBean;
 
 import jp.co.sample.kintai.approval.application.MonthlyAttendanceService;
 import jp.co.sample.kintai.approval.domain.AttendanceState;
+import jp.co.sample.kintai.approval.domain.NotApproverException;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
 import jp.co.sample.kintai.employee.domain.Assignment;
 import jp.co.sample.kintai.employee.domain.AssignmentRepository;
@@ -43,7 +44,6 @@ import jp.co.sample.kintai.leave.domain.PaidLeaveGrant;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantId;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
-import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Requester;
@@ -352,7 +352,7 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
             PaidLeaveRequest request = service.submit(yamada, yamadaId,
                     LocalDate.of(2026, 10, 5), Optional.empty());
             PaidLeaveRequest approved = service.approve(manager, request.id(),
-                    request.version());
+                    request.version()).request();
             monthlyAttendances.submit(yamada, yamadaId, OCTOBER, Optional.empty(), 0L);
             monthlyAttendances.approve(manager, yamadaId, OCTOBER,
                     monthlyAttendances.currentVersion(manager, yamadaId, OCTOBER));
@@ -391,10 +391,11 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
                     .as("在籍していない日の年休を承認してはならない")
                     .isInstanceOf(LeaveDateNotInServiceException.class);
 
-            PaidLeaveRequest rejected = service.reject(hr, request.id(),
+            var rejected = service.reject(hr, request.id(),
                     "退職により取得できないため", request.version());
 
-            assertThat(rejected.status()).isEqualTo(LeaveRequestStatus.REJECTED);
+            assertThat(rejected.request().status())
+                    .isEqualTo(LeaveRequestStatus.REJECTED);
         }
 
         /** 承認者がいる申請を、人事が横から却下することはできない（BR-11）。 */
@@ -407,7 +408,7 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
 
             assertThatThrownBy(() -> service.reject(hr, request.id(), "理由",
                     request.version()))
-                    .isInstanceOf(AccessDeniedException.class);
+                    .isInstanceOf(NotApproverException.class);
         }
     }
 
