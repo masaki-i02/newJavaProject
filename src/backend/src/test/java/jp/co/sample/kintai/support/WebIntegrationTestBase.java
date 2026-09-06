@@ -74,6 +74,8 @@ public abstract class WebIntegrationTestBase {
         //   何を消しているかを一覧から読めるようにする（IntegrationTestBase と同じ形）
         jdbc.execute("""
                 TRUNCATE TABLE
+                    payroll_export_targets,
+                    payroll_exports,
                     paid_leave_request_events,
                     paid_leave_requests,
                     paid_leave_grants,

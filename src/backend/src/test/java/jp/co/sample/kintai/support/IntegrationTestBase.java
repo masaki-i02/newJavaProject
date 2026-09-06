@@ -45,6 +45,8 @@ public abstract class IntegrationTestBase {
     protected void truncateAll() {
         jdbc.execute("""
                 TRUNCATE TABLE
+                    payroll_export_targets,
+                    payroll_exports,
                     paid_leave_request_events,
                     paid_leave_requests,
                     paid_leave_grants,

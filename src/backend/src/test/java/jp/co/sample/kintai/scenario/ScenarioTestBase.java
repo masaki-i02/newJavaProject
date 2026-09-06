@@ -355,7 +355,7 @@ abstract class ScenarioTestBase extends WebIntegrationTestBase {
                 .stream().findFirst().orElse(null);
     }
 
-    private MockHttpServletRequestBuilder 認証つき(MockHttpServletRequestBuilder request,
+    protected MockHttpServletRequestBuilder 認証つき(MockHttpServletRequestBuilder request,
                                               Actor 実行者) {
         return request.with(as(実行者.id(), 実行者.社員番号(), 実行者.roles()));
     }
