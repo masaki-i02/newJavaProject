@@ -20,8 +20,14 @@ import jp.co.sample.kintai.shared.domain.TimeRange;
  */
 public record TimeClockSequence(List<TimeClockEvent> events) {
 
-    /** 状態機械の状態。 */
-    enum Status {
+    /**
+     * 状態機械の状態。
+     *
+     * <p><strong>公開する。</strong> 打刻画面が「次に押せるボタン」を決めるのに要る。
+     * 画面が種別と時刻から状態を組み立て直すと、状態機械が 2 か所に生まれ、
+     * BR-02 を直したときに片方だけが古くなる（[画面設計書 1.1 の原則 1]）。
+     */
+    public enum Status {
         NOT_STARTED, WORKING, ON_BREAK, FINISHED
     }
 
@@ -158,6 +164,47 @@ public record TimeClockSequence(List<TimeClockEvent> events) {
         List<TimeClockEvent> added = new ArrayList<>(events);
         added.add(event);
         return new TimeClockSequence(added);
+    }
+
+    /**
+     * いまの状態。<strong>並びが不正なら空を返す。</strong>
+     *
+     * <p>{@link #isClosed()} と同じ扱いにする。
+     * 状態を答えられない列に対して例外を投げると、
+     * 画面が状態を問い合わせただけで 500 になる。
+     */
+    public Optional<Status> status() {
+        try {
+            return Optional.of(fold().status());
+        } catch (InvalidTimeClockSequenceException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * その状態で次に打てる打刻（BR-02）。
+     *
+     * <p><strong>ここが唯一の出どころである。</strong>
+     * 画面はこの配列だけでボタンを出し分ける。
+     * {@code status === 'WORKING'} のような分岐を画面に書くと、
+     * 休憩の扱いを変えたときに画面まで直すことになる。
+     *
+     * <p><strong>退勤済は空になる。</strong> 同じ勤務日に出勤し直すことはできない
+     * （出勤は必ず新しい勤務日を始める。落とし穴 68）。
+     */
+    public List<TimeClockEvent.Type> availableActions() {
+        return status().map(TimeClockSequence::actionsIn).orElseGet(List::of);
+    }
+
+    /** 網羅性検査つきの {@code switch}。状態を足すとここがコンパイルエラーになる。 */
+    private static List<TimeClockEvent.Type> actionsIn(Status status) {
+        return switch (status) {
+            case NOT_STARTED -> List.of(TimeClockEvent.Type.CLOCK_IN);
+            case WORKING -> List.of(TimeClockEvent.Type.BREAK_START,
+                    TimeClockEvent.Type.CLOCK_OUT);
+            case ON_BREAK -> List.of(TimeClockEvent.Type.BREAK_END);
+            case FINISHED -> List.of();
+        };
     }
 
     /** 打刻が 1 件も無いか。休日や欠勤で正常に起こりうる。 */

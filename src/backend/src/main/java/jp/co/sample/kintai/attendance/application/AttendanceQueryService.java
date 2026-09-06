@@ -10,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
+import jp.co.sample.kintai.attendance.domain.TimeClockEntry;
+import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
@@ -35,11 +37,14 @@ import jp.co.sample.kintai.shared.domain.Requester;
 public class AttendanceQueryService {
 
     private final DailyAttendanceRepository dailyAttendances;
+    private final TimeClockEventRepository timeClocks;
     private final EmployeeVisibility visibility;
 
     public AttendanceQueryService(DailyAttendanceRepository dailyAttendances,
+                                  TimeClockEventRepository timeClocks,
                                   EmployeeVisibility visibility) {
         this.dailyAttendances = dailyAttendances;
+        this.timeClocks = timeClocks;
         this.visibility = visibility;
     }
 
@@ -62,6 +67,26 @@ public class AttendanceQueryService {
         requireVisible(requester, employeeId, month.atEndOfMonth());
         return dailyAttendances.findByPeriod(employeeId,
                 new DateRange(month.atDay(1), month.plusMonths(1).atDay(1)));
+    }
+
+    /**
+     * その勤務日の打刻を<strong>識別子つき</strong>で返す（BR-09）。
+     *
+     * <p><strong>訂正申請の画面がこれを必要とする。</strong>
+     * 取消の対象は打刻の識別子で指すので、識別子を返す経路が無いと
+     * 利用者は「どの打刻を取り消すか」を選べず、
+     * 実在しない識別子を送って外部キー違反にするしかなくなる（落とし穴 66）。
+     *
+     * <p><strong>取り消された打刻も含めて返す。</strong>
+     * 有効な打刻だけだと「元は何時だったか」を示せず、
+     * 何がどう直ったのかを利用者が確かめられない（BR-09 の目的）。
+     *
+     * <p>日次勤怠と同じ閲覧範囲で絞る。承認者は部下の打刻を見て訂正申請を判断する。
+     */
+    public List<TimeClockEntry> recordedOn(Requester requester, EmployeeId employeeId,
+                                           LocalDate workDate) {
+        requireVisible(requester, employeeId, workDate);
+        return timeClocks.findEntriesByWorkDate(employeeId, workDate);
     }
 
     private void requireVisible(Requester requester, EmployeeId target, LocalDate asOf) {

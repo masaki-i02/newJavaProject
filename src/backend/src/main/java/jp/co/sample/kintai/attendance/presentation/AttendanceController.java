@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jp.co.sample.kintai.attendance.application.AttendanceQueryService;
+import jp.co.sample.kintai.attendance.application.TimeClockService;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
@@ -24,9 +25,12 @@ import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 public class AttendanceController {
 
     private final AttendanceQueryService attendances;
+    private final TimeClockService timeClocks;
 
-    public AttendanceController(AttendanceQueryService attendances) {
+    public AttendanceController(AttendanceQueryService attendances,
+                                TimeClockService timeClocks) {
         this.attendances = attendances;
+        this.timeClocks = timeClocks;
     }
 
     /**
@@ -41,6 +45,21 @@ public class AttendanceController {
         return attendances.findByMonth(principal.toRequester(),
                         new EmployeeId(employeeId), month).stream()
                 .map(DailyAttendanceResponse::from).toList();
+    }
+
+    /**
+     * 現在の勤務状態（[03 API設計書 2.2]）。
+     *
+     * <p><strong>{@code /{workDate}} より前に置く。</strong>
+     * あとに置くと {@code current} が {@code LocalDate} として解釈され、
+     * 400 になる。
+     */
+    @GetMapping("/current")
+    public CurrentAttendanceResponse current(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId) {
+        return CurrentAttendanceResponse.from(
+                timeClocks.current(principal.toRequester(), new EmployeeId(employeeId)));
     }
 
     /** 指定日の日次勤怠（内訳つき）。 */

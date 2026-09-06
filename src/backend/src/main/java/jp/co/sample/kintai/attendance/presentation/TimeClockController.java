@@ -1,18 +1,23 @@
 package jp.co.sample.kintai.attendance.presentation;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import jp.co.sample.kintai.attendance.application.AttendanceQueryService;
 import jp.co.sample.kintai.attendance.application.TimeClockService;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
@@ -36,9 +41,12 @@ import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 public class TimeClockController {
 
     private final TimeClockService timeClocks;
+    private final AttendanceQueryService attendances;
 
-    public TimeClockController(TimeClockService timeClocks) {
+    public TimeClockController(TimeClockService timeClocks,
+                               AttendanceQueryService attendances) {
         this.timeClocks = timeClocks;
+        this.attendances = attendances;
     }
 
     /**
@@ -54,5 +62,22 @@ public class TimeClockController {
                                @Valid @RequestBody PunchRequest request) {
         return PunchResponse.from(timeClocks.punch(principal.toRequester(),
                 new EmployeeId(employeeId), request.type(), request.occurredAtOrNow()));
+    }
+
+    /**
+     * その勤務日の打刻を識別子つきで返す（[03 API設計書 2.3]）。
+     *
+     * <p><strong>訂正申請の画面が取消の対象を選ぶために要る。</strong>
+     * 識別子を返す経路が無いと、利用者は実在しない識別子を送るしかなく、
+     * 外部キー違反という説明できないエラーになる（落とし穴 66）。
+     */
+    @GetMapping
+    public List<RecordedPunchResponse> list(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId, @RequestParam LocalDate workDate) {
+        return attendances.recordedOn(principal.toRequester(),
+                        new EmployeeId(employeeId), workDate).stream()
+                .map(RecordedPunchResponse::from)
+                .toList();
     }
 }

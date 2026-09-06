@@ -307,6 +307,93 @@ public class MonthlyAttendanceService {
                 .toList();
     }
 
+    /**
+     * 画面が「次に何ができるか」を決めるための一式
+     * （[05 API設計書 2.1](../../../../../../../../doc/02_詳細設計/05_申請承認と締め/API設計書.md)）。
+     *
+     * <p><strong>状態機械と BR-11 を画面に複製させない。</strong>
+     * {@code canSubmit} / {@code canApprove} は
+     * <strong>ログイン中の利用者が実行できるか</strong>をサーバが判断して返す。
+     * 画面が {@code status === 'DRAFT'} のような分岐を書くと、
+     * 提出の条件を変えたときに 2 か所を直すことになる。
+     *
+     * <p>判定は {@link #submit} / {@link #approve} が実際に課す条件をそのまま写す。
+     * 「押せるのに実行すると弾かれる」ボタンを出さないためである。
+     */
+    @Transactional(readOnly = true)
+    public MonthlyAttendanceView view(Requester requester, EmployeeId employeeId,
+                                      YearMonth month) {
+        LocalDate today = LocalDate.now(clock);
+        MonthlyAttendance attendance = find(requester, employeeId, month)
+                .orElseGet(() -> MonthlyAttendance.draft(new MonthlyAttendanceId(UUID.randomUUID()),
+                        employeeId, month));
+        long version = currentVersion(requester, employeeId, month);
+        Approver approver = approverOf(requester, employeeId, month);
+        List<ApprovalEvent> history = events.findBy(attendance.id());
+
+        return new MonthlyAttendanceView(employeeId, month, attendance.status(), version,
+                canSubmit(requester, employeeId, month, attendance, today),
+                canApprove(requester, employeeId, attendance, approver),
+                approver, history);
+    }
+
+    /**
+     * 本人（または退職者を代理する人事）が、いま提出できるか。
+     *
+     * <p>{@link #submit} が課す条件のうち、<strong>ボタンで避けられるもの</strong>を写す。
+     * 楽観ロックの版だけは押した瞬間にしか判定できないので含めない。
+     */
+    private boolean canSubmit(Requester requester, EmployeeId employeeId, YearMonth month,
+                              MonthlyAttendance attendance, LocalDate today) {
+        if (attendance.status().state() != AttendanceState.DRAFT) {
+            return false;
+        }
+        if (!today.isAfter(month.atEndOfMonth())) {
+            return false;
+        }
+        boolean self = requester.isSelf(employeeId);
+        boolean proxy = !self && requester.has(Role.HR) && employees.findById(employeeId)
+                .map(employee -> !employee.isActiveOn(today)).orElse(false);
+        if (!self && !proxy) {
+            return false;
+        }
+        // ★ 「打刻があるのに日次勤怠が無い日」が残っていないか。
+        //   判定は attendance が持つ（落とし穴 67）
+        return settlements.isCalculable(employeeId, month);
+    }
+
+    /**
+     * ログイン中の利用者が、いま承認できるか。
+     *
+     * <p>自己承認の禁止（BR-11 の 4）を承認者の判定より先に見る。
+     * {@link #approve} と同じ順序にそろえないと、
+     * 本人には「承認できない理由」が承認者不在として伝わる（落とし穴 110）。
+     */
+    private boolean canApprove(Requester requester, EmployeeId employeeId,
+                               MonthlyAttendance attendance, Approver approver) {
+        if (attendance.status().state() != AttendanceState.SUBMITTED) {
+            return false;
+        }
+        if (requester.isSelf(employeeId)) {
+            return false;
+        }
+        return approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR));
+    }
+
+    /**
+     * 画面へ返す一式。
+     *
+     * @param status   状態。<strong>提出者・承認者・締めた人と日時を型として持つ</strong>
+     * @param version  更新系のリクエストで必須。<strong>取得する経路はここだけ</strong>
+     * @param approver 誰が承認するか。遡った経路つき（BR-11）
+     * @param history  全遷移。差戻しの理由を含む
+     */
+    public record MonthlyAttendanceView(EmployeeId employeeId, YearMonth month,
+                                        MonthlyAttendanceStatus status, long version,
+                                        boolean canSubmit, boolean canApprove,
+                                        Approver approver, List<ApprovalEvent> history) {
+    }
+
     /** 承認者を答える（画面の「誰に承認してもらうか」の表示に使う）。 */
     @Transactional(readOnly = true)
     public Approver approverOf(Requester requester, EmployeeId employeeId,

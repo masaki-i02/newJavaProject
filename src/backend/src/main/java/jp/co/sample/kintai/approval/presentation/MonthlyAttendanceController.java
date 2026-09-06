@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.approval.presentation;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
@@ -23,8 +24,11 @@ import jakarta.validation.constraints.NotNull;
 import jp.co.sample.kintai.approval.application.BulkClosureResult;
 import jp.co.sample.kintai.approval.application.BulkClosureService;
 import jp.co.sample.kintai.approval.application.MonthlyAttendanceService;
+import jp.co.sample.kintai.approval.application.MonthlyAttendanceService.MonthlyAttendanceView;
 import jp.co.sample.kintai.approval.application.SubmissionResult;
+import jp.co.sample.kintai.approval.domain.ApprovalEvent;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
+import jp.co.sample.kintai.approval.domain.MonthlyAttendanceStatus;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
@@ -49,16 +53,18 @@ class MonthlyAttendanceController {
         this.bulkClosure = bulkClosure;
     }
 
+    /**
+     * 月次勤怠の 1 件（[05 API設計書 2.1]）。
+     *
+     * <p><strong>画面が「次に何ができるか」を決めるのに要るものを全部返す。</strong>
+     * 状態だけを返すと、画面が状態機械と BR-11 を複製することになる。
+     */
     @GetMapping("/employees/{employeeId}/monthly-attendances/{month}")
     MonthlyAttendanceResponse get(@AuthenticationPrincipal AuthenticatedEmployee principal,
                                   @PathVariable UUID employeeId,
                                   @PathVariable YearMonth month) {
-        var requester = principal.toRequester();
-        long version = attendances.currentVersion(requester,
-                new EmployeeId(employeeId), month);
-        return attendances.find(requester, new EmployeeId(employeeId), month)
-                .map(attendance -> MonthlyAttendanceResponse.from(attendance, version))
-                .orElseGet(() -> MonthlyAttendanceResponse.draft(employeeId, month));
+        return MonthlyAttendanceResponse.from(attendances.view(principal.toRequester(),
+                new EmployeeId(employeeId), month));
     }
 
     /** 承認待ちの一覧。<strong>見てよい社員のぶんだけ返る。</strong> */
@@ -68,7 +74,7 @@ class MonthlyAttendanceController {
             @RequestParam YearMonth month) {
         var requester = principal.toRequester();
         return attendances.findPendingApproval(requester, month).stream()
-                .map(attendance -> MonthlyAttendanceResponse.from(attendance,
+                .map(attendance -> MonthlyAttendanceResponse.summary(attendance,
                         attendances.currentVersion(requester, attendance.employeeId(),
                                 month)))
                 .toList();
@@ -162,8 +168,10 @@ class MonthlyAttendanceController {
      */
     private MonthlyAttendanceResponse respond(Requester requester,
                                               MonthlyAttendance attendance) {
-        return MonthlyAttendanceResponse.from(attendance, attendances.currentVersion(
-                requester, attendance.employeeId(), attendance.month()));
+        // ★ 遷移したあとの版と、遷移したあとに何ができるかを読み直して返す。
+        //   返さないと画面は必ず 1 回 409 を踏む（CLAUDE.md「決裁の応答の版」）
+        return MonthlyAttendanceResponse.from(attendances.view(requester,
+                attendance.employeeId(), attendance.month()));
     }
 
     /**
@@ -237,23 +245,80 @@ class MonthlyAttendanceController {
      *                 画面が「警告が無い」と「この操作では警告を返さない」を
      *                 区別できない（落とし穴 76）
      */
-    record MonthlyAttendanceResponse(String employeeId, String month, String status,
-                                     long version,
-                                     @JsonInclude(JsonInclude.Include.NON_NULL)
-                                     List<Warning> warnings) {
+    /**
+     * 月次勤怠の状態と、<strong>画面が次に何をできるか</strong>（[05 API設計書 2.1]）。
+     *
+     * <p><strong>状態機械と BR-11 を画面に複製させない。</strong>
+     * {@code canSubmit} / {@code canApprove} はログイン中の利用者が実行できるかを、
+     * {@code acceptsTimeClock} / {@code acceptsCorrectionRequest} はその月が
+     * 打刻と訂正申請を受け付けるかを、それぞれサーバが判断して返す。
+     *
+     * <p><strong>この 2 つを 1 つにまとめない。</strong>
+     * 提出済みは「打刻は不可・訂正申請は可」であり、まとめると
+     * 本人が提出後に直接打刻できてしまう（落とし穴 57 の隣にある判断）。
+     *
+     * <p><strong>氏名・社員番号・部署名を返さない。</strong>
+     * それらは {@code employee} が所有する概念である（設計規約チェックリスト 3）。
+     *
+     * <p>一覧の行では判断の項目を<strong>省く</strong>。
+     * 行ごとに承認者と履歴を引くと、社員数ぶんの問い合わせが重複する
+     * （CLAUDE.md「一覧に版を載せるか」と同じ理由）。
+     * 省きたいのが一部の項目なので、{@code @JsonInclude} は<strong>項目ごとに</strong>付ける
+     * （record 全体に付けると「所属が無い」ことまで応答から読めなくなる。落とし穴 76）。
+     */
+    record MonthlyAttendanceResponse(
+            String employeeId, String month, String status, long version,
+            @JsonInclude(JsonInclude.Include.NON_NULL) LocalDateTime submittedAt,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String submittedBy,
+            @JsonInclude(JsonInclude.Include.NON_NULL) LocalDateTime approvedAt,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String approvedBy,
+            @JsonInclude(JsonInclude.Include.NON_NULL) LocalDateTime closedAt,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String closedBy,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean acceptsTimeClock,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean acceptsCorrectionRequest,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean canSubmit,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean canApprove,
+            @JsonInclude(JsonInclude.Include.NON_NULL) ApproverResponse approver,
+            @JsonInclude(JsonInclude.Include.NON_NULL) List<HistoryEntry> history,
+            @JsonInclude(JsonInclude.Include.NON_NULL) List<Warning> warnings) {
 
-        static MonthlyAttendanceResponse from(MonthlyAttendance attendance, long version) {
-            return new MonthlyAttendanceResponse(attendance.employeeId().value().toString(),
-                    attendance.month().toString(), attendance.status().state().name(),
-                    version, null);
+        /** 全遷移の 1 件。<strong>差戻しの理由を本人が読む。</strong> */
+        record HistoryEntry(String eventKind, String fromStatus, String toStatus,
+                            String actorId,
+                            @JsonInclude(JsonInclude.Include.NON_NULL) String comment,
+                            LocalDateTime occurredAt) {
+
+            static HistoryEntry from(ApprovalEvent event) {
+                return new HistoryEntry(event.kind().name(), event.from().name(),
+                        event.to().name(), event.actor().value().toString(),
+                        event.comment().orElse(null), event.occurredAt());
+            }
         }
 
-        /** 警告を添える。無ければそのまま返す。 */
-        MonthlyAttendanceResponse with(Optional<Warning> warning) {
-            return warning
-                    .map(value -> new MonthlyAttendanceResponse(employeeId, month, status,
-                            version, List.of(value)))
-                    .orElse(this);
+        /** 詳細。判断の項目まで返す。 */
+        static MonthlyAttendanceResponse from(MonthlyAttendanceView view) {
+            MonthlyAttendanceStatus status = view.status();
+            return new MonthlyAttendanceResponse(
+                    view.employeeId().value().toString(), view.month().toString(),
+                    status.state().name(), view.version(),
+                    submittedAt(status), id(submittedBy(status)),
+                    approvedAt(status), id(approvedBy(status)),
+                    closedAt(status), id(closedBy(status)),
+                    status.acceptsTimeClock(), status.acceptsCorrectionRequest(),
+                    view.canSubmit(), view.canApprove(),
+                    ApproverResponse.from(view.approver()),
+                    view.history().stream().map(HistoryEntry::from).toList(),
+                    null);
+        }
+
+        /** 一覧の行。<strong>判断の項目は省く。</strong> */
+        static MonthlyAttendanceResponse summary(MonthlyAttendance attendance,
+                                                 long version) {
+            return new MonthlyAttendanceResponse(
+                    attendance.employeeId().value().toString(),
+                    attendance.month().toString(), attendance.status().state().name(),
+                    version, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null);
         }
 
         /**
@@ -261,10 +326,80 @@ class MonthlyAttendanceController {
          *
          * <p><strong>404 にしない。</strong> 「まだ何もしていない」は正常な状態であり、
          * 画面は「提出する」ボタンを出せなければならない。
+         * 版は 0（行が無いことだけを指す値。落とし穴 57）。
          */
         static MonthlyAttendanceResponse draft(UUID employeeId, YearMonth month) {
             return new MonthlyAttendanceResponse(employeeId.toString(), month.toString(),
-                    "DRAFT", 0L, null);
+                    "DRAFT", 0L, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null);
+        }
+
+        /** 警告を添える。無ければそのまま返す。 */
+        MonthlyAttendanceResponse with(Optional<Warning> warning) {
+            return warning
+                    .map(value -> new MonthlyAttendanceResponse(employeeId, month, status,
+                            version, submittedAt, submittedBy, approvedAt, approvedBy,
+                            closedAt, closedBy, acceptsTimeClock, acceptsCorrectionRequest,
+                            canSubmit, canApprove, approver, history, List.of(value)))
+                    .orElse(this);
+        }
+
+        private static String id(EmployeeId employeeId) {
+            return employeeId == null ? null : employeeId.value().toString();
+        }
+
+        private static EmployeeId submittedBy(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted s -> s.submittedBy();
+                case MonthlyAttendanceStatus.Approved a -> a.submittedBy();
+                case MonthlyAttendanceStatus.Closed c -> c.submittedBy();
+            };
+        }
+
+        private static LocalDateTime submittedAt(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted s -> s.submittedAt();
+                case MonthlyAttendanceStatus.Approved a -> a.submittedAt();
+                case MonthlyAttendanceStatus.Closed c -> c.submittedAt();
+            };
+        }
+
+        private static EmployeeId approvedBy(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted ignored -> null;
+                case MonthlyAttendanceStatus.Approved a -> a.approvedBy();
+                case MonthlyAttendanceStatus.Closed c -> c.approvedBy();
+            };
+        }
+
+        private static LocalDateTime approvedAt(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted ignored -> null;
+                case MonthlyAttendanceStatus.Approved a -> a.approvedAt();
+                case MonthlyAttendanceStatus.Closed c -> c.approvedAt();
+            };
+        }
+
+        private static EmployeeId closedBy(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted ignored -> null;
+                case MonthlyAttendanceStatus.Approved ignored -> null;
+                case MonthlyAttendanceStatus.Closed c -> c.closedBy();
+            };
+        }
+
+        private static LocalDateTime closedAt(MonthlyAttendanceStatus status) {
+            return switch (status) {
+                case MonthlyAttendanceStatus.Draft ignored -> null;
+                case MonthlyAttendanceStatus.Submitted ignored -> null;
+                case MonthlyAttendanceStatus.Approved ignored -> null;
+                case MonthlyAttendanceStatus.Closed c -> c.closedAt();
+            };
         }
     }
 }

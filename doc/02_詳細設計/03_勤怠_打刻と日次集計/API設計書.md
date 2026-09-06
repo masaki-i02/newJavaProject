@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 | --- | --- |
 | 文書番号 | KNT-DES-303 |
-| 版 | 0.2 |
+| 版 | 0.3 |
 | 対象パッケージ | `jp.co.sample.kintai.attendance.presentation` |
 | 関連文書 | [ドメインモデル設計書](ドメインモデル設計書.md) / [DB設計書](DB設計書.md) / [設計規約チェックリスト](../00_共通/設計規約チェックリスト.md) |
 | 改訂 | 0.2（2026-09-01）設計レビュー第 2 回の指摘を反映 |
@@ -177,12 +177,40 @@
   "status": "ON_BREAK",
   "availableActions": ["BREAK_END"],
   "punches": [
-    { "type": "CLOCK_IN",    "occurredAt": "2026-04-07T09:00:00" },
-    { "type": "BREAK_START", "occurredAt": "2026-04-07T12:00:00" }
+    { "id": "...", "type": "CLOCK_IN",    "occurredAt": "2026-04-07T09:00:00" },
+    { "id": "...", "type": "BREAK_START", "occurredAt": "2026-04-07T12:00:00" }
   ],
   "unclosedWorkDates": []
 }
 ```
+
+| 状態 | `availableActions` |
+| --- | --- |
+| `NOT_STARTED` | `["CLOCK_IN"]` |
+| `WORKING` | `["BREAK_START", "CLOCK_OUT"]` |
+| `ON_BREAK` | `["BREAK_END"]` |
+| `CLOSED`（退勤済）| `[]` |
+
+**退勤済は空になる。** 出勤は必ず新しい勤務日を始めるので、
+同じ勤務日に出勤し直すことはできない（落とし穴 68）。
+
+**`workDate` は「いま追記の対象になっている勤務日」である。**
+開いている勤務日があればその日、無ければ今日。
+{@code POST .../time-clocks} が打刻を追記する先と<strong>同じ日</strong>で、
+決め方は 1 か所（{@code TimeClockService.openOrCurrentWorkDate}）にしか無い。
+画面で決め直すと、日跨ぎ勤務の扱いを変えたときに片方だけが古くなる。
+
+**`status` は打刻の並びが壊れていれば `null`。**
+状態を答えられない列に対して例外を投げると、
+画面が状態を問い合わせただけで 500 になる。
+
+**本人しか引けない。** 打刻は本人の操作であり、代理の打刻は認めていない（BR-02）。
+他人のものを引くと `403 forbidden`。
+
+| 応答 | 条件 |
+| --- | --- |
+| `200 OK` | — |
+| `403 forbidden` | 本人以外 |
 
 **`availableActions` をサーバが返す。**
 状態機械（BR-02）はドメインの知識であり、フロントエンドに複製すると
@@ -202,20 +230,35 @@
 「元は何時だったか」を提示できることが BR-09 の目的だから。
 
 ```json
-{
-  "workDate": "2026-04-07",
-  "entries": [
-    { "id": "...", "type": "CLOCK_IN",  "occurredAt": "2026-04-07T09:00:00",
-      "source": "WEB", "revoked": false },
-    { "id": "...", "type": "CLOCK_OUT", "occurredAt": "2026-04-07T18:00:00",
-      "source": "WEB", "revoked": true,
-      "revocation": { "reason": "退勤打刻の時刻誤り", "recordedBy": "佐藤 花子",
-                      "recordedAt": "2026-04-08T10:00:00" } },
-    { "id": "...", "type": "CLOCK_OUT", "occurredAt": "2026-04-07T19:00:00",
-      "source": "CORRECTION", "reason": "退勤打刻の時刻誤り", "revoked": false }
-  ]
-}
+[
+  { "id": "...", "type": "CLOCK_IN",  "occurredAt": "2026-04-07T09:00:00",
+    "source": "WEB", "revoked": false },
+  { "id": "...", "type": "CLOCK_OUT", "occurredAt": "2026-04-07T18:00:00",
+    "source": "WEB", "revoked": true,
+    "revocation": { "reason": "退勤打刻の時刻誤り",
+                    "recordedBy": "0195c000-0000-7000-8000-000000000002",
+                    "recordedAt": "2026-04-08T10:00:00" } },
+  { "id": "...", "type": "CLOCK_OUT", "occurredAt": "2026-04-07T19:00:00",
+    "source": "CORRECTION", "reason": "退勤打刻の時刻誤り", "revoked": false }
+]
 ```
+
+**配列をそのまま返す。** 包む項目が `workDate` しかなく、それは要求に含まれている。
+
+**`recordedBy` は社員の識別子である。氏名は返さない。**
+氏名は `employee` が所有する概念なので、この応答に混ぜない
+（[設計規約チェックリスト 3](../00_共通/設計規約チェックリスト.md)）。
+画面は `GET /api/employees?ids=...` でまとめて引く。
+
+**並びは時刻順、同時刻なら記録順。**
+訂正で追記した打刻が元の打刻の隣に並ぶので、画面で対比できる。
+
+**閲覧範囲は日次勤怠と同じ。** 承認者は部下の打刻を見て訂正申請を判断する。
+
+| 応答 | 条件 |
+| --- | --- |
+| `200 OK` | — |
+| `403 forbidden` | 閲覧範囲の外 |
 
 ---
 
@@ -353,3 +396,13 @@ API から DB までを通す。**コントローラだけを切り出してリ�
 | IT-API-10 | **指定日の日次勤怠** | 内訳が暦日境界で分かれ、`calendarDate` と `premiums` が付く | BR-06 / BR-07 |
 | IT-API-11 | **月次の一覧** | 計算済みの日だけが返る。未退勤の日は含まない | BR-03 |
 | IT-API-12 | **月末日の勤怠** | 一覧に現れる（半開区間の上限がずれていない） | BR-05 |
+| IT-ATT-29 | **打刻していない日の現在の状態** | `NOT_STARTED` / `["CLOCK_IN"]` | BR-02 |
+| IT-ATT-30 | **出勤済み** | `WORKING` / `["BREAK_START", "CLOCK_OUT"]` | BR-02 |
+| IT-ATT-31 | **休憩中** | `ON_BREAK` / `["BREAK_END"]` | BR-02 |
+| IT-ATT-32 | **退勤済み** | `FINISHED` / `[]`。同じ日に出勤し直せない | BR-02 |
+| IT-ATT-33 | **前日の退勤を打ち忘れている** | `workDate` はその前日。打刻の追記先と一致する | BR-03 |
+| IT-ATT-34 | **勤務日の打刻の一覧** | 識別子つき。訂正申請の対象を選べる | BR-09 |
+| IT-ATT-35 | **他人の現在の状態** | `403 forbidden` | 要件 4.1 |
+
+取消の記録つきで返ることは、訂正の承認を通してでないと作れないので
+[05 API設計書](../05_申請承認と締め/API設計書.md) の IT-APV-88 が確かめる。

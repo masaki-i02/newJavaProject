@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import jp.co.sample.kintai.attendance.domain.RecordedTimeClockEvent;
+import jp.co.sample.kintai.attendance.domain.TimeClockEntry;
 import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventId;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
@@ -225,5 +226,56 @@ class TimeClockEventRepositoryAdapter implements TimeClockEventRepository {
             default -> throw new IllegalStateException(
                     "未知の打刻種別が保存されています: " + eventType);
         };
+    }
+
+    /**
+     * 取り消された打刻も含めて返す。
+     *
+     * <p>取消行（{@code entry_type = 'REVOCATION'}）を左外部結合して、
+     * <strong>1 回の問い合わせ</strong>で証跡を組み立てる。
+     * 打刻ごとに取消を引くと、1 日ぶんで往復が倍になる。
+     *
+     * <p>並びは<strong>時刻順、同時刻なら記録順</strong>。
+     * 訂正で追記した打刻が元の打刻の隣に並ぶので、画面で対比できる。
+     */
+    @Override
+    public java.util.List<TimeClockEntry> findEntriesByWorkDate(EmployeeId employeeId,
+                                                                LocalDate workDate) {
+        return jdbc.query("""
+                SELECT e.id, e.event_type, e.occurred_at, e.source, e.reason,
+                       r.reason AS revoked_reason, r.recorded_by AS revoked_by,
+                       r.created_at AS revoked_at
+                  FROM time_clock_events e
+                  LEFT JOIN time_clock_events r
+                         ON r.work_date = e.work_date
+                        AND r.employee_id = e.employee_id
+                        AND r.entry_type = 'REVOCATION'
+                        AND r.revokes_event_id = e.id
+                 WHERE e.work_date = ? AND e.employee_id = ?
+                   AND e.entry_type = 'ENTRY'
+                 ORDER BY e.occurred_at, e.created_at
+                """,
+                (rs, rowNum) -> new TimeClockEntry(
+                        new TimeClockEventId((UUID) rs.getObject("id")),
+                        toEvent(rs.getString("event_type"),
+                                BusinessZone.toLocal(rs.getObject("occurred_at",
+                                        java.time.OffsetDateTime.class))),
+                        TimeClockEntry.Source.valueOf(rs.getString("source")),
+                        java.util.Optional.ofNullable(rs.getString("reason")),
+                        revocationOf(rs)),
+                workDate, employeeId.value());
+    }
+
+    /** 取消行が無ければ空。<strong>外部結合の null をここで 1 か所に閉じる。</strong> */
+    private static java.util.Optional<TimeClockEntry.Revocation> revocationOf(
+            java.sql.ResultSet rs) throws java.sql.SQLException {
+        UUID revokedBy = (UUID) rs.getObject("revoked_by");
+        if (revokedBy == null) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new TimeClockEntry.Revocation(
+                rs.getString("revoked_reason"), new EmployeeId(revokedBy),
+                BusinessZone.toLocal(rs.getObject("revoked_at",
+                        java.time.OffsetDateTime.class))));
     }
 }

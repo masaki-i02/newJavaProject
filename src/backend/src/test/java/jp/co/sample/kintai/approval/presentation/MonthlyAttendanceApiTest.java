@@ -321,6 +321,131 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         }
     }
 
+    /**
+     * 画面が「次に何ができるか」を決めるための項目（[05 API設計書 2.1]）。
+     *
+     * <p><strong>状態機械と BR-11 を画面に複製させない。</strong>
+     * 返していない項目は、画面が状態から組み立て直すしかなくなる。
+     */
+    @Nested
+    @DisplayName("次に何ができるか")
+    class AvailableDecisions {
+
+        /**
+         * <strong>下書きの月は、本人が提出できて誰も承認できない。</strong>
+         * 打刻も訂正申請も受け付ける。
+         */
+        @Test
+        @DisplayName("IT-APV-82 下書きの月は本人が提出でき、打刻も訂正申請も受け付ける")
+        void draftAllowsSubmission() throws Exception {
+            detail(yamada, yamada, "E0001", Role.EMPLOYEE)
+                    .andExpect(jsonPath("$.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.canSubmit").value(true))
+                    .andExpect(jsonPath("$.canApprove").value(false))
+                    .andExpect(jsonPath("$.acceptsTimeClock").value(true))
+                    .andExpect(jsonPath("$.acceptsCorrectionRequest").value(true))
+                    .andExpect(jsonPath("$.version").value(0));
+        }
+
+        /**
+         * <strong>提出済みは「打刻は不可・訂正申請は可」である。</strong>
+         * 1 つの値にまとめると、本人が提出後に直接打刻できてしまう
+         * （承認者が見た内容と確定する内容が食い違う）。
+         */
+        @Test
+        @DisplayName("IT-APV-83 提出済みは打刻を受け付けず、訂正申請だけを受け付ける")
+        void submittedSplitsTheTwoAcceptances() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk())
+                    // ★ 遷移の応答も同じ形で返す。画面がもう一度 GET しなくてよい
+                    .andExpect(jsonPath("$.acceptsTimeClock").value(false))
+                    .andExpect(jsonPath("$.acceptsCorrectionRequest").value(true))
+                    .andExpect(jsonPath("$.canSubmit").value(false))
+                    .andExpect(jsonPath("$.submittedAt").exists())
+                    .andExpect(jsonPath("$.submittedBy").value(yamada.value().toString()));
+        }
+
+        /** 承認者には承認できると返し、本人には返さない（BR-11 の 4）。 */
+        @Test
+        @DisplayName("IT-APV-84 提出済みの月は承認者だけが承認できる")
+        void onlyApproverCanApprove() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk());
+
+            detail(yamada, manager, "E0100", Role.EMPLOYEE, Role.APPROVER)
+                    .andExpect(jsonPath("$.canApprove").value(true));
+            // 本人は自分を承認できない（BR-11 の 4）
+            detail(yamada, yamada, "E0001", Role.EMPLOYEE)
+                    .andExpect(jsonPath("$.canApprove").value(false));
+        }
+
+        /**
+         * <strong>誰が承認するかを本人にも示す</strong>（BR-11）。
+         * 問い合わせを減らすために、遡った経路ごと返す。
+         */
+        @Test
+        @DisplayName("IT-APV-85 承認者と、そこへ至った経路が返る")
+        void approverIsReturned() throws Exception {
+            detail(yamada, yamada, "E0001", Role.EMPLOYEE)
+                    .andExpect(jsonPath("$.approver.kind").value("INDIVIDUAL"))
+                    .andExpect(jsonPath("$.approver.employeeId")
+                            .value(manager.value().toString()))
+                    .andExpect(jsonPath("$.approver.path").isArray());
+        }
+
+        /**
+         * <strong>差戻しの理由を本人が読めるようにする。</strong>
+         * 同じ {@code SUBMITTED → DRAFT} でも、差戻しと訂正承認による自動差戻しは
+         * 本人に非があるかどうかが違うので、{@code eventKind} で区別する。
+         */
+        @Test
+        @DisplayName("IT-APV-86 全遷移が理由つきで履歴に返る")
+        void historyCarriesReasons() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk());
+            transition("rejection", manager, "E0100", "{\"reason\":\"打刻漏れがあります\"}",
+                    Role.EMPLOYEE, Role.APPROVER)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("DRAFT"))
+                    .andExpect(jsonPath("$.history.length()").value(2))
+                    .andExpect(jsonPath("$.history[0].eventKind").value("SUBMIT"))
+                    .andExpect(jsonPath("$.history[1].eventKind").value("REJECT"))
+                    .andExpect(jsonPath("$.history[1].fromStatus").value("SUBMITTED"))
+                    .andExpect(jsonPath("$.history[1].toStatus").value("DRAFT"))
+                    .andExpect(jsonPath("$.history[1].comment").value("打刻漏れがあります"));
+        }
+
+        /**
+         * <strong>一覧の行には判断の項目を載せない。</strong>
+         * 行ごとに承認者と履歴を引くと、社員数ぶんの問い合わせが重複する。
+         * 必要なのは詳細を開いた 1 人だけである。
+         */
+        @Test
+        @DisplayName("IT-APV-87 承認待ちの一覧は判断の項目を返さない")
+        void listOmitsDecisions() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/monthly-attendances/pending-approval")
+                            .param("month", "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].status").value("SUBMITTED"))
+                    .andExpect(jsonPath("$[0].version").exists())
+                    .andExpect(jsonPath("$[0].canApprove").doesNotExist())
+                    .andExpect(jsonPath("$[0].history").doesNotExist());
+        }
+
+        private org.springframework.test.web.servlet.ResultActions detail(
+                EmployeeId target, EmployeeId viewer, String number, Role... roles)
+                throws Exception {
+            return mockMvc.perform(get("/api/employees/{id}/monthly-attendances/{month}",
+                            target.value(), "2026-04")
+                            .with(as(viewer, number, roles)))
+                    .andExpect(status().isOk());
+        }
+    }
+
     @Nested
     @DisplayName("戻せないこと")
     class NoWayBack {

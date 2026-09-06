@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceCalculator;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
+import jp.co.sample.kintai.attendance.domain.RecordedTimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
@@ -140,9 +141,61 @@ public class TimeClockService {
             //   打ち忘れた日は unclosedWorkDates の警告として返す
             return punchedOn;
         }
+        return openOrCurrentWorkDate(employeeId, punchedOn);
+    }
+
+    /**
+     * いま追記の対象になっている勤務日。
+     *
+     * <p>開いている勤務日があればそれ、無ければその暦日である。
+     * <strong>打刻画面の「現在の状態」も同じ日を指す。</strong>
+     * 画面側で決め直すと、日跨ぎ勤務の扱いを変えたときに片方だけが古くなる（落とし穴 67）。
+     */
+    private LocalDate openOrCurrentWorkDate(EmployeeId employeeId, LocalDate punchedOn) {
         return timeClocks.findOpenWorkDate(employeeId,
                         punchedOn.minusDays(OPEN_WORK_DATE_LOOKBACK_DAYS))
                 .orElse(punchedOn);
+    }
+
+    /**
+     * 打刻画面が「次に押せるボタン」を決めるための現在の勤務状態
+     * （[03 API設計書 2.2](../../../../../../../../doc/02_詳細設計/03_勤怠_打刻と日次集計/API設計書.md)）。
+     *
+     * <p><strong>状態機械（BR-02）を画面に複製させない。</strong>
+     * {@code availableActions} をサーバが返し、画面はその配列だけでボタンを出し分ける。
+     * 種別と時刻から画面が状態を組み立て直すと、BR-02 が 2 か所に生まれる。
+     *
+     * <p><strong>本人しか見られない。</strong> 打刻は本人の操作であり、
+     * 代理の打刻は認めていない（BR-02）。
+     */
+    @Transactional(readOnly = true)
+    public CurrentAttendance current(Requester requester, EmployeeId employeeId) {
+        if (!requester.isSelf(employeeId)) {
+            throw new AccessDeniedException();
+        }
+        LocalDate workDate = openOrCurrentWorkDate(employeeId,
+                LocalDate.now(clock));
+        TimeClockSequence sequence = timeClocks.findByWorkDate(employeeId, workDate);
+        return new CurrentAttendance(workDate,
+                sequence.status().orElse(null),
+                sequence.availableActions(),
+                timeClocks.findRecordedByWorkDate(employeeId, workDate),
+                unclosedWorkDates(employeeId, workDate));
+    }
+
+    /**
+     * 打刻画面が見ている現在の勤務状態。
+     *
+     * @param workDate          いま追記の対象になっている勤務日
+     * @param status            状態機械の状態。<strong>並びが不正なら空</strong>
+     * @param availableActions  次に打てる打刻。画面はこれだけでボタンを出し分ける
+     * @param punches           その勤務日の打刻（識別子つき）
+     * @param unclosedWorkDates 退勤を打ち忘れた過去の勤務日（BR-03）
+     */
+    public record CurrentAttendance(LocalDate workDate, TimeClockSequence.Status status,
+                                    java.util.List<TimeClockEvent.Type> availableActions,
+                                    java.util.List<RecordedTimeClockEvent> punches,
+                                    java.util.List<LocalDate> unclosedWorkDates) {
     }
 
     /**

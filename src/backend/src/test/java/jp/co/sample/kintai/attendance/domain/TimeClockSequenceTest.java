@@ -269,6 +269,42 @@ class TimeClockSequenceTest {
                     .isEqualTo(java.time.Duration.ofHours(9));
         }
 
+        /**
+         * <strong>次に押せるボタンはサーバが決める。</strong>
+         * 画面が種別と時刻から状態を組み立て直すと、BR-02 が 2 か所に生まれる。
+         */
+        @Test
+        @DisplayName("UT-ATT-40 状態ごとに次に打てる打刻が決まる")
+        void availableActionsFollowTheStateMachine() {
+            assertThat(TimeClockSequence.empty().availableActions())
+                    .as("未出勤").containsExactly(TimeClockEvent.Type.CLOCK_IN);
+            assertThat(Punches.on("2026-04-06").in("09:00").build().availableActions())
+                    .as("勤務中").containsExactly(TimeClockEvent.Type.BREAK_START,
+                            TimeClockEvent.Type.CLOCK_OUT);
+            assertThat(Punches.on("2026-04-06").in("09:00").breakFrom("12:00").build()
+                    .availableActions())
+                    .as("休憩中").containsExactly(TimeClockEvent.Type.BREAK_END);
+            assertThat(Punches.on("2026-04-06").in("09:00").out("18:00").build()
+                    .availableActions())
+                    .as("退勤済。同じ勤務日に出勤し直すことはできない（落とし穴 68）")
+                    .isEmpty();
+        }
+
+        /**
+         * <strong>並びが壊れていたら状態を答えない。</strong>
+         * {@code isClosed()} と同じ扱いにする。例外を投げると、
+         * 画面が状態を問い合わせただけで 500 になる。
+         */
+        @Test
+        @DisplayName("UT-ATT-41 並びが不正なら状態も押せるボタンも答えない")
+        void brokenSequenceHasNoActions() {
+            var broken = TimeClockSequence.of(List.of(
+                    TimeClockEvent.Type.BREAK_END.at(at("12:00"))));
+
+            assertThat(broken.status()).isEmpty();
+            assertThat(broken.availableActions()).isEmpty();
+        }
+
         private LocalDateTime at(String time) {
             return LocalDateTime.parse("2026-04-06T" + time);
         }

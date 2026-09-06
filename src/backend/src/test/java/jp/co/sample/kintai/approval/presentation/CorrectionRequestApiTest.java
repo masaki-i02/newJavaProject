@@ -343,6 +343,36 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
         }
 
         /**
+         * <strong>取り消された打刻も、証跡として画面へ返る。</strong>
+         *
+         * <p>「元は何時だったか」「誰がいつ何の理由で取り消したか」を提示できることが
+         * BR-09 の目的である。有効な打刻だけを返すと、
+         * <strong>何がどう直ったのかを利用者が確かめられない。</strong>
+         */
+        @Test
+        @DisplayName("IT-APV-88 承認後の打刻一覧に、取消の記録つきで元の打刻が残る")
+        void revokedPunchIsReturnedWithItsRecord() throws Exception {
+            var original = clockOutOf(TARGET).id().value().toString();
+            var id = createRequest();
+            decide(id, "approval", manager, "E0100",
+                    "{\"version\":%d}".formatted(versionOf(id)),
+                    Role.EMPLOYEE, Role.APPROVER).andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/employees/{id}/time-clocks", yamada.value())
+                            .param("workDate", TARGET.toString())
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    // 元の退勤（取消済み）と、訂正で追記された退勤の両方が並ぶ
+                    .andExpect(jsonPath("$[?(@.id=='%s')].revoked".formatted(original))
+                            .value(true))
+                    .andExpect(jsonPath("$[?(@.id=='%s')].revocation.reason"
+                            .formatted(original)).exists())
+                    .andExpect(jsonPath("$[?(@.source=='CORRECTION')].revoked")
+                            .value(false))
+                    .andExpect(jsonPath("$[?(@.source=='CORRECTION')].reason").exists());
+        }
+
+        /**
          * <strong>元の打刻を消さない。</strong>
          * 取消行を追記することで訂正を表すので、
          * 「元は 17:00 だった」があとから提示できる。

@@ -60,6 +60,16 @@ public interface TimeClockEventRepository {
                                                                   LocalDate workDate);
 
     /**
+     * その勤務日の打刻を<strong>取り消されたものも含めて</strong>返す（BR-09）。
+     *
+     * <p>訂正申請の画面が「元は何時だったか」を示すために使う。
+     * 有効な打刻だけを返すと、<strong>何がどう直ったのかを利用者が確かめられない。</strong>
+     * それを提示できることが BR-09 の目的である。
+     */
+    java.util.List<TimeClockEntry> findEntriesByWorkDate(EmployeeId employeeId,
+                                                         LocalDate workDate);
+
+    /**
      * まだ退勤していない勤務日。
      *
      * <p><strong>勤務日は打刻した暦日と一致しない</strong>（BR-03）。
