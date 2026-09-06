@@ -228,7 +228,8 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
         void proxyIsRejected() throws Exception {
             requestCorrection(hr, "E0900", replaceClockOutBody(),
                     Role.EMPLOYEE, Role.HR)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
 
         @Test
@@ -427,7 +428,9 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
             decide(id, "approval", yamada, "E0001",
                     "{\"version\":%d}".formatted(versionOf(id)),
                     Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type")
+                                    .value("urn:kintai:error:self-correction-decision"));
 
             assertThat(workedMinutesOf(TARGET)).isEqualTo(8 * 60);
         }
@@ -441,7 +444,8 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
             decide(id, "approval", outsider, "E0003",
                     "{\"version\":%d}".formatted(versionOf(id)),
                     Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"));
         }
 
         /** <strong>古い版での承認は拒否する。</strong> */
@@ -512,7 +516,8 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
             decide(id, "cancellation", manager, "E0100",
                     "{\"version\":%d}".formatted(versionOf(id)),
                     Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:not-the-requester"));
         }
 
         @Test

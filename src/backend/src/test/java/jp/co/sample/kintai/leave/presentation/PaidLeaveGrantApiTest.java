@@ -262,6 +262,28 @@ class PaidLeaveGrantApiTest extends WebIntegrationTestBase {
         }
     }
 
+    /**
+     * <strong>「付与済みか」を、人事が送った日数の検証より先に見る</strong>
+     * （落とし穴 17・25）。
+     *
+     * <p>順序が逆だと、過大な日数を送ったときに `deemed-attendance-rejected`（422）が返り、
+     * 人事は「日数を直せば通る」と読む。実際は何を送っても通らない。
+     */
+    @Test
+    @DisplayName("IT-LV-127 付与済みの再判定は、日数の検証より先に 409 で拒否する")
+    void alreadyGrantedComesFirst() throws Exception {
+        EmployeeId yamada = hireWorking("E0001", HIRED, Optional.empty(), 150, 150);
+        grant(FIRST_GRANT).andExpect(status().isOk());
+
+        // 全労働日を大きく超える出勤扱いを送る。順序が逆なら 422 が返る
+        reassess(yamada, FIRST_GRANT, """
+                {"deemedAttendedDays":9999,"deemedReason":"産前産後休業"}
+                """)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type")
+                        .value("urn:kintai:error:grant-already-granted"));
+    }
+
     private ResultActions grant(LocalDate asOf) throws Exception {
         return mockMvc.perform(post("/api/paid-leave-grants")
                 .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))

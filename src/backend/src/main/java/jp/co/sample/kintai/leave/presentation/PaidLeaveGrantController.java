@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.leave.presentation;
 
 import java.time.LocalDate;
+import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
 
@@ -49,8 +50,7 @@ class PaidLeaveGrantController {
     @PostMapping("/paid-leave-grants")
     GrantResultResponse grant(@AuthenticationPrincipal AuthenticatedEmployee principal,
                               @Valid @RequestBody(required = false) GrantBody body) {
-        LocalDate asOf = body == null || body.asOf() == null
-                ? grants.today() : body.asOf();
+        Optional<LocalDate> asOf = Optional.ofNullable(body).map(GrantBody::asOf);
         return GrantResultResponse.from(grants.grantAsOf(principal.toRequester(), asOf));
     }
 
@@ -73,8 +73,15 @@ class PaidLeaveGrantController {
                 new EmployeeId(employeeId), grantedOn, deemedDays, reason));
     }
 
-    /** 付与の基準日。省略すると当日。 */
-    record GrantBody(@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    /**
+     * 付与の基準日。省略すると当日。
+     *
+     * <p><strong>{@code @DateTimeFormat} は付けない。</strong>
+     * 本文は Jackson が読むのでこの注釈は効かず、
+     * 「この注釈が形式を保証している」という誤読を招く。
+     * 日付の書式は {@code spring.mvc.format.date: iso} と Jackson の既定が担う。
+     */
+    record GrantBody(LocalDate asOf) {
     }
 
     /**

@@ -231,7 +231,12 @@ public record CorrectionRequest(CorrectionRequestId id, EmployeeId employeeId,
         @Serial
         private static final long serialVersionUID = 1L;
 
-        SelfDecisionException(String operation, LocalDate workDate) {
+        /**
+         * <p><strong>公開する。</strong> アプリケーション層が、承認者の判定より先に
+         * この拒否を返すために使う。集約の中でも同じ検査を残すのは、
+         * アプリケーション層を通さない経路を塞ぐためである（落とし穴 58）。
+         */
+        public SelfDecisionException(String operation, LocalDate workDate) {
             super("自分の訂正申請は自分で%sできません: 勤務日 %s"
                     .formatted(operation, workDate));
         }

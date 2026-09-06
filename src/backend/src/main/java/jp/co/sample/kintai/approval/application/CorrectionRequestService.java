@@ -134,6 +134,7 @@ public class CorrectionRequestService {
     public CorrectionResult approve(Requester requester, CorrectionRequestId id,
                                     long expectedVersion) {
         CorrectionRequest request = load(id);
+        requireNotSelf(requester, request, "承認");
         requireApprover(requester, request);
         requireMonthAcceptsCorrection(request.employeeId(), request.workDate());
 
@@ -174,6 +175,7 @@ public class CorrectionRequestService {
     public CorrectionRequest reject(Requester requester, CorrectionRequestId id,
                                     String comment, long expectedVersion) {
         CorrectionRequest request = load(id);
+        requireNotSelf(requester, request, "却下");
         requireApprover(requester, request);
         CorrectionRequest rejected = request.reject(requester.employeeId(),
                 LocalDateTime.now(clock), comment);
@@ -250,6 +252,21 @@ public class CorrectionRequestService {
      * 日をまたぐ勤務では {@code workDate} が始業日なので、
      * 3/31 22:00 出勤 → 4/1 06:00 退勤の訂正は 3 月の承認者が扱う（BR-03）。
      */
+    /**
+     * 自分の申請ではないか（BR-11 の 4）。
+     *
+     * <p><strong>承認者の判定より先に置く。</strong>
+     * {@code ApproverPolicy} は本人を承認者から外すので、あとに置くと
+     * {@code not-approver} が返り、自己決裁という事実が利用者に伝わらない。
+     */
+    private static void requireNotSelf(Requester requester, CorrectionRequest request,
+                                       String operation) {
+        if (requester.isSelf(request.employeeId())) {
+            throw new CorrectionRequest.SelfDecisionException(operation,
+                    request.workDate());
+        }
+    }
+
     private void requireApprover(Requester requester, CorrectionRequest request) {
         Approver approver = approverPolicy.resolve(request.employeeId(),
                 YearMonth.from(request.workDate()), LocalDate.now(clock));

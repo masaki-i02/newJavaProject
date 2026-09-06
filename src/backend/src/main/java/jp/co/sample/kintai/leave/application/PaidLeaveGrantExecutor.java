@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
 import jp.co.sample.kintai.employee.domain.Employee;
+import jp.co.sample.kintai.leave.domain.AlreadyGrantedException;
 import jp.co.sample.kintai.leave.domain.AttendanceRate;
 import jp.co.sample.kintai.leave.domain.GrantDecision;
 import jp.co.sample.kintai.leave.domain.GrantSchedule;
@@ -89,6 +90,13 @@ public class PaidLeaveGrantExecutor {
     @Transactional
     public PaidLeaveGrant reassess(Employee employee, PaidLeaveGrant grant,
                                    int deemedAttendedDays, String deemedReason) {
+        // ★ 「付与済みは再判定できない」を先に見る。あとに置くと、過大な日数を送ったときに
+        //   deemed-attendance-rejected（422）が返り、人事は「日数を直せば通る」と読む。
+        //   実際は何を送っても通らない（落とし穴 17・25）。
+        //   算定期間 1 年ぶんのカレンダー走査も無駄にならない
+        if (grant.isGranted()) {
+            throw new AlreadyGrantedException(grant.grantedOn());
+        }
         var schedule = new GrantSchedule(employee.hiredOn());
         AttendanceRate measured = assess(employee, schedule.assessmentPeriodOf(grant.grantIndex()));
         // ★ 人事が送った値は業務エラーとして弾く。

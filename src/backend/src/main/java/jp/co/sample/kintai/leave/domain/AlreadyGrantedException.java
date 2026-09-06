@@ -12,7 +12,12 @@ public final class AlreadyGrantedException extends DomainException {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    AlreadyGrantedException(LocalDate grantedOn) {
+    /**
+     * <p><strong>公開する。</strong> アプリケーション層が、人事の入力を検証するより先に
+     * この拒否を返すために使う。集約の中でも同じ検査を残すのは、
+     * アプリケーション層を通さない経路を塞ぐためである（落とし穴 58）。
+     */
+    public AlreadyGrantedException(LocalDate grantedOn) {
         super("%s の付与は既に付与済みです。再判定できるのは不付与だった付与だけです"
                 .formatted(grantedOn));
     }

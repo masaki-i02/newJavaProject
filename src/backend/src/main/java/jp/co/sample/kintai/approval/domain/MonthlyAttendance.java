@@ -177,7 +177,12 @@ public record MonthlyAttendance(MonthlyAttendanceId id, EmployeeId employeeId,
         @Serial
         private static final long serialVersionUID = 1L;
 
-        SelfApprovalException(EmployeeId employeeId, YearMonth month) {
+        /**
+         * <p><strong>公開する。</strong> アプリケーション層が、承認者の判定より先に
+         * この拒否を返すために使う。集約の中でも同じ検査を残すのは、
+         * アプリケーション層を通さない経路を塞ぐためである（落とし穴 58）。
+         */
+        public SelfApprovalException(EmployeeId employeeId, YearMonth month) {
             super("自分の勤怠は承認できません: 社員 %s / 対象月 %s"
                     .formatted(employeeId.value(), month));
         }

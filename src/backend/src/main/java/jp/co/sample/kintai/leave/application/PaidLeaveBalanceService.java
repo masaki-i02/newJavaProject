@@ -79,13 +79,16 @@ public class PaidLeaveBalanceService {
 
         PaidLeaveBalance actual = new PaidLeaveBalance(all, allocationsOf(requested));
         // ★ 表示する availableDays と申請の受理判定は、同じ仮配分・同じ期間から導く。
-        //   別の式にすると「残 3 日と表示されたのに拒否される」あるいはその逆が起きる（落とし穴 96）
+        //   別の式にすると「残 3 日と表示されたのに拒否される」あるいはその逆が起きる（落とし穴 96）。
+        //   窓の起点は asOf ではなく当日である。受理判定（submit）が当日で見るので、
+        //   asOf を指定した照会だけ窓がずれると、表示と受理がまた食い違う（落とし穴 103）
+        DateRange requestable = requestableWindow(LocalDate.now(clock));
         PaidLeaveBalance projected = new PaidLeaveBalance(
-                withScheduled(all, employee, date), allocationsOf(requested));
+                withScheduled(all, employee, requestable), allocationsOf(requested));
 
         return new PaidLeaveSummary(employeeId, date,
                 actual.remainingDays(date),
-                projected.availableDays(requestableWindow(date), pendingDatesOf(requested)),
+                projected.availableDays(requestable, pendingDatesOf(requested)),
                 all, actual.remainingByGrant(), obligationsOf(all, requested, date));
     }
 
@@ -108,8 +111,12 @@ public class PaidLeaveBalanceService {
                                          boolean onlyShortfall) {
         LocalDate date = asOf.orElseGet(() -> LocalDate.now(clock));
         List<ObligationSummary> result = new ArrayList<>();
+        // ★ 閲覧範囲の基準日は当日にそろえる（summaryOf と同じ）。
+        //   利用者が送った asOf を認可の基準にすると、過去の日付を送るだけで
+        //   当時の配下の取得状況を引ける。asOf は「いつ時点の義務か」だけに使う
+        LocalDate today = LocalDate.now(clock);
         for (Employee employee : employees.findForDirectory(date, false)) {
-            if (!visibility.canView(requester, employee.id(), date)) {
+            if (!visibility.canView(requester, employee.id(), today)) {
                 continue;
             }
             List<PaidLeaveRequest> requested = requests.findByEmployee(employee.id());
@@ -121,8 +128,11 @@ public class PaidLeaveBalanceService {
                 if (onlyShortfall && obligation.isFulfilled()) {
                     continue;
                 }
+                // ★ 数える先は deadline（閉区間の最終日）である。
+                //   period().toExclusive() まで数えると 1 日多くなる。
+                //   expiresOn と deadline で区間の扱いが違うので、必ず取り違える（落とし穴 10）
                 result.add(new ObligationSummary(employee.id(), obligation,
-                        (int) ChronoUnit.DAYS.between(date, obligation.period().toExclusive())));
+                        (int) ChronoUnit.DAYS.between(date, obligation.deadline())));
             }
         }
         return new ObligationList(date, result);
@@ -138,8 +148,8 @@ public class PaidLeaveBalanceService {
      */
     PaidLeaveBalance projectedBalanceOf(Employee employee, LocalDate asOf) {
         List<PaidLeaveRequest> requested = requests.findByEmployee(employee.id());
-        return new PaidLeaveBalance(withScheduled(grants.findAll(employee.id()), employee, asOf),
-                allocationsOf(requested));
+        return new PaidLeaveBalance(withScheduled(grants.findAll(employee.id()), employee,
+                requestableWindow(asOf)), allocationsOf(requested));
     }
 
     /** 承認時の配分に使う残日数。<strong>実体化した付与だけ</strong>を配分先にする。 */
@@ -178,11 +188,10 @@ public class PaidLeaveBalanceService {
      * 8 割未達で {@code Withheld} になった場合は、承認時の残日数の再検査が拒む。
      */
     private List<PaidLeaveGrant> withScheduled(List<PaidLeaveGrant> materialized,
-                                               Employee employee, LocalDate asOf) {
+                                               Employee employee, DateRange requestable) {
         var schedule = new GrantSchedule(employee.hiredOn());
         int nextIndex = materialized.stream()
                 .mapToInt(PaidLeaveGrant::grantIndex).max().orElse(-1) + 1;
-        DateRange requestable = requestableWindow(asOf);
         List<PaidLeaveGrant> result = new ArrayList<>(materialized);
         for (int index = nextIndex;
                 schedule.grantDateOf(index).isBefore(requestable.toExclusive()); index++) {

@@ -175,6 +175,36 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         }
 
         /** 未処理の申請も差し引く。承認済みだけを引くと残 1 日に 2 件が通る。 */
+        /**
+         * <strong>不付与の年も要素として返す。</strong>
+         * 行が無いのではなく「付与しなかった」ので、出勤率とともに残す。
+         * 意味を持たない {@code days} / {@code usedDays} / {@code remainingDays} は
+         * <strong>項目ごと</strong>省く。0 を返すと「0 日付与された」と読める。
+         * record 全体に {@code @JsonInclude} を付けると出勤率の
+         * {@code deemedReason: null} まで消え、「申告が無い」ことが読めなくなる（落とし穴 76）。
+         */
+        @Test
+        @DisplayName("IT-LV-129 不付与の年も、日数の項目を省いて返す")
+        void withheldGrantIsListed() throws Exception {
+            grants.save(new PaidLeaveGrant(PaidLeaveGrantId.generate(), yamada, 1,
+                    LocalDate.of(2027, 10, 1), AttendanceRate.of(240, 100),
+                    new GrantDecision.Withheld(),
+                    LocalDate.of(2027, 10, 1).atStartOfDay(), 1L));
+
+            mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value())
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.grants[1].granted").value(false))
+                    .andExpect(jsonPath("$.grants[1].days").doesNotExist())
+                    .andExpect(jsonPath("$.grants[1].usedDays").doesNotExist())
+                    .andExpect(jsonPath("$.grants[1].remainingDays").doesNotExist())
+                    .andExpect(jsonPath("$.grants[1].attendanceRate.attendedDays").value(100))
+                    // ★ 出勤扱いの申告が無いことは、null として読み取れなければならない。
+                    //   項目ごと消えると「申告が無い」と「この API では返さない」を区別できない
+                    .andExpect(jsonPath("$.grants[1].attendanceRate.deemedReason")
+                            .hasJsonPath());
+        }
+
         @Test
         @DisplayName("IT-LV-32 未処理の申請が availableDays から引かれる")
         void pendingReducesAvailable() throws Exception {
@@ -216,11 +246,17 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             submit(yamada, SECOND_GRANT.plusDays(14)).andExpect(status().isCreated());
         }
 
+        /**
+         * <strong>{@code APPROVER} を持つ他部署の長で試す。</strong>
+         * ロールを持たない社員で試すと、`EmployeeVisibility` はロールを見た時点で弾くので、
+         * <strong>「配下部署か」を辿る処理を消しても落ちない</strong>（落とし穴 12・24）。
+         * IT-LV-34 とは所属部署だけが違う。
+         */
         @Test
         @DisplayName("IT-LV-33 配下でない社員の残日数は見られない")
         void outOfScope() throws Exception {
             mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value())
-                            .with(as(outsider, "E0200", Role.EMPLOYEE)))
+                            .with(as(otherManager, "E0300", Role.EMPLOYEE, Role.APPROVER)))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
@@ -240,6 +276,94 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         void unauthenticated() throws Exception {
             mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value()))
                     .andExpect(status().isUnauthorized());
+        }
+    }
+
+    @Nested
+    @DisplayName("申請の参照")
+    class Listing {
+
+        /** 決裁した結果が永続化されていることを、HTTP から読み戻して確かめる。 */
+        @Test
+        @DisplayName("IT-LV-130 決裁した申請を読み戻せる")
+        void readsBackAfterDecision() throws Exception {
+            String id = submitAndGetId(TOMORROW);
+            approve(manager, id, 1L).andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/paid-leave-requests/{id}", id)
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("APPROVED"))
+                    .andExpect(jsonPath("$.leaveDate").value("2026-11-11"))
+                    .andExpect(jsonPath("$.version").value(2));
+        }
+
+        /** 閲覧範囲は 1 件の参照にも効く（要件 4.1）。 */
+        @Test
+        @DisplayName("IT-LV-131 配下でない社員の申請は 1 件でも読めない")
+        void detailIsScoped() throws Exception {
+            String id = submitAndGetId(TOMORROW);
+
+            mockMvc.perform(get("/api/paid-leave-requests/{id}", id)
+                            .with(as(otherManager, "E0300", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
+        }
+
+        @Test
+        @DisplayName("IT-LV-132 その社員の申請の一覧を承認者が見る")
+        void listOfEmployee() throws Exception {
+            submitAndGetId(TOMORROW);
+
+            mockMvc.perform(get("/api/employees/{id}/paid-leave-requests", yamada.value())
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].leaveDate").value("2026-11-11"));
+        }
+
+        /** 絞らないと、他部署の長が配下でない社員の申請を読める。 */
+        @Test
+        @DisplayName("IT-LV-133 配下でない社員の申請は一覧に出ない")
+        void listIsScoped() throws Exception {
+            submitAndGetId(TOMORROW);
+
+            mockMvc.perform(get("/api/employees/{id}/paid-leave-requests", yamada.value())
+                            .with(as(otherManager, "E0300", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(0));
+        }
+
+        /**
+         * 承認待ちの一覧。<strong>版は載せない</strong>（API設計書 1.1）。
+         * 行ごとに引くと社員数ぶんの問い合わせが増え、版が要るのは決裁する 1 件だけである。
+         */
+        @Test
+        @DisplayName("IT-LV-134 承認待ちの一覧は配下の社員だけを返し、版を載せない")
+        void pendingApprovalIsScoped() throws Exception {
+            submitAndGetId(TOMORROW);
+            grantTenDays(outsider);
+            submit(outsider, TOMORROW).andExpect(status().isCreated());
+
+            mockMvc.perform(get("/api/paid-leave-requests/pending-approval")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(1))
+                    .andExpect(jsonPath("$[0].employeeId").value(yamada.value().toString()))
+                    .andExpect(jsonPath("$[0].version").doesNotExist());
+        }
+
+        /** 決裁済みは承認待ちに残らない。 */
+        @Test
+        @DisplayName("IT-LV-135 決裁した申請は承認待ちの一覧から消える")
+        void decidedLeavesThePendingList() throws Exception {
+            String id = submitAndGetId(TOMORROW);
+            approve(manager, id, 1L).andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/paid-leave-requests/pending-approval")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.length()").value(0));
         }
     }
 
@@ -309,9 +433,10 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         @Test
         @DisplayName("IT-LV-40 退職後の日は指定できない")
         void notInService() throws Exception {
+            // ★ 境界で見る。退職日当日は在籍、翌日は非在籍（半開区間・落とし穴 10）
             retire(yamada, LocalDate.of(2026, 11, 30));
 
-            submit(yamada, LocalDate.of(2026, 12, 15))
+            submit(yamada, LocalDate.of(2026, 12, 1))
                     .andExpect(status().isUnprocessableEntity())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:leave-date-not-in-service"));
@@ -398,6 +523,28 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         @DisplayName("IT-LV-46 承認者でない社員は承認できない")
         void notApprover() throws Exception {
             String id = submitAndGetId(TOMORROW);
+
+            mockMvc.perform(post("/api/paid-leave-requests/{id}/approval", id)
+                            .with(as(outsider, "E0200", Role.EMPLOYEE))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\":1}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"));
+        }
+
+        /**
+         * <strong>認可を業務検査より先に置く</strong>（要件 4.1）。
+         *
+         * <p>あとに置くと、承認者でない社員が申請 ID を持っているだけで
+         * 対象社員の締め状態・所定労働日・在籍・実労働の有無・残日数を
+         * エラーの型から読み取れる。ここでは<strong>締め済みの月</strong>で試す。
+         * 順序が逆なら `month-already-closed` が返り、その事実が漏れる。
+         */
+        @Test
+        @DisplayName("IT-LV-125 承認者でない社員には、対象月の状態より先に not-approver を返す")
+        void authorizationComesFirst() throws Exception {
+            String id = submitAndGetId(IN_OCTOBER);
+            closeOctober();
 
             mockMvc.perform(post("/api/paid-leave-requests/{id}/approval", id)
                             .with(as(outsider, "E0200", Role.EMPLOYEE))
@@ -545,13 +692,21 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             String id = submitAndGetId(TOMORROW);
             approve(manager, id, 1L).andExpect(status().isOk());
 
+            // ★ 承認で 9 に減ったことを先に見る。取消後の 10 だけを見ると、
+            //   「承認しても減らない」実装と区別がつかない（落とし穴 36）
+            mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value())
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(jsonPath("$.remainingDays").value(9))
+                    .andExpect(jsonPath("$.grants[0].usedDays").value(1));
+
             cancel(yamada, id, 2L)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.request.status").value("CANCELED"));
 
             mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value())
                             .with(as(yamada, "E0001", Role.EMPLOYEE)))
-                    .andExpect(jsonPath("$.remainingDays").value(10));
+                    .andExpect(jsonPath("$.remainingDays").value(10))
+                    .andExpect(jsonPath("$.grants[0].usedDays").value(0));
         }
 
         /** 当日以降は実績が確定している。人事の取消（3.5）へ案内する。 */
@@ -573,6 +728,25 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             String id = submitAndGetId(TOMORROW);
 
             cancel(manager, id, 1L)
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:not-the-requester"));
+        }
+
+        /**
+         * <strong>本人かどうかを最初に見る</strong>（要件 4.1）。
+         *
+         * <p>締め済みの月の承認済み年休を他人が取り消そうとしたとき、
+         * 順序が逆なら `month-already-closed` が返り、対象社員の月の状態が漏れる。
+         */
+        @Test
+        @DisplayName("IT-LV-126 他人の取下げには、対象月の状態より先に not-the-requester を返す")
+        void requesterCheckComesFirst() throws Exception {
+            String id = submitAndGetId(IN_OCTOBER);
+            approve(manager, id, 1L).andExpect(status().isOk());
+            closeOctober();
+
+            cancel(manager, id, 2L)
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:not-the-requester"));
@@ -625,6 +799,10 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         void revokes() throws Exception {
             String id = submitAndGetId(IN_OCTOBER);
             approve(manager, id, 1L).andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/employees/{id}/paid-leave", yamada.value())
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(jsonPath("$.remainingDays").value(9));
 
             revoke(hr, id, "予定を変更して出勤したため", 2L)
                     .andExpect(status().isOk())
@@ -723,18 +901,28 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             assertThat(scheduledTotalMinutes()).isEqualTo(21 * 8 * 60);
         }
 
-        /** 承認と対称。戻さないと不足時間が 8 時間ぶん過少に出たままになる。 */
+        /**
+         * 承認と対称。戻さないと不足時間が 8 時間ぶん過少に出たままになる。
+         *
+         * <p><strong>本人の取下げ（{@code cancellation}）で見る。</strong>
+         * 人事の取消（{@code revocation}）は IT-LV-85 が持つ。
+         * 両方を revoke で書くと、`cancel` の「承認済みなら副作用を起こす」分岐を
+         * 1 件も通らないまま両方が緑になる。
+         *
+         * <p>取得日は未来にする。承認済みを本人が取り下げられるのは取得日の前日までなので、
+         * 過去日で書くと `leave-not-cancelable` に化けて所定総まで到達しない。
+         */
         @Test
-        @DisplayName("IT-LV-57 取り下げると所定総が戻る")
+        @DisplayName("IT-LV-57 本人が取り下げると所定総が戻る")
         void scheduledTotalRestored() throws Exception {
-            String id = submitAndGetId(IN_OCTOBER);
-            submitOctober();
+            String id = submitAndGetId(TOMORROW);
             approve(manager, id, 1L).andExpect(status().isOk());
-            assertThat(scheduledTotalMinutes()).isEqualTo(21 * 8 * 60);
+            // 11 月の平日は 21 日。年休 1 日を除くと 20 日ぶん
+            assertThat(novemberScheduledTotalMinutes()).isEqualTo(20 * 8 * 60);
 
-            revoke(hr, id, "予定を変更して出勤したため", 2L).andExpect(status().isOk());
+            cancel(yamada, id, 2L).andExpect(status().isOk());
 
-            assertThat(scheduledTotalMinutes()).isEqualTo(22 * 8 * 60);
+            assertThat(novemberScheduledTotalMinutes()).isEqualTo(21 * 8 * 60);
         }
 
         /** IT-LV-85 は IT-LV-57 と同じ経路を、残日数の側から見る。 */
@@ -771,10 +959,8 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
     class Obligations {
 
         @Test
-        @DisplayName("IT-LV-65 未達の社員だけが返る")
+        @DisplayName("IT-LV-65 未達の社員の不足日数と期限が返る")
         void shortfallOnly() throws Exception {
-            grantTenDays(outsider);
-
             mockMvc.perform(get("/api/paid-leave/obligations")
                             .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
                     .andExpect(status().isOk())
@@ -782,7 +968,12 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].shortfallDays"
                             .formatted(yamada.value())).value(5))
                     .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].deadline"
-                            .formatted(yamada.value())).value("2027-09-30"));
+                            .formatted(yamada.value())).value("2027-09-30"))
+                    // ★ 数える先は deadline（閉区間の最終日）。
+                    //   半開区間の上限まで数えると 1 日多くなる（落とし穴 10）
+                    .andExpect(jsonPath(
+                            "$.items[?(@.employeeId=='%s')].remainingDaysUntilDeadline"
+                                    .formatted(yamada.value())).value(324));
         }
 
         /** 絞らないと、一般の承認者が配下でない社員の取得状況を見られる（要件 4.1）。 */
@@ -808,7 +999,10 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         @Test
         @DisplayName("IT-LV-123 期限の過ぎた義務は未達一覧に現れない")
         void expiredObligationIsNotListed() throws Exception {
-            EmployeeId veteran = hire("E0400", "古参 五郎", Optional.empty());
+            // ★ 入社日も整合させる。2026-04-01 入社の社員に 2025-10-01 の付与を置くと、
+            //   本番では決して現れない行になる（落とし穴 56）
+            EmployeeId veteran = hire("E0400", "古参 五郎", LocalDate.of(2025, 4, 1),
+                    Optional.empty());
             // 義務期間は [2025-10-01, 2026-10-01)。今日（2026-11-10）は入っていない
             grants.save(new PaidLeaveGrant(PaidLeaveGrantId.generate(), veteran, 0,
                     LocalDate.of(2025, 10, 1), AttendanceRate.of(240, 240),
@@ -858,7 +1052,32 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         @Test
         @DisplayName("IT-LV-66 年 5 日が未達でも提出・承認・締めが通る")
         void doesNotBlockTheMonth() throws Exception {
+            // ★ 未達であることを先に確かめる。確かめないと、義務の判定が壊れて
+            //   未達でなくなっても「締めが通る」としか言えない
+            mockMvc.perform(get("/api/paid-leave/obligations")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].shortfallDays"
+                            .formatted(yamada.value())).value(5));
+
             closeOctober();
+        }
+
+        /**
+         * <strong>一般社員でも自分のぶんは見られる。</strong>
+         * 閲覧範囲で絞るので他人は出ない。ロールで一律に拒むと、
+         * 自分があと何日取る必要があるかを本人が確かめられなくなる。
+         */
+        @Test
+        @DisplayName("IT-LV-136 一般社員には自分の義務だけが返る")
+        void employeeSeesOnlyOwn() throws Exception {
+            grantTenDays(outsider);
+
+            mockMvc.perform(get("/api/paid-leave/obligations")
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1))
+                    .andExpect(jsonPath("$.items[0].employeeId")
+                            .value(yamada.value().toString()));
         }
     }
 
@@ -981,6 +1200,13 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         return found.isEmpty() ? 0L : found.getFirst();
     }
 
+    private int novemberScheduledTotalMinutes() {
+        return jdbc.queryForObject("""
+                SELECT scheduled_total_minutes FROM monthly_settlements
+                WHERE employee_id = ? AND target_month = '2026-11-01'
+                """, Integer.class, yamada.value());
+    }
+
     private int scheduledTotalMinutes() {
         return jdbc.queryForObject("""
                 SELECT scheduled_total_minutes FROM monthly_settlements
@@ -1004,9 +1230,14 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
     }
 
     private EmployeeId hire(String number, String name, Optional<LocalDate> retiredOn) {
+        return hire(number, name, HIRED, retiredOn);
+    }
+
+    private EmployeeId hire(String number, String name, LocalDate hiredOn,
+                            Optional<LocalDate> retiredOn) {
         var id = new EmployeeId(UUID.randomUUID());
         employees.save(new Employee(id, new EmployeeNumber(number), name,
-                new Email(number.toLowerCase() + "@example.com"), HIRED, retiredOn,
+                new Email(number.toLowerCase() + "@example.com"), hiredOn, retiredOn,
                 Set.of(Role.EMPLOYEE)));
         return id;
     }

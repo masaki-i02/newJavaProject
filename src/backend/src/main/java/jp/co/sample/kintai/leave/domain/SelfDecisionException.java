@@ -18,7 +18,12 @@ public final class SelfDecisionException extends DomainException {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    SelfDecisionException(EmployeeId employeeId) {
+    /**
+     * <p><strong>公開する。</strong> アプリケーション層が、承認者の判定より先に
+     * この拒否を返すために使う。集約の中でも同じ検査を残すのは、
+     * アプリケーション層を通さない経路を塞ぐためである（落とし穴 58）。
+     */
+    public SelfDecisionException(EmployeeId employeeId) {
         super("自分の年休の申請を自分で決裁することはできません: " + employeeId.value());
     }
 

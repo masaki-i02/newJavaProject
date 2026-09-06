@@ -377,7 +377,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isOk());
 
             transition("approval", yamada, "E0001", null, Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:self-approval"));
         }
 
         @Test
@@ -388,7 +389,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isOk());
 
             transition("approval", other, "E0002", null, Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"));
         }
 
         /**
@@ -405,7 +407,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isOk());
 
             transition("approval", hr, "E0900", null, Role.EMPLOYEE, Role.HR)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"));
         }
 
         @Test
@@ -414,7 +417,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
             submitAndApprove();
 
             transition("closure", manager, "E0100", null, Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
 
         /**
@@ -426,7 +430,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         void noProxySubmissionForActiveEmployee() throws Exception {
             transition("submission", hr, "E0900", "{\"comment\":\"代理で提出\"}",
                     Role.EMPLOYEE, Role.HR)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
     }
 
@@ -736,7 +741,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     "{\"month\":\"2026-04\",\"employeeIds\":[\"%s\"]}"
                             .formatted(yamada.value()),
                     Role.EMPLOYEE, Role.APPROVER)
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isForbidden())
+                            .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
 
             assertThat(statusOf()).isEqualTo("APPROVED");
         }

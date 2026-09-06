@@ -31,6 +31,7 @@ import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequestId;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequestRepository;
+import jp.co.sample.kintai.leave.domain.SelfDecisionException;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
@@ -136,6 +137,11 @@ public class PaidLeaveRequestService {
                                        long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
         YearMonth month = YearMonth.from(request.leaveDate());
+        // ★ 「誰の依頼か」を最初に見る。あとに置くと、その前の検査が対象社員に対して
+        //   実行され、締め状態・所定労働日・在籍・実労働の有無・残日数が
+        //   エラーの型から読み取れる（要件 4.1・申請と同じ判断）
+        requireNotSelf(requester, request);
+        requireApprover(requester, request.employeeId(), month);
         requireMonthEditable(request.employeeId(), month);
         // ★ 申請から承認までの間にカレンダーや在籍が変わりうる。
         //   休日・在籍期間の外の日に年休を消費しても社員には何の利益も無いので、
@@ -150,11 +156,11 @@ public class PaidLeaveRequestService {
         PaidLeaveGrantId grantId = balance.allocationFor(request.leaveDate())
                 .orElseThrow(() -> grantMissing(request, balance));
 
-        // ★ 自己承認の禁止は集約が先に検査する。
-        //   承認者の判定を先に置くと not-approver が返り、この検査が一度も働かない（落とし穴 58）
+        // ★ 集約も自己承認を検査する。アプリケーション層を通さない経路を塞ぐためであり、
+        //   この経路からは requireNotSelf が先に弾くので働かない。
+        //   だから集約に直接あてるテスト（UT-LV-30）で確かめる（落とし穴 58）
         LocalDateTime at = LocalDateTime.now(clock);
         PaidLeaveRequest approved = request.approve(requester.employeeId(), grantId, at);
-        requireApprover(requester, request.employeeId(), month);
 
         requests.update(approved, expectedVersion);
         record(approved, Optional.of(LeaveRequestStatus.SUBMITTED),
@@ -168,12 +174,13 @@ public class PaidLeaveRequestService {
     public LeaveDecisionResult reject(Requester requester, PaidLeaveRequestId id,
                                       String comment, long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
+        requireNotSelf(requester, request);
+        requireRejecter(requester, request.employeeId(),
+                YearMonth.from(request.leaveDate()));
         // ★ 締め済みの月でも却下できる。却下は残日数も月次清算も動かさないので、
         //   拒否すると遷移先の無い申請が残るだけである
         LocalDateTime at = LocalDateTime.now(clock);
         PaidLeaveRequest rejected = request.reject(requester.employeeId(), comment, at);
-        requireRejecter(requester, request.employeeId(),
-                YearMonth.from(request.leaveDate()));
 
         requests.update(rejected, expectedVersion);
         record(rejected, Optional.of(LeaveRequestStatus.SUBMITTED),
@@ -194,6 +201,12 @@ public class PaidLeaveRequestService {
     public LeaveDecisionResult cancel(Requester requester, PaidLeaveRequestId id,
                                       long expectedVersion) {
         PaidLeaveRequest request = requestOf(id);
+        // ★ 本人かどうかを最初に見る。あとに置くと、他人が呼んだときに
+        //   not-the-requester ではなく month-already-closed が返り、
+        //   その社員の対象月の状態が読み取れる
+        if (!requester.isSelf(request.employeeId())) {
+            throw new NotTheRequesterException(request.employeeId());
+        }
         boolean wasApproved = request.status() == LeaveRequestStatus.APPROVED;
         if (wasApproved) {
             requireMonthEditable(request.employeeId(), YearMonth.from(request.leaveDate()));
@@ -384,6 +397,19 @@ public class PaidLeaveRequestService {
         }
         if (!monthClosure.acceptsCorrectionRequest(employeeId, month)) {
             throw new MonthNotEditableException(month);
+        }
+    }
+
+    /**
+     * 自分の申請ではないか（BR-11 の 4）。
+     *
+     * <p><strong>承認者の判定より先に置く。</strong>
+     * {@code ApproverPolicy} は本人を承認者から外すので、あとに置くと
+     * {@code not-approver} が返り、自己承認という事実が利用者に伝わらない。
+     */
+    private static void requireNotSelf(Requester requester, PaidLeaveRequest request) {
+        if (requester.isSelf(request.employeeId())) {
+            throw new SelfDecisionException(request.employeeId());
         }
     }
 

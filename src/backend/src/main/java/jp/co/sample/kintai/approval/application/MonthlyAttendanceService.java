@@ -126,6 +126,13 @@ public class MonthlyAttendanceService {
     public MonthlyAttendance approve(Requester requester, EmployeeId employeeId,
                                      YearMonth month, long expectedVersion) {
         MonthlyAttendance current = load(employeeId, month);
+        // ★ 自己承認を承認者の判定より先に見る（BR-11 の 4）。
+        //   ApproverPolicy は本人を承認者から外すので、あとに置くと not-approver が返り、
+        //   自己承認という事実が利用者に伝わらない。集約の検査は
+        //   アプリケーション層を通さない経路のために残す（落とし穴 58）
+        if (requester.isSelf(employeeId)) {
+            throw new MonthlyAttendance.SelfApprovalException(employeeId, month);
+        }
         requireApprover(requester, employeeId, month);
         MonthlyAttendance next = current.approve(requester.employeeId(),
                 LocalDateTime.now(clock));

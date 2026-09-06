@@ -387,9 +387,11 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
                     Optional.empty());
             retire(LocalDate.of(2026, 11, 30));
 
+            // ★ 承認は開けない。人事は承認者ではないので not-approver で拒む。
+            //   却下だけを開けるので、遷移先の無い申請にはならない
             assertThatThrownBy(() -> service.approve(hr, request.id(), request.version()))
                     .as("在籍していない日の年休を承認してはならない")
-                    .isInstanceOf(LeaveDateNotInServiceException.class);
+                    .isInstanceOf(NotApproverException.class);
 
             var rejected = service.reject(hr, request.id(),
                     "退職により取得できないため", request.version());

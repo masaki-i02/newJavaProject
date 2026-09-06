@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,11 @@ public class PaidLeaveGrantService {
      * <p><strong>社員ごとに別トランザクションで処理する</strong>（落とし穴 59）。
      * 1 人の計算が失敗しても他の 99 人の付与が巻き戻らない。
      */
+    public GrantResult grantAsOf(Requester requester, Optional<LocalDate> asOf) {
+        return grantAsOf(requester, asOf.orElseGet(() -> LocalDate.now(clock)));
+    }
+
+    /** 基準日を明示して実行する。日次バッチはこちらを呼ぶ。 */
     public GrantResult grantAsOf(Requester requester, LocalDate asOf) {
         // ★ 依頼そのものの不備は例外へ。全員を skipped にすると、
         //   人事は自分に権限が無いことに気づけない（落とし穴 60）
@@ -154,8 +160,4 @@ public class PaidLeaveGrantService {
         }
     }
 
-    /** 現在時刻の既定値。プレゼンテーション層で埋めない（AR-09）。 */
-    public LocalDate today() {
-        return LocalDate.now(clock);
-    }
 }
