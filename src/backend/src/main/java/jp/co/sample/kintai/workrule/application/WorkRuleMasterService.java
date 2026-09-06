@@ -5,6 +5,7 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,7 @@ import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
 import jp.co.sample.kintai.shared.domain.PayrollExportQuery;
+import jp.co.sample.kintai.shared.domain.PayrollExportQuery.UsedDivisor;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.shared.domain.DateRange;
@@ -33,6 +36,7 @@ import jp.co.sample.kintai.workrule.domain.RegisteredCalendar;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
+import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesUsage;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
 
 /**
@@ -49,6 +53,9 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
  */
 @Service
 public class WorkRuleMasterService {
+
+    /** 一括設定で一度に登録できる日数の上限。年度の登録が目的なので 3 年で足りる。 */
+    private static final int MAX_BULK_DAYS = 1096;
 
     private final CompanyCalendarRepository calendar;
     private final WorkRuleSeriesRepository series;
@@ -83,8 +90,8 @@ public class WorkRuleMasterService {
         if (monthClosure.isClosedForAnyone(month)) {
             throw new MonthAlreadyClosedException(month, "会社カレンダー");
         }
-        requireFiscalYearNotUsedByPayroll(date);
         calendar.save(date, dayType, name);
+        requireDivisorUnchanged(date);
     }
 
     /**
@@ -101,28 +108,36 @@ public class WorkRuleMasterService {
      * <p>締め済みの月を含む期間は拒否する。1 日ずつの API と同じ判断である
      * （確定済みの勤怠と矛盾する）。
      *
-     * @param byDayOfWeek 曜日ごとの既定。指定の無い曜日は所定労働日
-     * @param overrides   個別の日。曜日の規則より優先する
+     * <p><strong>利用者が送る値の検証をここで行う。</strong>
+     * {@code DateRange} の compact constructor や {@code Collectors.toMap} に任せると、
+     * 期間が逆でも曜日が重複していても {@code IllegalArgumentException} /
+     * {@code IllegalStateException} になり、<strong>理由の載らない 500</strong> が返る。
+     * compact constructor は最後の防波堤であって、業務エラーの窓口ではない（落とし穴 105）。
+     *
+     * @param rules     曜日ごとの既定。指定の無い曜日は所定労働日
+     * @param overrides 個別の日。曜日の規則より優先する
      */
     @Transactional
     public CalendarRegistration 暦日区分をまとめて設定する(
-            Requester requester, DateRange period,
-            Map<DayOfWeek, DayTypeAndName> byDayOfWeek,
-            Map<LocalDate, DayTypeAndName> overrides) {
+            Requester requester, LocalDate from, LocalDate toExclusive,
+            List<CalendarDayOfWeekRule> rules, List<CalendarOverride> overrides) {
         requireHumanResources(requester);
+        DateRange period = requireValidPeriod(from, toExclusive);
+        Map<DayOfWeek, DayTypeAndName> byDayOfWeek = byDayOfWeek(rules);
+        Map<LocalDate, DayTypeAndName> byDate = overrides(overrides, period);
         requireNoClosedMonth(period);
-        requireFiscalYearNotUsedByPayroll(period.from());
-        requireFiscalYearNotUsedByPayroll(period.toExclusive().minusDays(1));
 
         Map<DayType, Integer> counts = new EnumMap<>(DayType.class);
         for (LocalDate date = period.from(); date.isBefore(period.toExclusive());
                 date = date.plusDays(1)) {
-            DayTypeAndName decided = overrides.getOrDefault(date,
+            DayTypeAndName decided = byDate.getOrDefault(date,
                     byDayOfWeek.getOrDefault(date.getDayOfWeek(),
                             new DayTypeAndName(DayType.WORKDAY, null)));
             calendar.save(date, decided.dayType(), decided.name());
             counts.merge(decided.dayType(), 1, Integer::sum);
         }
+
+        requireDivisorUnchanged(period);
 
         RegisteredCalendar registered = new RegisteredCalendar(calendar.findByPeriod(period));
         return new CalendarRegistration(Map.copyOf(counts),
@@ -130,19 +145,70 @@ public class WorkRuleMasterService {
     }
 
     /**
-     * その年度の分母を使った給与連携の出力が済んでいないか。
+     * 出力に使った分母（労基則 19 条 1 項 4 号）を動かす変更を拒む。
      *
      * <p><strong>締め済みの月の判定だけでは足りない。</strong>
-     * 割増賃金の基礎額の分母は<strong>年度全体</strong>の所定労働日数から決まるので、
+     * 分母は<strong>年度全体</strong>の所定労働日数から決まるので、
      * 4 月分の給与を払ったあとに 12 月（未締め）の休日を増やすと、
      * <strong>既に払った割増賃金の単価が事後的に足りなくなる</strong>（労基法 37 条は下限）。
      *
-     * <p>誰も気づけないまま起こるのが問題の本体なので、変更の側で止める。
+     * <p><strong>「出力したか」ではなく「分母が動くか」で判定する。</strong>
+     * 出力の有無だけで拒むと、
+     * <ul>
+     *   <li>法定休日と所定休日の付け替えや名称の訂正のように<strong>分母を動かさない変更</strong>
+     *       まで止まり、年度いっぱい暦日区分の誤りを直せなくなる（BR-07 の 35% 判定が誤ったまま固定される）</li>
+     *   <li>逆に、<strong>就業規則の適用や改定</strong>（分母のもう一方の入力）は素通りする</li>
+     * </ul>
+     * のどちらも起きる。書き込んだあとに数え直して、記録した値と突き合わせる。
+     *
+     * <p><strong>変更したあとに呼ぶ。</strong> 例外が飛べばトランザクションごと巻き戻る。
+     * 前もって「変更したらどうなるか」を組み立てると、
+     * 数え方の実装が 2 か所になる（落とし穴 67）。
+     *
+     * @param changed 変更が触れた期間。ここに重なる年度をすべて調べる
      */
-    private void requireFiscalYearNotUsedByPayroll(LocalDate date) {
-        int fiscalYear = AnnualScheduledHours.fiscalYearOf(YearMonth.from(date));
-        if (payrollExports.hasExportUsing(fiscalYear)) {
-            throw new FiscalYearUsedByPayrollException(fiscalYear);
+    private void requireDivisorUnchanged(DateRange changed) {
+        int last = AnnualScheduledHours.fiscalYearOf(
+                YearMonth.from(changed.toExclusive().minusDays(1)));
+        requireDivisorUnchangedFrom(changed.from(),
+                used -> used.fiscalYear() <= last);
+    }
+
+    /** 1 日の変更。 */
+    private void requireDivisorUnchanged(LocalDate date) {
+        requireDivisorUnchanged(new DateRange(date, date.plusDays(1)));
+    }
+
+    /**
+     * 終わりの無い変更（就業規則の適用）。
+     *
+     * <p><strong>年度の上限を呼ぶ側で決めない。</strong>
+     * 適用は期限を持たないので、どこまで効くかは
+     * 「出力のある年度がどこまであるか」でしか決まらない。
+     */
+    private void requireDivisorUnchangedFrom(LocalDate from) {
+        requireDivisorUnchangedFrom(from, used -> true);
+    }
+
+    private void requireDivisorUnchangedFrom(LocalDate from,
+                                             Predicate<UsedDivisor> within) {
+        int first = AnnualScheduledHours.fiscalYearOf(YearMonth.from(from));
+        for (UsedDivisor used : payrollExports.usedDivisorsFrom(first)) {
+            if (!within.test(used)) {
+                continue;
+            }
+            DateRange period = AnnualScheduledHours.periodOf(used.fiscalYear());
+            long now;
+            try {
+                now = annualScheduledTimeOf(used.fiscalYear(), period,
+                        new RegisteredCalendar(calendar.findByPeriod(period))).toMinutes();
+            } catch (DomainException e) {
+                // 分母そのものが求められなくなった。動いたかどうか以前の問題である
+                throw new FiscalYearUsedByPayrollException(used.fiscalYear());
+            }
+            if (now != used.annualScheduledMinutes()) {
+                throw new FiscalYearUsedByPayrollException(used.fiscalYear());
+            }
         }
     }
 
@@ -185,6 +251,101 @@ public class WorkRuleMasterService {
     }
 
     /** 一括設定の結果。 */
+    /**
+     * 期間の妥当性。
+     *
+     * <p>上限を置く。置かないと 1000 年ぶんの登録を要求でき、
+     * 1 トランザクションで 36 万行を書くことになる。
+     * 年度の登録が目的なので 3 年あれば足りる。
+     */
+    private static DateRange requireValidPeriod(LocalDate from, LocalDate toExclusive) {
+        if (from == null || toExclusive == null) {
+            throw new InvalidCalendarRequestException("期間の指定がありません");
+        }
+        if (!from.isBefore(toExclusive)) {
+            throw new InvalidCalendarRequestException(
+                    "期間の終わりは始まりより後でなければなりません: %s 〜 %s"
+                            .formatted(from, toExclusive));
+        }
+        long days = ChronoUnit.DAYS.between(from, toExclusive);
+        if (days > MAX_BULK_DAYS) {
+            throw new InvalidCalendarRequestException(
+                    "一度に登録できるのは %d 日までです: %d 日".formatted(MAX_BULK_DAYS, days));
+        }
+        return new DateRange(from, toExclusive);
+    }
+
+    private static Map<DayOfWeek, DayTypeAndName> byDayOfWeek(
+            List<CalendarDayOfWeekRule> rules) {
+        Map<DayOfWeek, DayTypeAndName> found = new EnumMap<>(DayOfWeek.class);
+        for (CalendarDayOfWeekRule rule : rules) {
+            // ★ 後勝ちにしない。どちらを意図したのか決められないので、送り直させる
+            if (found.put(rule.dayOfWeek(),
+                    new DayTypeAndName(rule.dayType(), rule.name())) != null) {
+                throw new InvalidCalendarRequestException(
+                        "同じ曜日の規則が 2 つあります: " + rule.dayOfWeek());
+            }
+        }
+        return found;
+    }
+
+    private static Map<LocalDate, DayTypeAndName> overrides(List<CalendarOverride> overrides,
+                                                            DateRange period) {
+        Map<LocalDate, DayTypeAndName> found = new LinkedHashMap<>();
+        for (CalendarOverride override : overrides) {
+            if (!period.contains(override.date())) {
+                // ★ 黙って捨てない。登録したつもりの祝日が入っていない状態を作る
+                throw new InvalidCalendarRequestException(
+                        "個別指定が期間の外にあります: %s（期間 %s）"
+                                .formatted(override.date(), period));
+            }
+            if (found.put(override.date(),
+                    new DayTypeAndName(override.dayType(), override.name())) != null) {
+                throw new InvalidCalendarRequestException(
+                        "同じ日の個別指定が 2 つあります: " + override.date());
+            }
+        }
+        return found;
+    }
+
+    /** 曜日ごとの既定（一括設定の入力）。 */
+    public record CalendarDayOfWeekRule(DayOfWeek dayOfWeek, DayType dayType, String name) {
+    }
+
+    /** 個別の日の指定（一括設定の入力）。 */
+    public record CalendarOverride(LocalDate date, DayType dayType, String name) {
+    }
+
+    /**
+     * 一括設定の依頼そのものの不備。
+     *
+     * <p><strong>422 で返す。</strong> 人事が何を直せばよいかを本文で伝える。
+     */
+    public static final class InvalidCalendarRequestException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        InvalidCalendarRequestException(String message) {
+            super(message);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:invalid-calendar-request";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "カレンダーの一括設定の指定が不正です";
+        }
+    }
+
     public record CalendarRegistration(Map<DayType, Integer> byDayType,
                                        List<DateRange> weeksWithoutLegalHoliday) {
 
@@ -239,42 +400,66 @@ public class WorkRuleMasterService {
      */
     private Duration annualScheduledTimeOf(int fiscalYear, DateRange period,
                                            CompanyCalendar registered) {
-        List<WorkRuleSeriesId> inUse = series.findSeriesIdsInUse(period);
-        if (inUse.isEmpty()) {
+        List<WorkRuleSeriesUsage> usages = series.findUsagesIn(period);
+        if (usages.isEmpty()) {
             throw new WorkRuleNotInUseException(fiscalYear);
         }
 
-        Map<WorkRuleSeriesId, Duration> totals = new LinkedHashMap<>();
-        for (WorkRuleSeriesId seriesId : inUse) {
-            totals.put(seriesId, annualScheduledTimeOf(fiscalYear, period, registered,
-                    seriesId));
-        }
-        Set<Duration> distinct = Set.copyOf(totals.values());
-        if (distinct.size() > 1) {
-            throw new MultipleScheduledWorkingTimesException(fiscalYear, totals);
-        }
-        return distinct.iterator().next();
-    }
-
-    /** 1 系列ぶん。所定労働日について、その日に有効な版の 1 日の所定を足す。 */
-    private Duration annualScheduledTimeOf(int fiscalYear, DateRange period,
-                                           CompanyCalendar registered,
-                                           WorkRuleSeriesId seriesId) {
-        List<WorkRule> versions = workRules.findVersionsOf(seriesId);
+        Map<WorkRuleSeriesId, List<WorkRule>> versions = new LinkedHashMap<>();
         Duration total = Duration.ZERO;
         for (LocalDate date = period.from(); date.isBefore(period.toExclusive());
                 date = date.plusDays(1)) {
             if (registered.dayTypeOf(date) != DayType.WORKDAY) {
                 continue;
             }
-            WorkRule effective = effectiveOn(versions, date)
-                    // ★ 版の隙間を 0 として素通りさせない。年間の所定が過少に出て、
-                    //   分母が小さくなり単価が過大になる（法定は下回らないが値は誤り）
-                    .orElseThrow(() -> new WorkRuleVersionMissingException(fiscalYear,
-                            seriesId, period.from()));
-            total = total.plus(effective.scheduledDailyWorkingTime());
+            total = total.plus(scheduledOn(fiscalYear, date, usages, versions));
         }
         return total;
+    }
+
+    /**
+     * その日の会社の所定労働時間。
+     *
+     * <p><strong>系列ごとに 1 年ぶんを足してから比べない。</strong>
+     * 年度の途中で新設した系列は 4 月〜使用開始前日に版を持たないのが正常であり、
+     * 年度の全所定労働日について版を要求すると
+     * <strong>10 月からフレックスを導入した会社は FY のどの月も出力できなくなる</strong>
+     * （落とし穴 131）。日ごとに「その日に適用されている系列」だけを見る。
+     *
+     * <p>日ごとに見ると、<strong>年度の途中で全社の所定を変えた年度</strong>も正しく数えられる。
+     * 4 月〜9 月が 480 分・10 月〜3 月が 465 分なら、その日ごとの値を足したものが年間の所定である。
+     *
+     * <p>拒否するのは<strong>同じ日に所定が 2 つ以上ある</strong>場合だけである。
+     * 労基則 19 条 1 項 4 号の分母は「その労働者の」所定なので、
+     * 割れたまま 1 つの値を返すと、所定の短い社員の単価が法定を下回る。
+     */
+    private Duration scheduledOn(int fiscalYear, LocalDate date,
+                                 List<WorkRuleSeriesUsage> usages,
+                                 Map<WorkRuleSeriesId, List<WorkRule>> versions) {
+        Map<WorkRuleSeriesId, Duration> onThatDay = new LinkedHashMap<>();
+        for (WorkRuleSeriesUsage usage : usages) {
+            if (!usage.period().contains(date)) {
+                continue;
+            }
+            List<WorkRule> found = versions.computeIfAbsent(usage.seriesId(),
+                    workRules::findVersionsOf);
+            WorkRule effective = effectiveOn(found, date)
+                    // ★ 版の隙間を 0 として素通りさせない。年間の所定が過少に出て、
+                    //   分母が小さくなり単価が過大になる（法定は下回らないが値は誤り）。
+                    //   ここは「適用されているのに版が無い」日なので、本当に隙間である
+                    .orElseThrow(() -> new WorkRuleVersionMissingException(fiscalYear,
+                            usage.seriesId(), date));
+            onThatDay.put(usage.seriesId(), effective.scheduledDailyWorkingTime());
+        }
+        if (onThatDay.isEmpty()) {
+            // 誰にも就業規則が適用されていない所定労働日。会社の所定が決まらない
+            throw new WorkRuleNotAppliedOnException(fiscalYear, date);
+        }
+        Set<Duration> distinct = Set.copyOf(onThatDay.values());
+        if (distinct.size() > 1) {
+            throw new MultipleScheduledWorkingTimesException(fiscalYear, date, onThatDay);
+        }
+        return distinct.iterator().next();
     }
 
     /**
@@ -353,6 +538,11 @@ public class WorkRuleMasterService {
      *
      * <p><strong>過去へ遡って適用できない</strong>（適用開始日が締め済みの月に入る場合）。
      * 遡らせると、確定済みの月の所定労働時間が後から変わる。
+     *
+     * <p><strong>分母の入力はカレンダーだけではない。</strong>
+     * 年間の所定労働時間は「所定労働日 × その日に適用されている規則の所定」なので、
+     * 適用を変えると出力済みの年度の分母も動きうる。
+     * カレンダーと同じ検査を当てる（落とし穴 130）。
      */
     @Transactional
     public void 就業規則を適用する(Requester requester, EmployeeId employeeId,
@@ -363,6 +553,8 @@ public class WorkRuleMasterService {
             throw new MonthAlreadyClosedException(month, "就業規則の適用");
         }
         series.assign(employeeId, seriesId, validFrom);
+        // ★ 適用は期限を持たないので、以後のすべての年度に効く
+        requireDivisorUnchangedFrom(validFrom);
     }
 
     private static void requireHumanResources(Requester requester) {
@@ -382,7 +574,7 @@ public class WorkRuleMasterService {
         private static final long serialVersionUID = 1L;
 
         FiscalYearUsedByPayrollException(int fiscalYear) {
-            super("%d 年度は給与連携で出力済みです。会社カレンダーを変えると、"
+            super("%d 年度は給与連携で出力済みです。この変更は年間の所定労働時間を動かすので、"
                     .formatted(fiscalYear)
                     + "既に払った割増賃金の単価が事後的に変わります");
         }
@@ -491,10 +683,10 @@ public class WorkRuleMasterService {
         @Serial
         private static final long serialVersionUID = 1L;
 
-        MultipleScheduledWorkingTimesException(int fiscalYear,
-                                               Map<WorkRuleSeriesId, Duration> totals) {
-            super("%d 年度の年間所定労働時間が就業規則によって異なります: %s（要件 3.1 は全社員 1 日 8 時間と定めています）"
-                    .formatted(fiscalYear, totals.values()));
+        MultipleScheduledWorkingTimesException(int fiscalYear, LocalDate date,
+                                               Map<WorkRuleSeriesId, Duration> onThatDay) {
+            super("%d 年度の %s に所定労働時間の異なる就業規則が並んでいます: %s（要件 3.1 は全社員 1 日 8 時間と定めています）"
+                    .formatted(fiscalYear, date, onThatDay.values()));
         }
 
         @Override
@@ -514,6 +706,42 @@ public class WorkRuleMasterService {
     }
 
     /** 年度に適用されている就業規則が 1 つも無い。 */
+    /**
+     * 所定労働日なのに、その日は誰にも就業規則が適用されていない。
+     *
+     * <p>{@link WorkRuleNotInUseException} が「年度に 1 件も無い」なのに対し、
+     * こちらは<strong>年度の一部だけ空いている</strong>場合である。
+     * 導入初年度（1 月から使い始めた会社の FY 前半）に必ず起こる。
+     *
+     * <p>0 時間として素通りさせない。年間の所定が過少に出て分母が小さくなり、
+     * <strong>単価が過大</strong>になる。法定は下回らないが、値としては誤りである。
+     */
+    public static final class WorkRuleNotAppliedOnException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        WorkRuleNotAppliedOnException(int fiscalYear, LocalDate date) {
+            super("%d 年度の %s は所定労働日ですが、就業規則が誰にも適用されていません"
+                    .formatted(fiscalYear, date));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:work-rule-not-applied-on";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "所定労働日に就業規則が適用されていません";
+        }
+    }
+
     public static final class WorkRuleNotInUseException extends DomainException {
 
         @Serial

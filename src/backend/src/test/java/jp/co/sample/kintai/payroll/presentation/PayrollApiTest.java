@@ -3,6 +3,7 @@ package jp.co.sample.kintai.payroll.presentation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,6 +51,26 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
  */
 @DisplayName("給与連携の API（BR-18）")
 class PayrollApiTest extends WebIntegrationTestBase {
+
+    /**
+     * CSV の列位置。<strong>数字を各所に散らさない。</strong>
+     * 列を 1 つ足したときに直す場所が 1 か所で済む。
+     */
+    private static final int 社員番号 = 0;
+    private static final int 暦月所定労働日数 = 5;
+    private static final int 清算期間所定労働日数 = 6;
+    private static final int 出勤日数 = 7;
+    private static final int 年休日数 = 8;
+    private static final int 欠勤日数 = 9;
+    private static final int 実労働 = 10;
+    private static final int 所定内 = 11;
+    private static final int 所定超 = 12;
+    private static final int 残業60hまで = 13;
+    private static final int 残業60h超 = 14;
+    private static final int 法定休日 = 15;
+    private static final int 深夜 = 16;
+    private static final int 所定総 = 17;
+    private static final int 不足 = 18;
 
     /** 5 月分を出力する。対象月が終わっている必要がある（BR-10）。 */
     private static final LocalDate TODAY = LocalDate.of(2026, 6, 10);
@@ -414,7 +435,7 @@ class PayrollApiTest extends WebIntegrationTestBase {
                     SELECT working_minutes FROM monthly_settlements
                      WHERE employee_id = ? AND target_month = DATE '2026-05-01'
                     """, Integer.class, taro.value());
-            assertThat(Integer.parseInt(columns[9])).isEqualTo(stored);
+            assertThat(Integer.parseInt(columns[実労働])).isEqualTo(stored);
         }
 
         /**
@@ -444,9 +465,9 @@ class PayrollApiTest extends WebIntegrationTestBase {
                     .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
             String[] columns = csv.lines().skip(1).findFirst().orElseThrow().split(",");
 
-            assertThat(Integer.parseInt(columns[14]))
+            assertThat(Integer.parseInt(columns[法定休日]))
                     .as("法定休日労働 8 時間").isEqualTo(480);
-            assertThat(Integer.parseInt(columns[11]))
+            assertThat(Integer.parseInt(columns[所定超]))
                     .as("法定休日の所定は 0 なので、所定超にも 8 時間が入る")
                     .isGreaterThanOrEqualTo(480);
         }
@@ -462,25 +483,191 @@ class PayrollApiTest extends WebIntegrationTestBase {
         }
 
         /**
-         * <strong>所定内 + 所定超 = 実労働。</strong>
-         * 給与側はこの 2 つで基礎賃金を払う。
+         * <strong>「所定内 + 所定超 = 実労働」を期待に書かない。</strong>
+         * {@code beyondScheduledTime()} が {@code workingTime − scheduledInsideTime()}
+         * として定義されているので、その等式は<strong>定義を代入しただけ</strong>であり、
+         * 所定内の式を何に変えても成り立つ（CLAUDE.md 落とし穴 117）。
+         * 実数で書く。
          */
         @Test
-        @DisplayName("IT-PAY-47 CSV の各行で所定内 + 所定超が実労働に一致する")
-        void csvRowsAreConsistent() throws Exception {
+        @DisplayName("IT-PAY-47 定時で働いた月は全部が所定内に入り、所定超は 0 になる")
+        void csvSplitsBaseWageByActualNumbers() throws Exception {
             workAndClose(taro, MAY);
             String id = createExport();
 
-            String csv = mockMvc.perform(get("/api/payroll/exports/" + id)
-                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
-                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+            String[] columns = csvOf(id);
+            assertThat(Integer.parseInt(columns[実労働]))
+                    .as("所定労働日 21 日 × 8 時間").isEqualTo(21 * 480);
+            assertThat(Integer.parseInt(columns[所定内]))
+                    .as("所定総 − 不足 = 21 日 × 8 時間").isEqualTo(21 * 480);
+            assertThat(Integer.parseInt(columns[所定超]))
+                    .as("所定を超えて働いていない").isZero();
+            assertThat(Integer.parseInt(columns[所定総])).isEqualTo(21 * 480);
+            assertThat(Integer.parseInt(columns[不足])).isZero();
+        }
 
-            String[] columns = csv.lines().skip(1).findFirst().orElseThrow().split(",");
-            int working = Integer.parseInt(columns[9]);
-            int inside = Integer.parseInt(columns[10]);
-            int beyond = Integer.parseInt(columns[11]);
-            assertThat(inside + beyond).isEqualTo(working);
-            assertThat(working).as("21 日 × 8 時間").isEqualTo(21 * 480);
+        /**
+         * <strong>労基則 54 条 4 号の労働日数と、日額の分母を確かめる。</strong>
+         * どのテストからも読まれていない列は、取り違えても誰も気づけない
+         * （落とし穴 112）。
+         */
+        @Test
+        @DisplayName("IT-PAY-53 日数の列が数えたとおりに並ぶ")
+        void csvCarriesDayCounts() throws Exception {
+            workAllMonth(taro, MAY);
+            // 5/8（金）は所定労働日。打刻しないので欠勤 1 日になる
+            closeAfterWork(taro, MAY);
+            String id = createExport();
+
+            String[] columns = csvOf(id);
+            assertThat(Integer.parseInt(columns[暦月所定労働日数]))
+                    .as("2026 年 5 月の平日").isEqualTo(21);
+            assertThat(Integer.parseInt(columns[清算期間所定労働日数]))
+                    .as("在籍期間で切っていない月は暦月と同じ").isEqualTo(21);
+            assertThat(Integer.parseInt(columns[出勤日数])).isEqualTo(21);
+            assertThat(Integer.parseInt(columns[年休日数])).isZero();
+            assertThat(Integer.parseInt(columns[欠勤日数])).isZero();
+        }
+
+        /**
+         * <strong>60 時間の分かれ目は 25% と 50% の境界である。</strong>
+         * 2 つの列を読まないと、渡す順序を入れ替えても検出できない。
+         */
+        @Test
+        @DisplayName("IT-PAY-54 月 60 時間超の残業は 2 つの列に分かれて出る")
+        void csvSplitsOvertimeAt60Hours() throws Exception {
+            workAllMonth(taro, MAY, 12);   // 1 日 12 時間 × 21 日 = 4 時間 × 21 = 84 時間の残業
+            closeAfterWork(taro, MAY);
+            String id = createExport();
+
+            String[] columns = csvOf(id);
+            int upTo60 = Integer.parseInt(columns[残業60hまで]);
+            int over60 = Integer.parseInt(columns[残業60h超]);
+            assertThat(upTo60).as("60 時間まで").isEqualTo(60 * 60);
+            assertThat(over60).as("60 時間を超えたぶん").isPositive();
+            assertThat(upTo60 + over60).as("合計が時間外労働").isEqualTo(84 * 60);
+        }
+
+        /**
+         * <strong>深夜は排他区分と別の列で渡す</strong>（労基則 20 条の上乗せ）。
+         * 深夜の列を 1 度も読まないと、0 を返す実装が生き残る。
+         */
+        @Test
+        @DisplayName("IT-PAY-55 深夜に働いた月は深夜の列が立つ")
+        void csvCarriesNightTime() throws Exception {
+            workAllMonth(taro, MAY);
+            // 5/16（土・所定休日）に 20:00〜23:00 働く。深夜帯は 22:00〜23:00 の 1 時間
+            LocalDate saturday = LocalDate.of(2026, 5, 16);
+            punch(taro, saturday, TimeClockEvent.Type.CLOCK_IN, 20);
+            punch(taro, saturday, TimeClockEvent.Type.CLOCK_OUT, 23);
+            closeAfterWork(taro, MAY);
+            String id = createExport();
+
+            String[] columns = csvOf(id);
+            assertThat(Integer.parseInt(columns[深夜])).as("22:00〜23:00").isEqualTo(60);
+            assertThat(Integer.parseInt(columns[深夜]))
+                    .as("深夜は実労働の内側にある")
+                    .isLessThanOrEqualTo(Integer.parseInt(columns[実労働]));
+        }
+
+        /**
+         * <strong>CSV は RFC 4180 に従い CRLF で区切る。</strong>
+         * {@code String.lines()} は LF でも CRLF でも同じ数を返すので、
+         * 行数だけを見ていると LF へ変えても落ちない（落とし穴 112）。
+         */
+        @Test
+        @DisplayName("IT-PAY-56 行の区切りは CRLF で、見出しは 19 列ある")
+        void csvUsesCrlfAndFullHeader() throws Exception {
+            workAndClose(taro, MAY);
+            String id = createExport();
+
+            String csv = rawCsvOf(id);
+            assertThat(csv).contains("\r\n");
+            String header = csv.substring(1, csv.indexOf("\r\n"));   // 先頭の BOM を除く
+            assertThat(header.split(",")).hasSize(19);
+            assertThat(header).endsWith("所定総,不足");
+            assertThat(header.split(",")[暦月所定労働日数]).isEqualTo("暦月所定労働日数");
+        }
+
+        /**
+         * <strong>複数行の CSV を 1 度は作る。</strong>
+         * 1 行しか出さないテストばかりだと、並び順を決める実装を消しても落ちない。
+         */
+        @Test
+        @DisplayName("IT-PAY-57 行は社員番号の昇順に並ぶ")
+        void csvRowsAreSortedByEmployeeNumber() throws Exception {
+            workAndClose(boss, MAY);   // E0500
+            workAndClose(taro, MAY);   // E0001
+            String id = createExport();
+
+            String csv = rawCsvOf(id);
+            assertThat(csv.lines().skip(1).map(line -> line.split(",")[社員番号]).toList())
+                    .containsExactly("E0001", "E0500");
+        }
+
+        /**
+         * <strong>月中入社の月は、日額の分母（暦月）と所定総の根拠（清算期間）が食い違う。</strong>
+         *
+         * <p>清算期間のほうを日額の分母に使うと、
+         * 月給 30 万円・暦月 21 日の会社で 1 日欠勤したときの控除が
+         * 14,285 円ではなく 27,272 円になる（労基法 24 条の全額払い・落とし穴 132）。
+         * <strong>暦月の所定労働日数は他のどの列からも復元できない</strong>ので、別に渡す。
+         */
+        @Test
+        @DisplayName("IT-PAY-71 月中入社の月は暦月と清算期間で所定労働日数が違う")
+        void midMonthHireCarriesBothScheduledDays() throws Exception {
+            LocalDate hiredOn = LocalDate.of(2026, 5, 18);   // 月曜
+            EmployeeId newcomer = hire("E0004", hiredOn, Optional.empty(), Role.EMPLOYEE);
+            series.assign(newcomer, standard, hiredOn);
+            // ★ 所属は入社日より前に登録できない。固定の HIRED を使い回さない
+            assignments.save(jp.co.sample.kintai.employee.domain.Assignment
+                    .startingAt(newcomer, sales, hiredOn));
+            for (LocalDate date = hiredOn; date.isBefore(LocalDate.of(2026, 6, 1));
+                    date = date.plusDays(1)) {
+                if (date.getDayOfWeek().getValue() >= 6) {
+                    continue;
+                }
+                punch(newcomer, date, TimeClockEvent.Type.CLOCK_IN, 9);
+                punch(newcomer, date, TimeClockEvent.Type.BREAK_START, 12);
+                punch(newcomer, date, TimeClockEvent.Type.BREAK_END, 13);
+                punch(newcomer, date, TimeClockEvent.Type.CLOCK_OUT, 18);
+            }
+            closeAfterWork(newcomer, MAY);
+            String id = createExport();
+
+            String[] columns = csvOf(id);
+            assertThat(columns[社員番号]).isEqualTo("E0004");
+            assertThat(Integer.parseInt(columns[暦月所定労働日数]))
+                    .as("2026 年 5 月の平日はすべて所定労働日").isEqualTo(21);
+            assertThat(Integer.parseInt(columns[清算期間所定労働日数]))
+                    .as("5/18〜5/31 の平日").isEqualTo(10);
+            assertThat(Integer.parseInt(columns[出勤日数])).isEqualTo(10);
+            assertThat(Integer.parseInt(columns[所定総]))
+                    .as("清算期間の所定労働日 10 日 × 8 時間").isEqualTo(10 * 480);
+        }
+
+        /** 全社員の賃金データなので、人事でなければ CSV そのものを取れない。 */
+        @Test
+        @DisplayName("IT-PAY-58 人事でない利用者は CSV を取得できない")
+        void csvIsForHumanResourcesOnly() throws Exception {
+            workAndClose(taro, MAY);
+            String id = createExport();
+
+            mockMvc.perform(get("/api/payroll/exports/" + id)
+                            .with(as(taro, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
+        }
+
+        private String[] csvOf(String id) throws Exception {
+            return rawCsvOf(id).lines().skip(1).findFirst().orElseThrow().split(",");
+        }
+
+        private String rawCsvOf(String id) throws Exception {
+            return mockMvc.perform(get("/api/payroll/exports/" + id)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         }
     }
 
@@ -529,17 +716,39 @@ class PayrollApiTest extends WebIntegrationTestBase {
     @DisplayName("出力の記録")
     class Records {
 
+        /**
+         * <strong>別の月の記録を混ぜる。</strong>
+         * 対象月の記録しか無い状態で数えると、
+         * 月での絞り込みを消しても件数が変わらない（落とし穴 102）。
+         */
         @Test
-        @DisplayName("IT-PAY-44 同じ月を 2 回出力でき、記録が 2 件になる")
+        @DisplayName("IT-PAY-44 同じ月を 2 回出力でき、月で絞ると 2 件になる")
         void sameMonthTwice() throws Exception {
             workAndClose(taro, MAY);
             createExport();
             createExport();
+            createExport(YearMonth.of(2026, 4));   // 別の月。全員が除外されるが記録は残る
 
             mockMvc.perform(get("/api/payroll/exports?month=2026-05")
                             .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.exports.length()").value(2));
+                    .andExpect(jsonPath("$.exports.length()").value(2))
+                    .andExpect(jsonPath("$.exports[0].month").value("2026-05"));
+
+            mockMvc.perform(get("/api/payroll/exports")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    // 絞らなければ 4 月ぶんも含めて 3 件
+                    .andExpect(jsonPath("$.exports.length()").value(3));
+        }
+
+        /** 全社員の賃金データの一覧なので、人事でなければ引けない。 */
+        @Test
+        @DisplayName("IT-PAY-59 人事でない利用者は記録の一覧を引けない")
+        void recordsAreForHumanResourcesOnly() throws Exception {
+            mockMvc.perform(get("/api/payroll/exports")
+                            .with(as(taro, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
 
         /**
@@ -561,10 +770,195 @@ class PayrollApiTest extends WebIntegrationTestBase {
         }
     }
 
+    /**
+     * 出力に使った分母（労基則 19 条 1 項 4 号）の保護。
+     *
+     * <p><strong>止めるのは「分母が動く変更」だけである。</strong>
+     * 「出力したか」で拒むと、法定休日と所定休日の付け替えのような
+     * 分母を動かさない訂正まで年度いっぱい止まる。
+     * 逆に、就業規則の適用（分母のもう一方の入力）は素通りする。
+     */
+    @Nested
+    @DisplayName("分母の保護")
+    class Divisor {
+
+        @Test
+        @DisplayName("IT-PAY-62 出力済みの年度でも所定労働日数が変わらない訂正は通る")
+        void nonDivisorChangeIsAllowed() throws Exception {
+            workAndClose(taro, MAY);
+            createExport();
+
+            // 2026-12-27 は日曜（法定休日）。所定休日へ付け替えても所定労働日数は変わらない
+            mockMvc.perform(put("/api/calendars/{date}", "2026-12-27")
+                            .contentType("application/json")
+                            .content("{\"dayType\":\"NON_LEGAL_HOLIDAY\",\"name\":\"年末休暇\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isNoContent());
+        }
+
+        @Test
+        @DisplayName("IT-PAY-63 出力済みの年度で所定労働日を休日に変えると 409")
+        void divisorChangeIsRejected() throws Exception {
+            workAndClose(taro, MAY);
+            createExport();
+
+            // 2026-12-30 は水曜（所定労働日）。休日にすると年間の所定が 1 日ぶん減る
+            mockMvc.perform(put("/api/calendars/{date}", "2026-12-30")
+                            .contentType("application/json")
+                            .content("{\"dayType\":\"NON_LEGAL_HOLIDAY\",\"name\":\"年末休暇\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:fiscal-year-used-by-payroll"));
+        }
+
+        /**
+         * <strong>一括設定でも同じ検査が働く。</strong>
+         * 同じ規則に 2 つの入口があるのに片方しか通していないと、
+         * 一方だけを消しても落ちない（落とし穴 111）。
+         */
+        @Test
+        @DisplayName("IT-PAY-64 一括設定でも出力済みの年度は守られる")
+        void bulkRegistrationIsGuarded() throws Exception {
+            workAndClose(taro, MAY);
+            createExport();
+
+            mockMvc.perform(post("/api/calendars/bulk")
+                            .contentType("application/json")
+                            .content("""
+                                    {"from":"2026-12-01","toExclusive":"2027-01-01",
+                                     "rules":[{"dayOfWeek":"MONDAY","dayType":"NON_LEGAL_HOLIDAY"}],
+                                     "overrides":[]}
+                                    """)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:fiscal-year-used-by-payroll"));
+        }
+
+        /**
+         * <strong>1 行も出なかった記録では凍結しない。</strong>
+         * 全員が除外された記録は誰にも賃金を払っていない。
+         * 数えると、動作確認で 1 回叩いただけでその年度のカレンダーを直せなくなる。
+         */
+        @Test
+        @DisplayName("IT-PAY-65 行の出なかった出力は年度を凍結しない")
+        void emptyExportDoesNotFreeze() throws Exception {
+            createExport();   // 誰も締めていないので rowCount は 0
+
+            mockMvc.perform(put("/api/calendars/{date}", "2026-12-30")
+                            .contentType("application/json")
+                            .content("{\"dayType\":\"NON_LEGAL_HOLIDAY\",\"name\":\"年末休暇\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isNoContent());
+        }
+
+        /** 守るのは出力した年度だけ。別の年度は自由に組める。 */
+        @Test
+        @DisplayName("IT-PAY-66 別の年度のカレンダーは変えられる")
+        void otherFiscalYearIsUntouched() throws Exception {
+            workAndClose(taro, MAY);
+            createExport();
+
+            // 2027-06-01 は FY2027。FY2026 の出力とは無関係
+            mockMvc.perform(put("/api/calendars/{date}", "2027-06-01")
+                            .contentType("application/json")
+                            .content("{\"dayType\":\"NON_LEGAL_HOLIDAY\",\"name\":\"創立記念日\"}")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isNoContent());
+        }
+
+        /**
+         * <strong>分母の入力はカレンダーだけではない。</strong>
+         * 年間の所定は「所定労働日 × その日に適用されている規則の所定」なので、
+         * 就業規則の適用を変えても動く（落とし穴 130）。
+         */
+        @Test
+        @DisplayName("IT-PAY-67 出力済みの年度に所定の違う就業規則を適用すると 409")
+        void applyingAnotherRuleIsGuarded() throws Exception {
+            workAndClose(taro, MAY);
+            createExport();
+
+            WorkRuleSeriesId shorter = new WorkRuleSeriesId(UUID.randomUUID());
+            series.save(WorkRuleSeries.active(shorter, "短時間勤務"));
+            workRules.save(WorkRules.versionOf(shorter, LocalDate.of(2026, 7, 1),
+                    WorkRules.fixed("09:00", "17:45", 60),
+                    Duration.ofHours(8), NightWindow.STANDARD));
+
+            mockMvc.perform(post("/api/employees/{id}/work-rule-assignments", taro.value())
+                            .contentType("application/json")
+                            .content("{\"seriesId\":\"%s\",\"validFrom\":\"2026-07-01\"}"
+                                    .formatted(shorter.value()))
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:fiscal-year-used-by-payroll"));
+        }
+
+        /**
+         * <strong>利用者が送る値の不備は 422 で返す。</strong>
+         * {@code DateRange} の compact constructor に任せると、
+         * 理由の載らない 500 になる（落とし穴 105）。
+         */
+        @Test
+        @DisplayName("IT-PAY-68 一括設定の期間が逆だと 422")
+        void bulkPeriodMustBeOrdered() throws Exception {
+            mockMvc.perform(post("/api/calendars/bulk")
+                            .contentType("application/json")
+                            .content("""
+                                    {"from":"2027-04-01","toExclusive":"2026-04-01",
+                                     "rules":[],"overrides":[]}
+                                    """)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:invalid-calendar-request"));
+        }
+
+        /** 後勝ちで畳まない。どちらを意図したのか決められない。 */
+        @Test
+        @DisplayName("IT-PAY-69 一括設定に同じ曜日が 2 つあると 422")
+        void bulkRulesMustNotRepeatDayOfWeek() throws Exception {
+            mockMvc.perform(post("/api/calendars/bulk")
+                            .contentType("application/json")
+                            .content("""
+                                    {"from":"2028-04-01","toExclusive":"2028-05-01",
+                                     "rules":[{"dayOfWeek":"MONDAY","dayType":"WORKDAY"},
+                                              {"dayOfWeek":"MONDAY","dayType":"LEGAL_HOLIDAY"}],
+                                     "overrides":[]}
+                                    """)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:invalid-calendar-request"));
+        }
+
+        /** 期間の外の個別指定を黙って捨てると、登録したつもりの祝日が入らない。 */
+        @Test
+        @DisplayName("IT-PAY-70 一括設定の個別指定が期間の外だと 422")
+        void bulkOverridesMustBeInsideThePeriod() throws Exception {
+            mockMvc.perform(post("/api/calendars/bulk")
+                            .contentType("application/json")
+                            .content("""
+                                    {"from":"2028-04-01","toExclusive":"2028-05-01",
+                                     "rules":[],
+                                     "overrides":[{"date":"2028-06-01","dayType":"LEGAL_HOLIDAY"}]}
+                                    """)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:invalid-calendar-request"));
+        }
+    }
+
     private String createExport() throws Exception {
+        return createExport(MAY);
+    }
+
+    private String createExport(YearMonth month) throws Exception {
         String body = mockMvc.perform(post("/api/payroll/exports")
                         .contentType("application/json")
-                        .content("{\"month\":\"2026-05\"}")
+                        .content("{\"month\":\"%s\"}".formatted(month))
                         .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
@@ -589,6 +983,11 @@ class PayrollApiTest extends WebIntegrationTestBase {
 
     /** その月の所定労働日すべてに 9:00–18:00（休憩 1 時間）の打刻を入れる。 */
     private void workAllMonth(EmployeeId employeeId, YearMonth month) {
+        workAllMonth(employeeId, month, 8);
+    }
+
+    /** 1 日の実労働時間を指定して、その月の所定労働日すべてに打刻を入れる。 */
+    private void workAllMonth(EmployeeId employeeId, YearMonth month, int workingHours) {
         for (LocalDate date = month.atDay(1); date.isBefore(month.plusMonths(1).atDay(1));
                 date = date.plusDays(1)) {
             if (date.getDayOfWeek().getValue() >= 6) {
@@ -597,16 +996,14 @@ class PayrollApiTest extends WebIntegrationTestBase {
             punch(employeeId, date, TimeClockEvent.Type.CLOCK_IN, 9);
             punch(employeeId, date, TimeClockEvent.Type.BREAK_START, 12);
             punch(employeeId, date, TimeClockEvent.Type.BREAK_END, 13);
-            punch(employeeId, date, TimeClockEvent.Type.CLOCK_OUT, 18);
+            punch(employeeId, date, TimeClockEvent.Type.CLOCK_OUT, 10 + workingHours);
         }
     }
 
-    /** 打刻 → 提出 → 承認 → 締め まで本番の経路で通す。 */
-    private void workAndClose(EmployeeId employeeId, YearMonth month) {
-        workAllMonth(employeeId, month);
+    /** 打刻済みの月を 提出 → 承認 → 締め まで通す。 */
+    private void closeAfterWork(EmployeeId employeeId, YearMonth month) {
         Requester self = new Requester(employeeId, Set.of(Role.EMPLOYEE));
         Requester humanResources = new Requester(hr, Set.of(Role.EMPLOYEE, Role.HR));
-        // ★ 承認は部署長が行う（BR-11）。人事が承認できるのは承認者を導けない場合だけ
         Requester approver = new Requester(boss, Set.of(Role.EMPLOYEE, Role.APPROVER));
         attendances.submit(self, employeeId, month, Optional.empty(), 0L);
         Requester decider = employeeId.equals(boss) ? humanResources : approver;
@@ -614,6 +1011,13 @@ class PayrollApiTest extends WebIntegrationTestBase {
                 attendances.currentVersion(humanResources, employeeId, month));
         attendances.close(humanResources, employeeId, month,
                 attendances.currentVersion(humanResources, employeeId, month));
+    }
+
+    /** 打刻 → 提出 → 承認 → 締め まで本番の経路で通す。 */
+    private void workAndClose(EmployeeId employeeId, YearMonth month) {
+        // ★ 承認は部署長が行う（BR-11）。人事が承認できるのは承認者を導けない場合だけ
+        workAllMonth(employeeId, month);
+        closeAfterWork(employeeId, month);
     }
 
     /** 年度の全日を登録する。土=所定休日・日=法定休日・他=所定労働日。 */

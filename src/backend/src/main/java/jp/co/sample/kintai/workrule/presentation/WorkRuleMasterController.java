@@ -60,19 +60,18 @@ class WorkRuleMasterController {
     @PostMapping("/calendars/bulk")
     BulkResponse setDayTypes(@AuthenticationPrincipal AuthenticatedEmployee principal,
                              @Valid @RequestBody BulkBody body) {
-        Map<java.time.DayOfWeek, WorkRuleMasterService.DayTypeAndName> byDayOfWeek =
-                body.rules().stream().collect(java.util.stream.Collectors.toMap(
-                        BulkRule::dayOfWeek,
-                        rule -> new WorkRuleMasterService.DayTypeAndName(
-                                rule.dayType(), rule.name())));
-        Map<LocalDate, WorkRuleMasterService.DayTypeAndName> overrides =
-                body.overrides().stream().collect(java.util.stream.Collectors.toMap(
-                        BulkOverride::date,
-                        override -> new WorkRuleMasterService.DayTypeAndName(
-                                override.dayType(), override.name())));
-
+        // ★ 重複や期間の逆転をここで畳まない。畳むと後勝ちになり、
+        //   人事は「登録したはずの祝日が入っていない」ことに気づけない（落とし穴 105）
         var result = master.暦日区分をまとめて設定する(principal.toRequester(),
-                new DateRange(body.from(), body.toExclusive()), byDayOfWeek, overrides);
+                body.from(), body.toExclusive(),
+                body.rules().stream()
+                        .map(rule -> new WorkRuleMasterService.CalendarDayOfWeekRule(
+                                rule.dayOfWeek(), rule.dayType(), rule.name()))
+                        .toList(),
+                body.overrides().stream()
+                        .map(override -> new WorkRuleMasterService.CalendarOverride(
+                                override.date(), override.dayType(), override.name()))
+                        .toList());
         return BulkResponse.from(result);
     }
 

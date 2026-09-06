@@ -217,12 +217,14 @@ public class PayrollExportService {
         MonthlySettlement settlement = settlements.find(employeeId, month).orElseThrow(
                 () -> new IllegalStateException(
                         "締め済みなのに月次清算がありません: %s / %s".formatted(employeeId, month)));
-        MonthlyDayCounts days = settlements.dayCountsIn(employeeId, month);
+        // ★ 清算期間は保存済みの月次清算から渡す。引き直すと、締めたあとに登録された
+        //   退職日で期間が縮み、同じ出力の記録から出る CSV が変わる（落とし穴 122）
+        MonthlyDayCounts days = settlements.dayCountsIn(employeeId, settlement.period());
 
         Duration over60 = settlement.overtimeOver60Time();
         return new PayrollRow(employee.number(), month, settlement.period().period(),
                 settlement.workingTimeSystem(),
-                days.scheduledDays(), days.attendedDays(),
+                days.monthlyScheduledDays(), days.scheduledDays(), days.attendedDays(),
                 days.paidLeaveDays(), days.absentDays(),
                 settlement.workingTime(),
                 settlement.scheduledInsideTime(), settlement.beyondScheduledTime(),

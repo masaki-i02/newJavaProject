@@ -36,27 +36,30 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  *
  * @param employeeNumber      ① 名寄せの鍵。内部の識別子（UUID）は出さない
  * @param month               ② 対象月
- * @param period              ③ 清算期間。暦月 ∩ 在籍期間（BR-05）
+ * @param period              ③ 清算期間。暦月 ∩ 在籍期間（BR-05）。
+ *                            <strong>賃金計算期間ではない。</strong> 賃金計算期間は②の暦月である
  * @param system              ④ 労働時間制度
- * @param scheduledDays       ⑤ 所定労働日数。<strong>年休を引く前</strong>（日額の分母）
- * @param attendedDays        ⑥ 出勤日数。法定休日・所定休日の出勤を含む（労基則 54 条の労働日数）
- * @param paidLeaveDays       ⑦ 年次有給休暇の取得日数（BR-16）
- * @param absentDays          ⑧ 欠勤日数
- * @param workingTime         ⑨ 実労働時間（労基則 54 条の労働時間数）
- * @param scheduledInsideTime ⑩ 所定内労働時間。月給に含む
- * @param beyondScheduledTime ⑪ 所定超労働時間。<strong>通常の賃金 1.0 倍の追加支払</strong>
- * @param overtimeUpTo60Time  ⑫ 法定外残業（月 60 時間まで）。割増 +25%
- * @param overtimeOver60Time  ⑬ 法定外残業（月 60 時間超）。割増 +50%
- * @param legalHolidayTime    ⑭ 法定休日労働。割増 +35%
- * @param nightTime           ⑮ 深夜労働。割増 +25%（⑩〜⑭に上乗せ）
- * @param scheduledTotalTime  ⑯ 所定総労働時間。年休の日を除いた後
- * @param shortageTime        ⑰ 不足時間
+ * @param monthlyScheduledDays ⑤ 暦月の所定労働日数。<strong>日額（月給 ÷ これ）の分母</strong>
+ * @param scheduledDays       ⑥ 清算期間の所定労働日数。<strong>年休を引く前</strong>。⑯の根拠
+ * @param attendedDays        ⑦ 出勤日数。法定休日・所定休日の出勤を含む（労基則 54 条の労働日数）
+ * @param paidLeaveDays       ⑧ 年次有給休暇の取得日数（BR-16）
+ * @param absentDays          ⑨ 欠勤日数
+ * @param workingTime         ⑩ 実労働時間（労基則 54 条の労働時間数）
+ * @param scheduledInsideTime ⑪ 所定内労働時間。月給に含む
+ * @param beyondScheduledTime ⑫ 所定超労働時間。<strong>通常の賃金 1.0 倍の追加支払</strong>
+ * @param overtimeUpTo60Time  ⑬ 法定外残業（月 60 時間まで）。割増 +25%
+ * @param overtimeOver60Time  ⑭ 法定外残業（月 60 時間超）。割増 +50%
+ * @param legalHolidayTime    ⑮ 法定休日労働。割増 +35%
+ * @param nightTime           ⑯ 深夜労働。割増 +25%（⑪〜⑮に上乗せ）
+ * @param scheduledTotalTime  ⑰ 所定総労働時間。年休の日を除いた後
+ * @param shortageTime        ⑱ 不足時間
  */
 public record PayrollRow(
         EmployeeNumber employeeNumber,
         YearMonth month,
         DateRange period,
         WorkingTimeSystemType system,
+        int monthlyScheduledDays,
         int scheduledDays,
         int attendedDays,
         int paidLeaveDays,
@@ -85,7 +88,8 @@ public record PayrollRow(
                 throw new IllegalArgumentException("労働時間を負にはできません: " + value);
             }
         }
-        for (int value : new int[] {scheduledDays, attendedDays, paidLeaveDays, absentDays}) {
+        for (int value : new int[] {monthlyScheduledDays, scheduledDays, attendedDays,
+                paidLeaveDays, absentDays}) {
             if (value < 0) {
                 throw new IllegalArgumentException("日数を負にはできません: " + value);
             }
@@ -119,6 +123,12 @@ public record PayrollRow(
             throw new IllegalArgumentException(
                     "不足時間が所定総を超えています: %s > %s"
                             .formatted(shortageTime, scheduledTotalTime));
+        }
+        // ★ 清算期間は暦月の部分集合である。日額の分母のほうが必ず大きいか等しい
+        if (scheduledDays > monthlyScheduledDays) {
+            throw new IllegalArgumentException(
+                    "清算期間の所定労働日数が暦月を超えています: %d > %d"
+                            .formatted(scheduledDays, monthlyScheduledDays));
         }
         // ★ 年休と欠勤は所定労働日のうちである
         if (paidLeaveDays + absentDays > scheduledDays) {

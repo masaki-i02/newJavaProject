@@ -34,6 +34,8 @@ import jp.co.sample.kintai.shared.domain.PaidLeaveDays;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
+import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
+import jp.co.sample.kintai.workrule.domain.RegisteredCalendar;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
@@ -56,7 +58,7 @@ public class MonthlySettlementService {
     private final MonthlySettlementRepository settlements;
     private final WorkRuleRepository workRules;
     private final EmployeeRepository employees;
-    private final CompanyCalendar calendar;
+    private final CompanyCalendarRepository calendar;
     private final MonthClosureQuery monthClosure;
     private final EmployeeVisibility visibility;
     private final PaidLeaveDays paidLeaveDays;
@@ -66,7 +68,7 @@ public class MonthlySettlementService {
                                     MonthlySettlementRepository settlements,
                                     WorkRuleRepository workRules,
                                     EmployeeRepository employees,
-                                    CompanyCalendar calendar,
+                                    CompanyCalendarRepository calendar,
                                     MonthClosureQuery monthClosure,
                                     EmployeeVisibility visibility,
                                     PaidLeaveDays paidLeaveDays) {
@@ -194,23 +196,54 @@ public class MonthlySettlementService {
      */
     @Transactional(readOnly = true)
     public MonthlyDayCounts dayCountsIn(EmployeeId employeeId, YearMonth month) {
-        SettlementPeriod period = periodOf(employeeId, month);
-        int scheduledDays = calendar.workdayCountIn(period.period());
-        int leaveDays = paidLeaveDaysIn(employeeId, period);
+        return dayCountsIn(employeeId, periodOf(employeeId, month));
+    }
+
+    /**
+     * 清算期間を<strong>外から渡す</strong>版。
+     *
+     * <p>締め済みの月の CSV を作り直すときに使う。
+     * 締めたあとに退職日が登録されると {@link #periodOf} の返す清算期間が縮むので、
+     * 引き直すと<strong>同じ出力の記録から出る CSV が変わる</strong>（落とし穴 122）。
+     * 保存済みの月次清算が持つ清算期間を渡して固定する。
+     */
+    @Transactional(readOnly = true)
+    public MonthlyDayCounts dayCountsIn(EmployeeId employeeId, SettlementPeriod period) {
+        DateRange monthRange = new DateRange(period.month().atDay(1),
+                period.month().plusMonths(1).atDay(1));
+        // ★ 日ごとに findById を投げると 1 社員あたり 31 往復する。まとめて 1 回で読む
+        CompanyCalendar registered = new RegisteredCalendar(calendar.findByPeriod(monthRange));
+
+        int monthlyScheduledDays = registered.workdayCountIn(monthRange);
+        int scheduledDays = registered.workdayCountIn(period.period());
+        Set<LocalDate> leaveDates = paidLeaveDays.approvedOn(employeeId, period.period())
+                .stream()
+                .filter(date -> registered.dayTypeOf(date) == DayType.WORKDAY)
+                .collect(Collectors.toSet());
 
         List<DailyAttendance> worked = dailyAttendances
                 .findByPeriod(employeeId, period.period()).stream()
                 .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
                 .toList();
         int attendedDays = worked.size();
-        // ★ 欠勤は所定労働日の話なので、休日の出勤を数に入れない
-        int workedOnScheduledDays = (int) worked.stream()
-                .filter(day -> calendar.dayTypeOf(day.workDate()) == DayType.WORKDAY)
-                .count();
-        // ★ 年休の日に出勤した月（落とし穴 97）では所定労働日を超えうるので 0 で止める
-        int absentDays = Math.max(0, scheduledDays - leaveDays - workedOnScheduledDays);
+        Set<LocalDate> workedDates = worked.stream()
+                .map(DailyAttendance::workDate)
+                .collect(Collectors.toSet());
 
-        return new MonthlyDayCounts(scheduledDays, attendedDays, leaveDays, absentDays);
+        // ★ 引き算で導かない。年休の日に出勤した月（落とし穴 97）では
+        //   同じ日が年休と実労働の両方に数えられ、引くと欠勤が 1 日少なく出る。
+        //   定義（所定労働日のうち、年休でもなく実労働が 1 分も無い日）をそのまま数える
+        int absentDays = 0;
+        for (LocalDate date = period.period().from();
+                date.isBefore(period.period().toExclusive()); date = date.plusDays(1)) {
+            if (registered.dayTypeOf(date) == DayType.WORKDAY
+                    && !leaveDates.contains(date) && !workedDates.contains(date)) {
+                absentDays++;
+            }
+        }
+
+        return new MonthlyDayCounts(monthlyScheduledDays, scheduledDays, attendedDays,
+                leaveDates.size(), absentDays);
     }
 
     /**
@@ -243,9 +276,12 @@ public class MonthlySettlementService {
         if (!incompleteWorkDates(employeeId, period).isEmpty()) {
             return false;
         }
-        // ★ 就業規則が 1 日でも欠けていると settle が落ちるので、提出もできない
-        return workRules.findEffectiveByPeriod(employeeId, period.period()).size()
-                == (int) period.period().days();
+        // ★ 提出は月次清算を計算し直すので、それが落ちる条件も「提出できない」である。
+        //   計算が引くのは清算期間の末日の版だけ（calculate）なので、そこにそろえる。
+        //   「全日に版がある」を要求すると、実際には提出できる社員に
+        //   「規則を適用せよ」と案内することになる（落とし穴 67）
+        LocalDate lastDay = period.period().toExclusive().minusDays(1);
+        return workRules.findEffective(employeeId, lastDay).isPresent();
     }
 
     @Transactional(readOnly = true)

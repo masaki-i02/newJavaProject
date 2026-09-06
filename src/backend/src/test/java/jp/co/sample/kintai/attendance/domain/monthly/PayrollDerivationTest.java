@@ -203,11 +203,17 @@ class PayrollDerivationTest {
     }
 
     /**
-     * <strong>深夜は重複属性なので、所定内 + 所定超の合計を変えない。</strong>
-     * 合計に足すと二重に数えることになる（BR-06）。
+     * <strong>深夜は重複属性なので、所定内・所定超のどちらも増やさない。</strong>
+     *
+     * <p><strong>「所定内 + 所定超 = 実労働」を期待に書かない。</strong>
+     * {@code beyondScheduledTime()} が {@code workingTime − scheduledInsideTime()}
+     * として定義されている以上、その等式は<strong>定義を代入しただけ</strong>で、
+     * 深夜を足し込む実装でも成り立つ（CLAUDE.md 落とし穴 117）。実数で書く。
+     *
+     * <p>5 月の平日は 21 日。所定総は 21 × 480 分だが、働いたのは 1 日 8 時間だけである。
      */
     @Test
-    @DisplayName("UT-PAY-14 深夜労働があっても所定内 + 所定超は実労働のまま")
+    @DisplayName("UT-PAY-14 深夜労働があっても所定内は実労働のまま増えない")
     void nightWorkDoesNotChangeTheSplit() {
         weekdaysOnly(YearMonth.of(2026, 5));
         var days = List.of(daily.flexNightDay(LocalDate.of(2026, 5, 7),
@@ -217,9 +223,13 @@ class PayrollDerivationTest {
                 WorkRules.flexRule(), Duration.ZERO, 0);
 
         assertThat(settlement.nightTime()).isEqualTo(Duration.ofHours(2));
-        assertThat(settlement.scheduledInsideTime().plus(settlement.beyondScheduledTime()))
-                .as("深夜は実労働の一部であって、別に足すものではない")
-                .isEqualTo(settlement.workingTime());
+        assertThat(settlement.workingTime())
+                .as("働いたのは 1 日 8 時間だけ").isEqualTo(Duration.ofHours(8));
+        assertThat(settlement.scheduledInsideTime())
+                .as("所定の範囲で働いた 8 時間。深夜の 2 時間を足さない")
+                .isEqualTo(Duration.ofHours(8));
+        assertThat(settlement.beyondScheduledTime())
+                .as("所定に届いていないので所定超は無い").isZero();
     }
 
     /**

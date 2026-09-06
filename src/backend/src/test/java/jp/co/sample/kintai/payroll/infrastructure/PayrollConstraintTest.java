@@ -42,10 +42,39 @@ class PayrollConstraintTest extends IntegrationTestBase {
                 .hasMessageContaining("payroll_exports_month_check");
     }
 
+    /**
+     * <strong>入力を 1 つだけ変える</strong>（CLAUDE.md 落とし穴 12）。
+     *
+     * <p>{@code payroll_exports_average_check} は 3 つの列の連言なので、
+     * 3 つ同時に 0 にすると<strong>どの 1 つを削っても同じ制約名で拒否される。</strong>
+     * 1 つずつ破って、それぞれが効いていることを確かめる。
+     */
     @Test
-    @DisplayName("IT-PAY-19 年間の所定が 0 だと拒否される")
-    void annualScheduledMustBePositive() {
-        assertThatThrownBy(() -> insertExport(LocalDate.of(2026, 5, 1), 0, 0))
+    @DisplayName("IT-PAY-19 年間の所定労働日数が 0 だと拒否される")
+    void annualScheduledDaysMustBePositive() {
+        assertThatThrownBy(() -> insertExport(LocalDate.of(2026, 5, 1), 0, 125_280))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("payroll_exports_average_check");
+    }
+
+    @Test
+    @DisplayName("IT-PAY-60 年間の所定労働時間が 0 だと拒否される")
+    void annualScheduledMinutesMustBePositive() {
+        assertThatThrownBy(() -> insertExport(LocalDate.of(2026, 5, 1), 261, 0))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("payroll_exports_average_check");
+    }
+
+    /** 月平均だけを 0 にする。導出の検査より先に、正の値であることを求める。 */
+    @Test
+    @DisplayName("IT-PAY-61 1 か月平均が 0 だと拒否される")
+    void monthlyAverageMustBePositive() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO payroll_exports (id, target_month, exported_by, fiscal_year,
+                        annual_scheduled_days, annual_scheduled_minutes,
+                        monthly_average_minutes)
+                VALUES (?, DATE '2026-05-01', ?, 2026, 261, 11, 0)
+                """, UUID.randomUUID(), hr))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("payroll_exports_average_check");
     }

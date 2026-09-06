@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 | --- | --- |
 | 文書番号 | KNT-DES-702 |
-| 版 | 0.3 |
+| 版 | 0.4 |
 | 対象スキーマ | `payroll_exports` / `payroll_export_targets` |
 | 関連要件 | BR-18 |
 | 関連文書 | [ドメインモデル設計書](ドメインモデル設計書.md) / [API設計書](API設計書.md) / [設計規約チェックリスト](../00_共通/設計規約チェックリスト.md) |
@@ -229,13 +229,19 @@ VALUES (:id, :targetMonth, :exportedBy, :fiscalYear,
 
 ## 6. 制約の検証
 
+> **連言の制約は 1 つずつ破る。** `payroll_exports_average_check` は
+> 3 つの列がすべて正であることを求める連言なので、
+> 3 つ同時に 0 にすると**どの 1 つを削っても同じ制約名で拒否される**（落とし穴 12）。
+
 **検証環境**: PostgreSQL 16 / 2026-09-06 実施。実装後は `PayrollConstraintTest` が同じ観点を自動で確かめる。
 V1〜V8 を空のデータベースへ順に適用し、`psql` から直接確かめた。
 
 | ID | 観点 | 期待 | 結果 |
 | --- | --- | --- | --- |
 | IT-PAY-18 | 対象月に月初日以外を入れる | `payroll_exports_month_check` で拒否 | 確認 |
-| IT-PAY-19 | 月平均を 0 にする | `payroll_exports_average_check` で拒否 | 確認 |
+| IT-PAY-19 | **年間の所定労働日数**を 0 にする | `payroll_exports_average_check` で拒否 | 確認 |
+| IT-PAY-60 | **年間の所定労働時間**を 0 にする | 同上 | 確認 |
+| IT-PAY-61 | **月平均**を 0 にする | 同上 | 確認 |
 | IT-PAY-52 | **月平均が年間の所定 ÷ 12 と食い違う** | `payroll_exports_average_derivation_check` で拒否 | 確認 |
 | IT-PAY-20 | 実在しない社員を実行者にする | `payroll_exports_exported_by_fkey` で拒否 | 確認 |
 | IT-PAY-21 | **同じ月を 2 回記録する** | 通る。再出力は正当である | 確認 |

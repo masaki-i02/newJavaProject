@@ -37,7 +37,7 @@ final class PayrollCsv {
 
     private static final List<String> HEADER = List.of(
             "社員番号", "対象月", "清算期間開始", "清算期間終了", "労働時間制度",
-            "所定労働日数", "出勤日数", "年休日数", "欠勤日数",
+            "暦月所定労働日数", "清算期間所定労働日数", "出勤日数", "年休日数", "欠勤日数",
             "実労働", "所定内", "所定超",
             "法定外残業60hまで", "法定外残業60h超", "法定休日", "深夜",
             "所定総", "不足");
@@ -62,6 +62,9 @@ final class PayrollCsv {
                 // ★ 半開区間の上限ではなく、閉区間の最終日を書く（落とし穴 10・112）
                 row.period().toExclusive().minusDays(1).toString(),
                 row.system().name(),
+                // ★ 日額（月給 ÷ これ）の分母。清算期間のほうを使うと月中入社・退職の月で
+                //   控除が 2 倍近くに膨らむ（労基法 24 条・落とし穴 132）
+                String.valueOf(row.monthlyScheduledDays()),
                 String.valueOf(row.scheduledDays()),
                 String.valueOf(row.attendedDays()),
                 String.valueOf(row.paidLeaveDays()),

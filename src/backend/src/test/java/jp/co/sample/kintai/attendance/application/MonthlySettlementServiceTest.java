@@ -29,6 +29,8 @@ import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
+import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
+import jp.co.sample.kintai.attendance.domain.monthly.MonthlyDayCounts;
 import jp.co.sample.kintai.leave.application.PaidLeaveRequestService;
 import jp.co.sample.kintai.leave.domain.AttendanceRate;
 import jp.co.sample.kintai.leave.domain.GrantDecision;
@@ -79,6 +81,8 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
     private MonthlySettlementService settlements;
     @Autowired
     private PaidLeaveRequestService leaveRequests;
+    @Autowired
+    private TimeClockService timeClocks;
     @Autowired
     private PaidLeaveGrantRepository grants;
     @Autowired
@@ -192,6 +196,66 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
         assertThat(settlement.scheduledTotalTime())
                 .as("所定労働日 21 日ぶん。年休の 1 日は引かない")
                 .isEqualTo(Duration.ofHours(168));
+    }
+
+    /**
+     * <strong>欠勤日数を引き算で導かない。</strong>
+     *
+     * <p>年休を承認した日に出勤した月（落とし穴 97）では、
+     * その日が<strong>年休の日数にも実労働のある日にも数えられる</strong>。
+     * {@code 所定労働日数 − 年休 − 出勤} で求めると同じ日を 2 回引くので、
+     * 欠勤日数が 1 日少なく出る。{@code Math.max(0, ...)} は
+     * 負にならないようにするだけで、この重なりを取り除かない。
+     *
+     * <p>⑨ 欠勤日数は欠勤控除の直接の入力なので、控除漏れが静かに起こる。
+     */
+    @Test
+    @DisplayName("UT-PAY-29 年休の日に出勤しても欠勤日数は二重に引かれない")
+    void absentDaysAreCountedNotSubtracted() {
+        LocalDate leaveDate = LocalDate.of(2026, 10, 5);   // 月曜
+        approveLeaveOn(leaveDate);
+        workOn(leaveDate);
+
+        MonthlyDayCounts counts = settlements.dayCountsIn(yamadaId, OCTOBER);
+
+        // 10 月の平日は 22 日。働いたのは 10/05 の 1 日だけで、それは年休の日でもある
+        assertThat(counts.scheduledDays()).isEqualTo(22);
+        assertThat(counts.paidLeaveDays()).isEqualTo(1);
+        assertThat(counts.attendedDays()).isEqualTo(1);
+        assertThat(counts.absentDays())
+                .as("年休でも出勤でもない所定労働日は 21 日。引き算だと 20 日になる")
+                .isEqualTo(21);
+    }
+
+    /**
+     * <strong>日額の分母は暦月の所定労働日数である</strong>（労基法 24 条）。
+     *
+     * <p>清算期間（暦月 ∩ 在籍期間）のほうを分母にすると、
+     * 月中退職の月の 1 日あたりの控除が 2 倍になる。
+     * しかも暦月の所定労働日数は他のどの項目からも復元できないので、両方を持つ。
+     */
+    @Test
+    @DisplayName("UT-PAY-30 月中退職の月は暦月と清算期間で所定労働日数が違う")
+    void monthlyAndSettlementScheduledDaysDiffer() {
+        retire();
+
+        MonthlyDayCounts counts = settlements.dayCountsIn(yamadaId, OCTOBER);
+
+        assertThat(counts.monthlyScheduledDays()).as("10 月の平日").isEqualTo(22);
+        assertThat(counts.scheduledDays()).as("10/01〜10/15 の平日").isEqualTo(11);
+        assertThat(counts.absentDays()).as("1 日も働いていない").isEqualTo(11);
+    }
+
+    /** 本人として 9:00–18:00（休憩 1 時間）を打刻する。 */
+    private void workOn(LocalDate date) {
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.CLOCK_IN,
+                Optional.of(date.atTime(9, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.BREAK_START,
+                Optional.of(date.atTime(12, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.BREAK_END,
+                Optional.of(date.atTime(13, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.CLOCK_OUT,
+                Optional.of(date.atTime(18, 0)));
     }
 
     private void approveLeaveOn(LocalDate leaveDate) {

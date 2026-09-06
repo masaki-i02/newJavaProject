@@ -29,6 +29,7 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
+import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesUsage;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
 import jp.co.sample.kintai.workrule.domain.PremiumRates;
 
@@ -103,7 +104,7 @@ class AnnualScheduledHoursServiceTest {
         LocalDate missing = LocalDate.of(2026, 12, 15);
 
         assertThatThrownBy(() -> service(rules(Duration.ofHours(8)),
-                withoutDate(missingOne, missing))
+                withoutDate(missingOne, missing), List.of(usedAllAlong(STANDARD)))
                 .annualScheduledHours(HR, FISCAL_YEAR))
                 .isInstanceOf(WorkRuleMasterService.CalendarNotRegisteredException.class)
                 .hasMessageContaining("2026-12-15");
@@ -158,11 +159,112 @@ class AnnualScheduledHoursServiceTest {
         assertThatThrownBy(() -> service(
                 List.of(version(STANDARD, Duration.ofHours(8)),
                         version(shorter, Duration.ofMinutes(465))),
-                calendar, List.of(STANDARD, shorter))
+                calendar, List.of(usedAllAlong(STANDARD), usedAllAlong(shorter)))
                 .annualScheduledHours(HR, FISCAL_YEAR))
                 .isInstanceOf(
                         WorkRuleMasterService.MultipleScheduledWorkingTimesException.class)
                 .hasMessageContaining("要件 3.1");
+    }
+
+    /**
+     * <strong>年度の途中で改定した年度も、日ごとに足せば正しく数えられる。</strong>
+     *
+     * <p>「所定労働日数 × 1 日の所定」で求めていると、
+     * どちらの所定を掛けるかが決まらないので必ず誤る。
+     * このテストが無いと、日ごとのループを掛け算に戻す変異が生き残る。
+     */
+    @Test
+    @DisplayName("UT-PAY-18 年度の途中で所定を改定した年度は日ごとに足す")
+    void midYearRevisionIsSummedPerDay() {
+        calendar.registerAll(FY);
+        LocalDate revisedOn = LocalDate.of(2026, 10, 1);
+
+        AnnualScheduledHours annual = service(
+                List.of(version(STANDARD, Duration.ofHours(8),
+                                new DateRange(LocalDate.of(2020, 4, 1), revisedOn)),
+                        version(STANDARD, Duration.ofMinutes(465),
+                                DateRange.startingAt(revisedOn))),
+                calendar, List.of(usedAllAlong(STANDARD)))
+                .annualScheduledHours(HR, FISCAL_YEAR);
+
+        // 4/1〜9/30 の平日 131 日 × 480 分 + 10/1〜3/31 の平日 130 日 × 465 分
+        assertThat(annual.scheduledDays()).isEqualTo(261);
+        assertThat(annual.annualTotal()).isEqualTo(Duration.ofMinutes(123_330));
+        assertThat(annual.monthlyAverage()).isEqualTo(Duration.ofMinutes(123_330 / 12));
+    }
+
+    /**
+     * <strong>年度の途中で新設した系列があっても出力できる。</strong>
+     *
+     * <p>10 月からフレックスを導入した会社の新系列は、
+     * 4 月〜9 月に版を持たないのが<strong>正常</strong>である。
+     * 系列ごとに年度の全所定労働日ぶんの版を要求すると、
+     * その年度のどの月も永久に出力できなくなる（落とし穴 131）。
+     */
+    @Test
+    @DisplayName("UT-PAY-19 年度の途中で新設した系列があっても年度の所定は返る")
+    void seriesIntroducedMidYearIsAccepted() {
+        calendar.registerAll(FY);
+        WorkRuleSeriesId introduced = new WorkRuleSeriesId(UUID.randomUUID());
+        LocalDate startedOn = LocalDate.of(2026, 10, 1);
+
+        AnnualScheduledHours annual = service(
+                List.of(version(STANDARD, Duration.ofHours(8)),
+                        version(introduced, Duration.ofHours(8),
+                                DateRange.startingAt(startedOn))),
+                calendar, List.of(usedAllAlong(STANDARD), usedFrom(introduced, startedOn)))
+                .annualScheduledHours(HR, FISCAL_YEAR);
+
+        assertThat(annual.annualTotal()).isEqualTo(Duration.ofMinutes(261 * 480));
+    }
+
+    /**
+     * <strong>適用されているのに版が無い日は、本当の隙間である。</strong>
+     * 0 時間として素通りさせると年間の所定が過少に出て、分母が小さくなり単価が過大になる。
+     */
+    @Test
+    @DisplayName("UT-PAY-20 適用されている系列に版の隙間があると拒否する")
+    void versionGapWithinTheAssignmentIsRejected() {
+        calendar.registerAll(FY);
+        LocalDate gapFrom = LocalDate.of(2026, 10, 1);
+
+        assertThatThrownBy(() -> service(
+                List.of(version(STANDARD, Duration.ofHours(8),
+                        new DateRange(LocalDate.of(2020, 4, 1), gapFrom))),
+                calendar, List.of(usedAllAlong(STANDARD)))
+                .annualScheduledHours(HR, FISCAL_YEAR))
+                .isInstanceOf(WorkRuleMasterService.WorkRuleVersionMissingException.class);
+    }
+
+    /**
+     * <strong>所定労働日なのに誰にも規則が適用されていない年度は拒否する。</strong>
+     * 導入初年度（1 月から使い始めた会社の年度前半）に必ず起こる。
+     * 0 時間として数えると、分母が小さくなり単価が過大になる。
+     */
+    @Test
+    @DisplayName("UT-PAY-21 適用の無い所定労働日がある年度は拒否する")
+    void dayWithoutAnyWorkRuleIsRejected() {
+        calendar.registerAll(FY);
+        LocalDate startedOn = LocalDate.of(2026, 10, 1);
+
+        assertThatThrownBy(() -> service(
+                List.of(version(STANDARD, Duration.ofHours(8),
+                        DateRange.startingAt(startedOn))),
+                calendar, List.of(usedFrom(STANDARD, startedOn)))
+                .annualScheduledHours(HR, FISCAL_YEAR))
+                .isInstanceOf(WorkRuleMasterService.WorkRuleNotAppliedOnException.class)
+                .hasMessageContaining("2026-04-01");
+    }
+
+    /** 年度に 1 件も適用が無いと、年度の所定そのものが決まらない。 */
+    @Test
+    @DisplayName("UT-PAY-22 適用が 1 件も無い年度は拒否する")
+    void fiscalYearWithoutAnyAssignmentIsRejected() {
+        calendar.registerAll(FY);
+
+        assertThatThrownBy(() -> service(rules(Duration.ofHours(8)), calendar, List.of())
+                .annualScheduledHours(HR, FISCAL_YEAR))
+                .isInstanceOf(WorkRuleMasterService.WorkRuleNotInUseException.class);
     }
 
     /** 人事以外は年度の所定を引けない。全社員の賃金の基礎になる値である。 */
@@ -194,8 +296,13 @@ class AnnualScheduledHoursServiceTest {
     }
 
     private static WorkRule version(WorkRuleSeriesId seriesId, Duration daily) {
+        return version(seriesId, daily, DateRange.startingAt(LocalDate.of(2020, 4, 1)));
+    }
+
+    private static WorkRule version(WorkRuleSeriesId seriesId, Duration daily,
+                                    DateRange validPeriod) {
         return new WorkRule(new WorkRuleId(UUID.randomUUID()), seriesId,
-                DateRange.startingAt(LocalDate.of(2020, 4, 1)),
+                validPeriod,
                 WorkRules.fixed("09:00", fixedEnd(daily), 60),
                 Duration.ofHours(8), Duration.ofHours(40),
                 NightWindow.STANDARD, PremiumRates.STATUTORY);
@@ -207,16 +314,23 @@ class AnnualScheduledHoursServiceTest {
     }
 
     private WorkRuleMasterService service(List<WorkRule> versions) {
-        return service(versions, calendar, List.of(STANDARD));
+        return service(versions, calendar, List.of(usedAllAlong(STANDARD)));
     }
 
-    private WorkRuleMasterService service(List<WorkRule> versions, TestCalendar calendar) {
-        return service(versions, calendar, List.of(STANDARD));
+    /** 期限の無い適用。導入時から使い続けている系列。 */
+    private static WorkRuleSeriesUsage usedAllAlong(WorkRuleSeriesId seriesId) {
+        return new WorkRuleSeriesUsage(seriesId,
+                DateRange.startingAt(LocalDate.of(2020, 4, 1)));
+    }
+
+    /** その日から使い始めた適用。 */
+    private static WorkRuleSeriesUsage usedFrom(WorkRuleSeriesId seriesId, LocalDate from) {
+        return new WorkRuleSeriesUsage(seriesId, DateRange.startingAt(from));
     }
 
     /** 代役は事実だけを答える。判定も数え方も本番が持つ。 */
     private WorkRuleMasterService service(List<WorkRule> versions, TestCalendar calendar,
-                                          List<WorkRuleSeriesId> inUse) {
+                                          List<WorkRuleSeriesUsage> inUse) {
         WorkRuleSeriesRepository series = new WorkRuleSeriesRepository() {
             @Override
             public java.util.Optional<WorkRuleSeries> findById(WorkRuleSeriesId id) {
@@ -251,7 +365,7 @@ class AnnualScheduledHoursServiceTest {
             }
 
             @Override
-            public List<WorkRuleSeriesId> findSeriesIdsInUse(DateRange period) {
+            public List<WorkRuleSeriesUsage> findUsagesIn(DateRange period) {
                 return inUse;
             }
         };
@@ -305,7 +419,7 @@ class AnnualScheduledHoursServiceTest {
                 return false;
             }
         };
-        PayrollExportQuery exports = fiscalYear -> false;
+        PayrollExportQuery exports = fiscalYear -> List.of();
         return new WorkRuleMasterService(calendar, series, workRules, closure, exports);
     }
 }

@@ -13,6 +13,7 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleAssignment;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesRepository;
+import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesUsage;
 
 /** {@link WorkRuleSeriesRepository} の実装。 */
 @Repository
@@ -98,9 +99,15 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
     }
 
     @Override
-    public List<WorkRuleSeriesId> findSeriesIdsInUse(DateRange period) {
-        return assignments.findSeriesIdsInUse(period.from(), period.toExclusive()).stream()
-                .map(WorkRuleSeriesId::new).toList();
+    public List<WorkRuleSeriesUsage> findUsagesIn(DateRange period) {
+        // ★ 同じ系列に複数の適用行があるのは普通のこと（社員ごと・異動ごと）なので、
+        //   同じ (系列, 期間) はまとめる。日ごとの判定では区別できない
+        return assignments.findAssignmentsIn(period.from(), period.toExclusive()).stream()
+                .map(row -> new WorkRuleSeriesUsage(
+                        new WorkRuleSeriesId(row.getWorkRuleSeriesId()),
+                        WorkRuleMapper.toRange(row.getValidFrom(), row.getValidTo())))
+                .distinct()
+                .toList();
     }
 
     private static WorkRuleSeries toDomain(WorkRuleSeriesEntity entity) {

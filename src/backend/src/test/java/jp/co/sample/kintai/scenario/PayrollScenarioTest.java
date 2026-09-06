@@ -95,11 +95,15 @@ class PayrollScenarioTest extends ScenarioTestBase {
         String[] 列 = csv.lines().skip(1).findFirst().orElseThrow().split(",");
         assertThat(列[0]).isEqualTo("E0001");
         assertThat(列[3]).as("清算期間の終了日は閉区間の最終日").isEqualTo("2026-05-31");
-        assertThat(Integer.parseInt(列[9]))
+        assertThat(Integer.parseInt(列[5])).as("暦月の所定労働日数（日額の分母）").isEqualTo(21);
+        assertThat(Integer.parseInt(列[6])).as("清算期間の所定労働日数").isEqualTo(21);
+        assertThat(Integer.parseInt(列[10]))
                 .as("所定労働日 21 日 × 8 時間").isEqualTo(21 * 480);
-        assertThat(Integer.parseInt(列[10]) + Integer.parseInt(列[11]))
-                .as("所定内 + 所定超 = 実労働").isEqualTo(Integer.parseInt(列[9]));
-        assertThat(Integer.parseInt(列[17])).as("不足時間は無い").isZero();
+        // ★ 「所定内 + 所定超 = 実労働」は定義を代入しただけで恒真になる（落とし穴 117）。
+        //   実数で書く
+        assertThat(Integer.parseInt(列[11])).as("全部が所定内").isEqualTo(21 * 480);
+        assertThat(Integer.parseInt(列[12])).as("所定超は無い").isZero();
+        assertThat(Integer.parseInt(列[18])).as("不足時間は無い").isZero();
     }
 
     /**

@@ -36,12 +36,17 @@ public interface WorkRuleSeriesRepository {
     List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date);
 
     /**
-     * 期間に<strong>実際に適用されている</strong>系列（BR-18）。
+     * 期間に<strong>実際に適用されている</strong>系列と、その適用範囲（BR-18）。
      *
      * <p>割増賃金の基礎額の分母（労基則 19 条 1 項 4 号）は、
      * その年度に使われている就業規則から導く。
      * {@link #findAll()} で全系列を舐めると、<strong>廃止済みの系列や過去の版まで巻き込み</strong>、
      * 一度でも違う所定の規則を作ったことがある会社は永久に出力できなくなる。
+     *
+     * <p><strong>系列だけでなく適用範囲を返す。</strong>
+     * 系列の一覧だけを渡すと、呼び出す側は「年度の全所定労働日にその系列の版がある」
+     * ことを前提にするしかない。年度の途中で新設した系列は 4 月に版を持たないのが正常なので、
+     * その前提は<strong>導入 2 年目以降のすべての年度で崩れる</strong>（落とし穴 131）。
      */
-    List<WorkRuleSeriesId> findSeriesIdsInUse(DateRange period);
+    List<WorkRuleSeriesUsage> findUsagesIn(DateRange period);
 }
