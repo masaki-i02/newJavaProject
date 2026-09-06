@@ -45,6 +45,18 @@ public record Approver(ApproverKind kind, Optional<EmployeeId> employeeId,
         return new Approver(ApproverKind.NONE, Optional.empty(), path);
     }
 
+    /**
+     * 承認者が導出できなかったか。
+     *
+     * <p>対象月にまったく所属が無い場合である。月次勤怠ではその月に行が作られないので
+     * 起きないが、<strong>年次有給休暇は在籍していない月の取得日でも申請しうる</strong>
+     * （未来日の申請のあとに退職が登録される）。
+     * 呼ぶ側が「承認者がいない」ことに応じた扱いをするために公開する。
+     */
+    public boolean isUnresolved() {
+        return kind == ApproverKind.NONE;
+    }
+
     /** その社員が承認してよいか。 */
     public boolean isApprovedBy(EmployeeId candidate, boolean candidateIsHumanResources) {
         return switch (kind) {

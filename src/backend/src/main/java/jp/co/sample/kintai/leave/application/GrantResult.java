@@ -17,12 +17,13 @@ import jp.co.sample.kintai.shared.domain.EmployeeId;
  * 人事が取るべき行動が違う。
  */
 public record GrantResult(LocalDate asOf, List<Granted> granted, List<Withheld> withheld,
-                          List<Skipped> skipped) {
+                          List<Skipped> skipped, List<Failed> failed) {
 
     public GrantResult {
         granted = List.copyOf(granted);
         withheld = List.copyOf(withheld);
         skipped = List.copyOf(skipped);
+        failed = List.copyOf(failed);
     }
 
     /** 付与した。 */
@@ -31,6 +32,19 @@ public record GrantResult(LocalDate asOf, List<Granted> granted, List<Withheld> 
 
     /** 出勤率 8 割に満たないので付与しなかった（BR-14）。 */
     public record Withheld(EmployeeId employeeId, LocalDate grantedOn, AttendanceRate rate) {
+    }
+
+    /**
+     * 計算そのものが失敗した。
+     *
+     * <p><strong>1 人の失敗で残りの社員を止めない。</strong>
+     * 付与は冪等なので、原因を取り除けば翌日の実行で追いつく。
+     * 例外にして抜けると、その日は以降の社員が一件も処理されず、
+     * しかも結果が返らないので<strong>誰も気づけない</strong>。
+     *
+     * @param reason 例外の種別と要点。制約名やスタックトレースは載せない
+     */
+    public record Failed(EmployeeId employeeId, String reason) {
     }
 
     /** 既に処理済みなので何もしなかった。 */

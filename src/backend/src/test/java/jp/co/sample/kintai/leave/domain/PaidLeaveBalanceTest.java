@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 
 /** 残日数・時効・先入先出（BR-15）。 */
@@ -132,7 +133,9 @@ class PaidLeaveBalanceTest {
             List<LocalDate> pending = List.of(LocalDate.of(2026, 6, 1));
 
             assertThat(balance.remainingDays(LocalDate.of(2026, 6, 1))).isEqualTo(10);
-            assertThat(balance.availableDays(LocalDate.of(2026, 6, 1), pending)).isEqualTo(9);
+            assertThat(balance.availableDays(
+                    new DateRange(LocalDate.of(2026, 6, 1), LocalDate.of(2027, 6, 1)),
+                    pending)).isEqualTo(9);
         }
 
         /** 残 1 日に対して 2 件目は受理しない。 */

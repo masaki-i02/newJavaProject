@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.leave.application;
 
 import java.time.Duration;
+import java.util.stream.Collectors;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
@@ -49,7 +50,7 @@ final class AttendanceRateCalculator {
         Set<LocalDate> worked = days.stream()
                 .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
                 .map(DailyAttendance::workDate)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .collect(Collectors.toUnmodifiableSet());
 
         int total = 0;
         int attended = 0;

@@ -980,17 +980,6 @@ class MonthlySettlementCalculatorTest {
             assertThat(withLeave.overtimeTime()).isEqualTo(Duration.ofMinutes(100));
         }
 
-        /** 説明のための数値として結果に残す。所定総がなぜその値かを後から辿れるようにする。 */
-        @Test
-        @DisplayName("UT-LV-46 年休の日数が清算結果に残る")
-        void paidLeaveDaysAreKept() {
-            var may = period(2026, 5);
-            var days = daily.week(LocalDate.of(2026, 5, 1), 30, Duration.ofHours(8));
-
-            assertThat(calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 3)
-                    .paidLeaveDays()).isEqualTo(3);
-        }
-
         /**
          * <strong>欠勤との対比。</strong> 年休と欠勤はどちらも実労働 0 の所定労働日だが、
          * 年休は所定総から除き、欠勤は除かない。
@@ -1015,10 +1004,42 @@ class MonthlySettlementCalculatorTest {
             var may = period(2026, 5);
             var days = daily.week(LocalDate.of(2026, 5, 1), 1, Duration.ofHours(8));
 
+            // ★ 閾値をまたぐ 2 点で見る。5 月はすべて所定労働日なので 31 日。
+            //   999 のような遠い値だけだと、条件を <= 0 に変えても落ちない（落とし穴 24・43）
+            assertThat(calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 31)
+                    .scheduledTotalTime())
+                    .as("所定労働日をすべて年休で埋めた月は、所定総が 0 になる。例外ではない")
+                    .isEqualTo(Duration.ZERO);
             assertThatThrownBy(() ->
-                    calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 999))
+                    calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 32))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("所定労働日数を超えています");
+        }
+
+        /**
+         * 年休の日数が負の清算結果は<strong>生成できない</strong>。
+         *
+         * <p>計算経路（{@code calculate}）からは、負を渡すと所定労働日数が
+         * <strong>増える</strong>ので 251 行のガードをすり抜ける。
+         * 強制している当の場所（compact constructor）に破れた値を渡す（落とし穴 36）。
+         */
+        @Test
+        @DisplayName("UT-LV-75 年休の日数が負の月次清算は生成できない")
+        void negativePaidLeaveDays() {
+            MonthlySettlement valid = calculator.calculate(TARO, period(2026, 5),
+                    daily.week(LocalDate.of(2026, 5, 1), 1, Duration.ofHours(8)),
+                    fixedRule(), Duration.ZERO, 1);
+
+            assertThatThrownBy(() -> new MonthlySettlement(valid.employeeId(),
+                    valid.period(), valid.workRuleSeriesId(), valid.workingTimeSystem(),
+                    valid.workingTime(), valid.legalHolidayTime(),
+                    valid.targetWorkingTime(), valid.scheduledTotalTime(),
+                    valid.statutoryTotalLimit(), valid.dailyOvertimeTime(),
+                    valid.weeklyOvertimeTime(), valid.carriedOverOvertimeTime(),
+                    valid.overtimeTime(), valid.shortageTime(), valid.nightTime(),
+                    -1, valid.weeklyBreakdown(), valid.agreementUsage()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("年休の日数を負にはできません");
         }
     }
 

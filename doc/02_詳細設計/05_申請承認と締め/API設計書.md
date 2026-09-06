@@ -149,13 +149,36 @@
 
 | 応答 | 条件 |
 | --- | --- |
-| `200 OK` | 提出成功。更新後の状態を返す |
+| `200 OK` | 提出成功。更新後の状態と、**気づかせるための警告**を返す |
 | `409 invalid-transition` | 下書き以外から提出しようとした |
 | `409 optimistic-lock-failure` | `version` が一致しない |
 | `409 month-not-finished` | **対象月の末日が到来していない** |
 | `409 daily-attendance-incomplete` | **未確定の勤務日が残っている** |
 | `403 forbidden` | 本人でなく、`HR` でもない／本人が在籍しているのに `HR` が代理提出しようとした |
 | `422 business-rule-violation` | 代理提出なのに理由が空 |
+
+#### 警告
+
+提出は**手続きなので、不整合を理由に止めない**（落とし穴 19）。
+気づかせるだけの情報は `warnings` に載せる。
+
+```json
+{
+  "status": "SUBMITTED",
+  "version": 3,
+  "warnings": [
+    { "type": "paid-leave-date-worked", "dates": ["2026-04-15"] }
+  ]
+}
+```
+
+| 決定 | 理由 |
+| --- | --- |
+| **警告が無ければ項目ごと省く。** 空配列にしない | 「警告が無い」と「この操作では警告を返さない」を画面が区別できない（落とし穴 76）|
+| `paid-leave-date-worked` の判定は `attendance` が持つ（`MonthlySettlementService.workedOnPaidLeaveDates`） | 承認済みの取得日も日次勤怠もそこから引く。写すと片方が古くなる（落とし穴 67）|
+| 提出以外の遷移（承認・差戻し・締め）では返さない | 是正できるのは提出の前後だけである |
+
+種別の意味は [06 API設計書 3.5](../06_年次有給休暇/API設計書.md) が定める。
 
 #### 実行者
 

@@ -2,6 +2,7 @@ package jp.co.sample.kintai.leave.application;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +25,7 @@ import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequestRepository;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
 import jp.co.sample.kintai.shared.domain.Requester;
@@ -35,6 +37,9 @@ import jp.co.sample.kintai.shared.domain.Requester;
  */
 @Service
 public class PaidLeaveBalanceService {
+
+    /** 申請できるのは当日から何年先までか（API の共通仕様 1.2）。 */
+    private static final int REQUESTABLE_YEARS = 1;
 
     private final PaidLeaveGrantRepository grants;
     private final PaidLeaveRequestRepository requests;
@@ -72,14 +77,14 @@ public class PaidLeaveBalanceService {
         List<PaidLeaveRequest> requested = requests.findByEmployee(employeeId);
 
         PaidLeaveBalance actual = new PaidLeaveBalance(all, allocationsOf(requested));
-        // ★ 表示する availableDays と申請の受理判定は、同じ仮配分から導く。
-        //   別の式にすると「残 3 日と表示されたのに拒否される」が起きる（落とし穴 96）
+        // ★ 表示する availableDays と申請の受理判定は、同じ仮配分・同じ期間から導く。
+        //   別の式にすると「残 3 日と表示されたのに拒否される」あるいはその逆が起きる（落とし穴 96）
         PaidLeaveBalance projected = new PaidLeaveBalance(
                 withScheduled(all, employee, date), allocationsOf(requested));
 
         return new PaidLeaveSummary(employeeId, date,
                 actual.remainingDays(date),
-                projected.availableDays(date, pendingDatesOf(requested)),
+                projected.availableDays(requestableWindow(date), pendingDatesOf(requested)),
                 all, actual.remainingByGrant(), obligationsOf(all, requested, date));
     }
 
@@ -101,6 +106,17 @@ public class PaidLeaveBalanceService {
     PaidLeaveBalance actualBalanceOf(EmployeeId employeeId) {
         return new PaidLeaveBalance(grants.findAll(employeeId),
                 allocationsOf(requests.findByEmployee(employeeId)));
+    }
+
+    /**
+     * 申請できる取得日の範囲（API の共通仕様 1.2）。
+     *
+     * <p><strong>1 か所で決める。</strong> 到来予定の付与をどこまで組み入れるかと、
+     * {@code availableDays} がどの付与を数えるかは同じ範囲でなければならない。
+     * 別々に書くと、組み入れた付与が表示から落ちる（落とし穴 96）。
+     */
+    private static DateRange requestableWindow(LocalDate asOf) {
+        return new DateRange(asOf, asOf.plusYears(REQUESTABLE_YEARS));
     }
 
     /** 未処理の申請の取得日。取得日が過ぎたものも含める（本人がいつでも取り下げられる）。 */
@@ -126,10 +142,10 @@ public class PaidLeaveBalanceService {
         var schedule = new GrantSchedule(employee.hiredOn());
         int nextIndex = materialized.stream()
                 .mapToInt(PaidLeaveGrant::grantIndex).max().orElse(-1) + 1;
-        // 申請できるのは当日 + 1 年まで（API の共通仕様 1.2）なので、その範囲の付与だけ足す
-        LocalDate horizon = asOf.plusYears(1);
-        List<PaidLeaveGrant> result = new java.util.ArrayList<>(materialized);
-        for (int index = nextIndex; schedule.grantDateOf(index).isBefore(horizon); index++) {
+        DateRange requestable = requestableWindow(asOf);
+        List<PaidLeaveGrant> result = new ArrayList<>(materialized);
+        for (int index = nextIndex;
+                schedule.grantDateOf(index).isBefore(requestable.toExclusive()); index++) {
             LocalDate grantedOn = schedule.grantDateOf(index);
             if (!employee.isActiveOn(grantedOn)) {
                 break;

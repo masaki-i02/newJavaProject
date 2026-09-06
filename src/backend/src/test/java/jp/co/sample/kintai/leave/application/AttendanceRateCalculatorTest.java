@@ -67,6 +67,29 @@ class AttendanceRateCalculatorTest {
         assertThat(withoutLeave.meetsThreshold()).isFalse();
     }
 
+    /**
+     * 欠勤の日は分母に入るが、分子には入らない（BR-14）。
+     *
+     * <p>出勤日を「日次勤怠の行がある日」で数えると、
+     * <strong>労働時間 0 の行</strong>（出勤と退勤が同時刻・落とし穴 40）まで出勤に数える。
+     * 欠勤しても出勤率が下がらなくなり、8 割の判定が意味を失う。
+     */
+    @Test
+    @DisplayName("UT-LV-71 労働時間の無い日は出勤日に数えない")
+    void absentDaysAreNotAttended() {
+        Employee employee = active(FROM);
+        DateRange period = new DateRange(FROM, FROM.plusDays(10));
+        List<DailyAttendance> worked = new ArrayList<>(workedDays(FROM, 8));
+        // 9 日目・10 日目は打刻が無い（欠勤）。行そのものは存在しうる
+        worked.add(days.absent(FROM.plusDays(8)));
+        worked.add(days.absent(FROM.plusDays(9)));
+
+        AttendanceRate rate = calculator().of(employee, period, worked, Set.of());
+
+        assertThat(rate.totalWorkingDays()).as("欠勤の日も分母には入る").isEqualTo(10);
+        assertThat(rate.attendedDays()).as("労働時間が無いので分子には入らない").isEqualTo(8);
+    }
+
     /** 所定休日・法定休日は分母に入らない（BR-07）。働く義務が無い日である。 */
     @Test
     @DisplayName("UT-LV-13 所定休日・法定休日は全労働日に数えない")

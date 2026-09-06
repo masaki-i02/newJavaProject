@@ -36,7 +36,7 @@ class PaidLeaveRequestTest {
     class Submit {
 
         @Test
-        @DisplayName("UT-LV-36 本人以外は申請できない（人事の代理も認めない）")
+        @DisplayName("UT-LV-74 本人以外は申請できない（人事の代理も認めない）")
         void proxyRejected() {
             assertThatThrownBy(() -> PaidLeaveRequest.submit(PaidLeaveRequestId.generate(),
                     HR, YAMADA, LEAVE_DATE, Optional.empty(), REQUESTED_AT))

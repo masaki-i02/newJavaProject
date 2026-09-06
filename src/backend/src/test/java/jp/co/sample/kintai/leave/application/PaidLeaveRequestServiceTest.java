@@ -38,10 +38,12 @@ import jp.co.sample.kintai.employee.domain.ManagershipRepository;
 import jp.co.sample.kintai.leave.domain.AttendanceRate;
 import jp.co.sample.kintai.leave.domain.GrantDecision;
 import jp.co.sample.kintai.leave.domain.LeaveRequestStatus;
+import jp.co.sample.kintai.leave.domain.NotTheRequesterException;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrant;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantId;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
+import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.BusinessZone;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Requester;
@@ -118,14 +120,16 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
     private EmployeeId yamadaId;
     private Requester yamada;
     private Requester manager;
+    private Requester hr;
 
     @BeforeEach
     void setUpOrganization() {
         yamadaId = hire("E0001", "山田 太郎", Role.EMPLOYEE);
         EmployeeId managerId = hire("E0100", "課長 次郎", Role.EMPLOYEE);
-        hire("E0900", "人事 花子", Role.EMPLOYEE, Role.HR);
+        EmployeeId hrId = hire("E0900", "人事 花子", Role.EMPLOYEE, Role.HR);
         yamada = new Requester(yamadaId, Set.of(Role.EMPLOYEE));
         manager = new Requester(managerId, Set.of(Role.EMPLOYEE, Role.APPROVER));
+        hr = new Requester(hrId, Set.of(Role.EMPLOYEE, Role.HR));
 
         var sales = new DepartmentId(UUID.randomUUID());
         departments.save(Department.root(sales, new DepartmentCode("SALES"), "営業部"));
@@ -139,9 +143,11 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
                 Duration.ofHours(8), NightWindow.STANDARD));
         series.assign(yamadaId, standard, HIRED);
 
-        // 10 月の土日を休日にする。平日は未登録のまま所定労働日（本番と同じ既定）
+        // ★ 10 月と 11 月の土日を休日にする。平日は未登録のまま所定労働日（本番と同じ既定）。
+        //   11 月を登録しないと、既定が WORKDAY なので土日にも年休を申請できてしまい、
+        //   本番なら NotAWorkdayException で弾かれる前提の上でテストが回る
         for (LocalDate date = OCTOBER.atDay(1);
-                date.isBefore(OCTOBER.plusMonths(1).atDay(1)); date = date.plusDays(1)) {
+                date.isBefore(OCTOBER.plusMonths(2).atDay(1)); date = date.plusDays(1)) {
             switch (date.getDayOfWeek()) {
                 case SUNDAY -> calendarRepository.save(date, DayType.LEGAL_HOLIDAY, "法定休日");
                 case SATURDAY -> calendarRepository.save(date, DayType.NON_LEGAL_HOLIDAY,
@@ -174,6 +180,32 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
                     .isInstanceOf(InsufficientPaidLeaveException.class);
         }
 
+        /**
+         * <strong>本人かどうかを最初に見る</strong>（要件 4.1）。
+         *
+         * <p>集約の検査（落とし穴 58 のために残す）に任せると、その前に並ぶ 5 つの検査が
+         * <strong>対象社員に対して</strong>実行される。他人の社員 ID を投げるだけで、
+         * 締め状態・在籍・既存の申請・残日数がエラーの型から読み取れてしまう。
+         *
+         * <p><strong>対象社員の状態が先の検査に引っかかる場面を選ぶ。</strong>
+         * 何にも引っかからない日で試すと、順序を入れ替えても同じ例外が返るので
+         * <strong>検査にならない</strong>（落とし穴 12・24）。
+         * ここでは本人が既に申請している日を使う。順序が逆なら、
+         * 他人でも `duplicate-leave-request` が返り、
+         * 「その社員がその日に申請していること」が読み取れてしまう。
+         */
+        @Test
+        @DisplayName("UT-LV-78 他人の申請は、対象社員の状態を読む前に拒否する")
+        void otherEmployeeIsRejectedFirst() {
+            grantTenDays();
+            LocalDate date = LocalDate.of(2026, 11, 16);
+            service.submit(yamada, yamadaId, date, Optional.empty());
+
+            assertThatThrownBy(() -> service.submit(manager, yamadaId, date,
+                    Optional.empty()))
+                    .isInstanceOf(NotTheRequesterException.class);
+        }
+
         /** 同じ 1 日に 2 件の未処理申請を作らない（部分一意インデックスと同じ規則）。 */
         @Test
         @DisplayName("UT-LV-28 同じ 1 日に 2 件目の未処理申請は出せない")
@@ -199,8 +231,14 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
             PaidLeaveRequest second = service.submit(yamada, yamadaId, date,
                     Optional.empty());
 
-            assertThat(second.status()).isEqualTo(LeaveRequestStatus.SUBMITTED);
+            // ★ 塞ぐのは未処理の申請だけである（部分一意インデックスと同じ規則）。
+            //   同じ 1 日に、取り下げた行と未処理の行が並ぶ
             assertThat(second.id()).isNotEqualTo(first.id());
+            assertThat(service.requestsOf(yamada, yamadaId))
+                    .filteredOn(request -> request.leaveDate().equals(date))
+                    .extracting(PaidLeaveRequest::status)
+                    .containsExactlyInAnyOrder(LeaveRequestStatus.CANCELED,
+                            LeaveRequestStatus.SUBMITTED);
         }
 
         /**
@@ -323,6 +361,61 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
                     approved.version()))
                     .isInstanceOf(MonthNotEditableException.class);
         }
+    }
+
+    @Nested
+    @DisplayName("承認者が導出できない申請")
+    class Orphaned {
+
+        /**
+         * <strong>どの状態にも遷移できない申請を残さない</strong>（落とし穴 26・93）。
+         *
+         * <p>未来日の年休を申請したあとにその社員が退職すると、
+         * 対象月には所属が無いので {@code ApproverPolicy} は承認者を返さない。
+         * 本人は退職後ログインできないので取り下げられず、承認も却下もできない。
+         * <strong>部分一意インデックスがその日を占有したまま永久に残る。</strong>
+         *
+         * <p>承認は認めない。在籍していない日の年休を承認すれば、
+         * 残日数だけが減って社員には何も残らない。
+         */
+        @Test
+        @DisplayName("UT-LV-76 承認者が導出できない申請は人事が却下できる")
+        void humanResourcesCanRejectWithoutApprover() {
+            grantTenDays();
+            LocalDate leaveDate = LocalDate.of(2026, 12, 15);
+            PaidLeaveRequest request = service.submit(yamada, yamadaId, leaveDate,
+                    Optional.empty());
+            retire(LocalDate.of(2026, 11, 30));
+
+            assertThatThrownBy(() -> service.approve(hr, request.id(), request.version()))
+                    .as("在籍していない日の年休を承認してはならない")
+                    .isInstanceOf(LeaveDateNotInServiceException.class);
+
+            PaidLeaveRequest rejected = service.reject(hr, request.id(),
+                    "退職により取得できないため", request.version());
+
+            assertThat(rejected.status()).isEqualTo(LeaveRequestStatus.REJECTED);
+        }
+
+        /** 承認者がいる申請を、人事が横から却下することはできない（BR-11）。 */
+        @Test
+        @DisplayName("UT-LV-77 承認者が導出できる申請は人事でも却下できない")
+        void humanResourcesCannotRejectWhenApproverExists() {
+            grantTenDays();
+            PaidLeaveRequest request = service.submit(yamada, yamadaId,
+                    LocalDate.of(2026, 12, 15), Optional.empty());
+
+            assertThatThrownBy(() -> service.reject(hr, request.id(), "理由",
+                    request.version()))
+                    .isInstanceOf(AccessDeniedException.class);
+        }
+    }
+
+    /** 退職を登録する。所属を閉じるところまで行う（承認者の導出に効く）。 */
+    private void retire(LocalDate lastDay) {
+        Employee employee = employees.findById(yamadaId).orElseThrow();
+        employees.save(employee.retire(lastDay));
+        assignments.close(yamadaId, lastDay.plusDays(1));
     }
 
     /** 0 回目の付与（10 日）を実体化する。 */

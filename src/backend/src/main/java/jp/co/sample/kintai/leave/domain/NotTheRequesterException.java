@@ -17,7 +17,12 @@ public final class NotTheRequesterException extends DomainException {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    NotTheRequesterException(EmployeeId employeeId) {
+    /**
+     * <p><strong>公開する。</strong> アプリケーション層が、対象社員の状態を読む検査より
+     * 先にこの拒否を返すために使う。集約の中でも同じ検査を残すのは、
+     * アプリケーション層を通さない経路を塞ぐためである（落とし穴 58）。
+     */
+    public NotTheRequesterException(EmployeeId employeeId) {
         super("年休の申請・取下げは本人しか行えません: " + employeeId.value());
     }
 

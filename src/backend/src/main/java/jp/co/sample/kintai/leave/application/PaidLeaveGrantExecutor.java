@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.leave.application;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -65,7 +66,7 @@ public class PaidLeaveGrantExecutor {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public List<Outcome> grantFor(Employee employee, LocalDate asOf) {
         var schedule = new GrantSchedule(employee.hiredOn());
-        List<Outcome> outcomes = new java.util.ArrayList<>();
+        List<Outcome> outcomes = new ArrayList<>();
         for (int index : schedule.indexesDueOn(asOf).toArray()) {
             LocalDate grantedOn = schedule.grantDateOf(index);
             if (!employee.isActiveOn(grantedOn)) {
@@ -90,12 +91,35 @@ public class PaidLeaveGrantExecutor {
                                    int deemedAttendedDays, String deemedReason) {
         var schedule = new GrantSchedule(employee.hiredOn());
         AttendanceRate measured = assess(employee, schedule.assessmentPeriodOf(grant.grantIndex()));
+        // ★ 人事が送った値は業務エラーとして弾く。
+        //   AttendanceRate の compact constructor に任せると IllegalArgumentException になり、
+        //   理由の載らない 500 で返る（API設計書 4.2 は 422 を求めている）
+        requireAcceptable(measured, deemedAttendedDays, deemedReason);
         var rate = new AttendanceRate(measured.totalWorkingDays(), measured.attendedDays(),
                 deemedAttendedDays, deemedReason);
 
         PaidLeaveGrant reassessed = grant.reassess(rate, LocalDateTime.now(clock));
         grants.update(reassessed, grant.version());
         return reassessed;
+    }
+
+    /**
+     * 人事の申告を受け付けられるか（BR-14）。
+     *
+     * <p>実績（{@code measured}）と突き合わせないと判定できないので、ここに置く。
+     */
+    private static void requireAcceptable(AttendanceRate measured, int deemedAttendedDays,
+                                          String deemedReason) {
+        if (deemedAttendedDays < 0) {
+            throw DeemedAttendanceRejectedException.negative(deemedAttendedDays);
+        }
+        if (deemedAttendedDays > 0 && (deemedReason == null || deemedReason.isBlank())) {
+            throw DeemedAttendanceRejectedException.reasonMissing();
+        }
+        if (measured.attendedDays() + deemedAttendedDays > measured.totalWorkingDays()) {
+            throw DeemedAttendanceRejectedException.exceedsTotal(measured.attendedDays(),
+                    deemedAttendedDays, measured.totalWorkingDays());
+        }
     }
 
     private AttendanceRate assess(Employee employee, DateRange period) {

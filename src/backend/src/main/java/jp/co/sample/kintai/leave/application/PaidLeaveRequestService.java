@@ -22,6 +22,7 @@ import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.leave.domain.LeaveRequestEvent;
 import jp.co.sample.kintai.leave.domain.LeaveRequestEventKind;
 import jp.co.sample.kintai.leave.domain.LeaveRequestStatus;
+import jp.co.sample.kintai.leave.domain.NotTheRequesterException;
 import jp.co.sample.kintai.leave.domain.PaidLeaveBalance;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantId;
 import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
@@ -91,6 +92,12 @@ public class PaidLeaveRequestService {
     @Transactional
     public PaidLeaveRequest submit(Requester requester, EmployeeId employeeId,
                                    LocalDate leaveDate, Optional<String> reason) {
+        // ★ 本人かどうかを最初に見る。集約の検査（落とし穴 58 のために残す）に任せると、
+        //   その前に並ぶ 5 つの検査が対象社員に対して実行され、
+        //   締め状態・在籍・既存の申請・残日数がエラーの型から読み取れてしまう（要件 4.1）
+        if (!requester.isSelf(employeeId)) {
+            throw new NotTheRequesterException(employeeId);
+        }
         Employee employee = employeeOf(employeeId);
         requireMonthEditable(employeeId, YearMonth.from(leaveDate));
         requireWorkday(leaveDate);
@@ -124,6 +131,11 @@ public class PaidLeaveRequestService {
         PaidLeaveRequest request = requestOf(id);
         YearMonth month = YearMonth.from(request.leaveDate());
         requireMonthEditable(request.employeeId(), month);
+        // ★ 申請から承認までの間にカレンダーや在籍が変わりうる。
+        //   休日・在籍期間の外の日に年休を消費しても社員には何の利益も無いので、
+        //   申請のときと同じ検査をここでも通す
+        requireWorkday(request.leaveDate());
+        requireInService(employeeOf(request.employeeId()), request.leaveDate());
         requireNotWorked(request);
 
         // ★ 承認の時点でも残日数を確かめる。申請から承認までの間に
@@ -154,7 +166,8 @@ public class PaidLeaveRequestService {
         //   拒否すると遷移先の無い申請が残るだけである
         LocalDateTime at = LocalDateTime.now(clock);
         PaidLeaveRequest rejected = request.reject(requester.employeeId(), comment, at);
-        requireApprover(requester, request.employeeId(), YearMonth.from(request.leaveDate()));
+        requireRejecter(requester, request.employeeId(),
+                YearMonth.from(request.leaveDate()));
 
         requests.update(rejected, expectedVersion);
         record(rejected, Optional.of(LeaveRequestStatus.SUBMITTED),
@@ -222,16 +235,26 @@ public class PaidLeaveRequestService {
         return revoked;
     }
 
+    /**
+     * その社員の申請。<strong>見てよいものだけ返す。</strong>
+     *
+     * <p>基準日は<strong>取得日</strong>にそろえる（訂正申請と同じ形）。
+     * 今日の組織で決めると、異動した部下の異動前の申請を旧上長が見られなくなる。
+     */
     @Transactional(readOnly = true)
     public List<PaidLeaveRequest> requestsOf(Requester requester, EmployeeId employeeId) {
-        requireVisible(requester, employeeId);
-        return requests.findByEmployee(employeeId);
+        return requests.findByEmployee(employeeId).stream()
+                .filter(request -> visibility.canView(requester, employeeId,
+                        request.leaveDate()))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public PaidLeaveRequest find(Requester requester, PaidLeaveRequestId id) {
         PaidLeaveRequest request = requestOf(id);
-        requireVisible(requester, request.employeeId());
+        if (!visibility.canView(requester, request.employeeId(), request.leaveDate())) {
+            throw new AccessDeniedException();
+        }
         return request;
     }
 
@@ -286,10 +309,11 @@ public class PaidLeaveRequestService {
 
     /** 残日数が足りるか（BR-16）。<strong>未処理の申請も差し引く。</strong> */
     private void requireEnoughLeave(Employee employee, LocalDate leaveDate) {
+        // ★ 未処理の申請は 1 度だけ読む。呼ぶたびに引くと、同じ問い合わせが 3 回走る
+        List<LocalDate> pending = balances.pendingDatesOf(employee.id());
         PaidLeaveBalance balance = balances.projectedBalanceOf(employee, LocalDate.now(clock));
-        if (!balance.canAllocate(leaveDate, balances.pendingDatesOf(employee.id()))) {
-            throw new InsufficientPaidLeaveException(leaveDate,
-                    balances.pendingDatesOf(employee.id()).size());
+        if (!balance.canAllocate(leaveDate, pending)) {
+            throw new InsufficientPaidLeaveException(leaveDate, pending.size());
         }
     }
 
@@ -337,8 +361,25 @@ public class PaidLeaveRequestService {
         }
     }
 
-    private void requireVisible(Requester requester, EmployeeId employeeId) {
-        if (!visibility.canView(requester, employeeId, LocalDate.now(clock))) {
+    /**
+     * 却下してよいか。
+     *
+     * <p><strong>承認者が導出できない申請は、人事が却下できる。</strong>
+     * 未来日の年休を申請したあとに退職が登録されると、その月には所属が無いので
+     * 承認者が決まらない。本人は退職後ログインできないので取り下げられず、
+     * <strong>どの状態にも遷移できない申請</strong>が部分一意インデックスを
+     * 占有したまま残る（落とし穴 26・93）。
+     *
+     * <p><strong>承認は認めない。</strong> 在籍していない日の年休を通しても、
+     * 残日数が減るだけで社員には何も残らない。開けるのは却下の側だけである。
+     */
+    private void requireRejecter(Requester requester, EmployeeId employeeId,
+                                 YearMonth month) {
+        Approver approver = approverPolicy.resolve(employeeId, month, LocalDate.now(clock));
+        if (approver.isUnresolved() && requester.has(Role.HR)) {
+            return;
+        }
+        if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
             throw new AccessDeniedException();
         }
     }

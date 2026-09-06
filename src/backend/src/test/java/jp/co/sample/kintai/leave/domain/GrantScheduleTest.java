@@ -89,7 +89,7 @@ class GrantScheduleTest {
         }
 
         @Test
-        @DisplayName("UT-LV-17 付与の連番が負なら例外")
+        @DisplayName("UT-LV-72 付与の連番が負なら例外")
         void negative() {
             assertThatThrownBy(() -> LeaveEntitlement.of(-1))
                     .isInstanceOf(IllegalArgumentException.class);

@@ -163,14 +163,75 @@ def render_by_requirement(rows):
     return '\n'.join(out)
 
 
+# テストコードの置き場所。@DisplayName の先頭に書かれた ID を拾う
+TEST_SOURCE = os.path.normpath(
+    os.path.join(ROOT, '..', 'src', 'backend', 'src', 'test', 'java'))
+
+DISPLAY_NAME = re.compile(r'@DisplayName\("\s*((?:UT|IT)-[A-Z0-9]+-\d+)\b')
+
+
+def collect_from_code():
+    """テストコードにある ID → その ID を名乗るテストの場所（複数）。"""
+    found = {}
+    if not os.path.isdir(TEST_SOURCE):
+        return found
+    for base, _, names in os.walk(TEST_SOURCE):
+        for name in names:
+            if not name.endswith('.java'):
+                continue
+            path = os.path.join(base, name)
+            for number, line in enumerate(io.open(path, encoding='utf-8'), start=1):
+                m = DISPLAY_NAME.search(line)
+                if m:
+                    rel = os.path.relpath(path, TEST_SOURCE)
+                    found.setdefault(m.group(1), []).append(f'{rel}:{number}')
+    return found
+
+
+def check_code(defined):
+    """設計書とテストコードの ID を突き合わせる。
+
+    **警告では見過ごされる。落として気づかせる**（落とし穴 89）。
+    落とすのは、次の 2 つだけである。
+
+    - 設計書に無い ID をコードが名乗っている … 一覧に現れないので
+      要件 → 設計 → テスト → 実装 の追跡が切れる（落とし穴 45・62）。
+      廃止した ID を消し忘れたコードもここで出る
+    - 1 つの ID を<strong>別々のテストクラス</strong>が名乗っている …
+      無関係な観点が同じ ID を借りている印である
+      （`UT-LV-17` が「法定の範囲外の付与日数」と「連番が負」の両方を指していた）
+
+    <strong>同じクラスの中の複数のテストは落とさない。</strong>
+    1 つの観点を閾値の両側から見るとき、テストを 2 つに分けるのは
+    むしろ正しい（落とし穴 24）。ここで落とすと、
+    「1 行にまとめる」方向に圧力がかかって逆効果になる。
+    """
+    problems = []
+    for tid, places in sorted(collect_from_code().items()):
+        classes = {place.split(':')[0] for place in places}
+        if len(classes) > 1:
+            problems.append(f'{tid} を {len(classes)} 個のテストクラスが名乗っている: '
+                            + ', '.join(sorted(places)))
+        if tid not in defined:
+            problems.append(f'{tid} は設計書に無い（{places[0]}）')
+    return problems
+
+
 def main():
+    defined = set()
     for prefix, path, title in TARGETS:
         rows = collect(prefix)
+        defined |= {r['id'] for r in rows}
         os.makedirs(os.path.dirname(path), exist_ok=True)
         io.open(path, 'w', encoding='utf-8').write(render(prefix, title, rows))
         print(f'{prefix}: {len(rows)} 件 → {os.path.relpath(path, ROOT)}')
+
+    problems = check_code(defined)
+    for problem in problems:
+        print(f'追跡が切れている: {problem}', file=sys.stderr)
     if DUPLICATES:
         print(f'ID が重複している: {sorted(set(DUPLICATES))}', file=sys.stderr)
+    if DUPLICATES or problems:
         sys.exit(1)
 
 

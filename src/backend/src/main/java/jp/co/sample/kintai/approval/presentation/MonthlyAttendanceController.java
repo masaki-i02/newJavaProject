@@ -1,9 +1,12 @@
 package jp.co.sample.kintai.approval.presentation;
 
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +23,7 @@ import jakarta.validation.constraints.NotNull;
 import jp.co.sample.kintai.approval.application.BulkClosureResult;
 import jp.co.sample.kintai.approval.application.BulkClosureService;
 import jp.co.sample.kintai.approval.application.MonthlyAttendanceService;
+import jp.co.sample.kintai.approval.application.SubmissionResult;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Requester;
@@ -84,9 +88,11 @@ class MonthlyAttendanceController {
             @PathVariable UUID employeeId, @PathVariable YearMonth month,
             @Valid @RequestBody SubmissionRequest request) {
         var requester = principal.toRequester();
-        return respond(requester, attendances.submit(requester,
+        SubmissionResult result = attendances.submit(requester,
                 new EmployeeId(employeeId), month,
-                Optional.ofNullable(request.comment()), request.version()));
+                Optional.ofNullable(request.comment()), request.version());
+        return respond(requester, result.attendance())
+                .with(Warning.paidLeaveDateWorked(result.workedOnPaidLeaveDates()));
     }
 
     @PostMapping("/employees/{employeeId}/monthly-attendances/{month}/approval")
@@ -210,13 +216,44 @@ class MonthlyAttendanceController {
     }
 
     /** 月次勤怠の状態。 */
+    /**
+     * 気づかせるための情報。<strong>手続きは止めない</strong>（落とし穴 19）。
+     *
+     * @param type  警告の種別
+     * @param dates 対象の日
+     */
+    record Warning(String type, List<LocalDate> dates) {
+
+        /** 承認済みの年休の日なのに実労働がある（06 API設計書 3.5）。 */
+        static Optional<Warning> paidLeaveDateWorked(List<LocalDate> dates) {
+            return dates.isEmpty() ? Optional.empty()
+                    : Optional.of(new Warning("paid-leave-date-worked", dates));
+        }
+    }
+
+    /**
+     * @param warnings 警告。<strong>遷移の応答すべてに付くわけではない</strong>ので、
+     *                 無い場合は項目ごと省く。項目に {@code null} を残すと、
+     *                 画面が「警告が無い」と「この操作では警告を返さない」を
+     *                 区別できない（落とし穴 76）
+     */
     record MonthlyAttendanceResponse(String employeeId, String month, String status,
-                                     long version) {
+                                     long version,
+                                     @JsonInclude(JsonInclude.Include.NON_NULL)
+                                     List<Warning> warnings) {
 
         static MonthlyAttendanceResponse from(MonthlyAttendance attendance, long version) {
             return new MonthlyAttendanceResponse(attendance.employeeId().value().toString(),
                     attendance.month().toString(), attendance.status().state().name(),
-                    version);
+                    version, null);
+        }
+
+        /** 警告を添える。無ければそのまま返す。 */
+        MonthlyAttendanceResponse with(Optional<Warning> warning) {
+            return warning
+                    .map(value -> new MonthlyAttendanceResponse(employeeId, month, status,
+                            version, List.of(value)))
+                    .orElse(this);
         }
 
         /**
@@ -227,7 +264,7 @@ class MonthlyAttendanceController {
          */
         static MonthlyAttendanceResponse draft(UUID employeeId, YearMonth month) {
             return new MonthlyAttendanceResponse(employeeId.toString(), month.toString(),
-                    "DRAFT", 0L);
+                    "DRAFT", 0L, null);
         }
     }
 }

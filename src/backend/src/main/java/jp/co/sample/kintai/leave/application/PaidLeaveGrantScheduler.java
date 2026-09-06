@@ -1,6 +1,8 @@
 package jp.co.sample.kintai.leave.application;
 
 import java.time.Clock;
+import java.util.UUID;
+import java.util.Set;
 import java.time.LocalDate;
 
 import org.slf4j.Logger;
@@ -35,10 +37,17 @@ public class PaidLeaveGrantScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(PaidLeaveGrantScheduler.class);
 
-    /** バッチの実行者。個人ではないので、識別子は固定の 0 とする。 */
+    /**
+     * バッチの実行者。個人ではないので、識別子は固定の 0 とする。
+     *
+     * <p><strong>この ID を証跡の実行者として書いてはならない。</strong>
+     * {@code employees} に対応する行が無いので、
+     * {@code approval_events.actor_id} のような外部キーで落ちる。
+     * 付与そのものは実行者を行に残さない（会社の行為であり、
+     * 誰が起動したかは監査の対象ではない）ので、いまはこの形で足りている。
+     */
     private static final Requester SYSTEM = new Requester(
-            new EmployeeId(new java.util.UUID(0L, 0L)),
-            java.util.Set.of(Role.EMPLOYEE, Role.HR));
+            new EmployeeId(new UUID(0L, 0L)), Set.of(Role.EMPLOYEE, Role.HR));
 
     private final PaidLeaveGrantService grants;
     private final Clock clock;

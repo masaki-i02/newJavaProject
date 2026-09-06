@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
+
 /**
  * 残日数と先入先出の配分（BR-15）。
  *
@@ -59,18 +61,26 @@ public record PaidLeaveBalance(List<PaidLeaveGrant> grants, List<LeaveAllocation
     }
 
     /**
-     * 未処理の申請を仮に配分したあと、なお残っている日数。
+     * 未処理の申請を仮に配分したあと、なお申請に使える日数。
      *
      * <p><strong>件数の引き算にしない。</strong>
      * 「合計では足りているが、その日に有効な付与だけでは足りない」場合に実際と食い違う。
      * 表示に出る値と、申請の受理判定が別の式になってはならない（落とし穴 96）。
      *
+     * <p><strong>基準日ではなく、申請できる期間との重なりで絞る。</strong>
+     * 受理判定（{@link #canAllocate}）は<strong>取得日</strong>の時点で有効な付与を探すので、
+     * 基準日で絞ると<strong>付与日がまだ到来していない付与</strong>が表示から落ちる。
+     * 「0 日と表示されるのに申請は通る」という食い違いになり、
+     * 社員は表示を見て権利を行使しない方向へ倒れる。
+     *
+     * @param requestable       申請できる取得日の範囲（当日から 1 年後まで）
      * @param pendingLeaveDates 未処理の申請の取得日
      */
-    public int availableDays(LocalDate asOf, List<LocalDate> pendingLeaveDates) {
+    public int availableDays(DateRange requestable, List<LocalDate> pendingLeaveDates) {
         Map<PaidLeaveGrantId, Integer> remaining = simulate(pendingLeaveDates);
         return grants.stream()
-                .filter(grant -> grant.isValidOn(asOf))
+                .filter(PaidLeaveGrant::isGranted)
+                .filter(grant -> grant.validPeriod().overlaps(requestable))
                 .mapToInt(grant -> remaining.getOrDefault(grant.id(), 0))
                 .sum();
     }

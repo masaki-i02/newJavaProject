@@ -79,9 +79,9 @@ public class MonthlyAttendanceService {
      * @param comment 代理提出の理由。本人の提出では空でよい
      */
     @Transactional
-    public MonthlyAttendance submit(Requester requester, EmployeeId employeeId,
-                                    YearMonth month, Optional<String> comment,
-                                    long expectedVersion) {
+    public SubmissionResult submit(Requester requester, EmployeeId employeeId,
+                                   YearMonth month, Optional<String> comment,
+                                   long expectedVersion) {
         LocalDate today = LocalDate.now(clock);
         Employee employee = employees.findById(employeeId)
                 .orElseThrow(() -> new AttendanceNotFoundException(employeeId, month));
@@ -110,9 +110,14 @@ public class MonthlyAttendanceService {
         MonthlyAttendance current = loadOrDraft(employeeId, month);
         MonthlyAttendance next = current.submit(requester.employeeId(),
                 LocalDateTime.now(clock));
-        return apply(current, next, proxy ? ApprovalEventKind.PROXY_SUBMIT
-                : ApprovalEventKind.SUBMIT, requester.employeeId(), comment,
-                OptionalLong.of(expectedVersion));
+        MonthlyAttendance submitted = apply(current, next,
+                proxy ? ApprovalEventKind.PROXY_SUBMIT : ApprovalEventKind.SUBMIT,
+                requester.employeeId(), comment, OptionalLong.of(expectedVersion));
+
+        // ★ 提出を止めない。承認済みの年休の日に出勤していたことを警告として返す。
+        //   取り消せるのは締め前だけなので、締め前に必ず通るここで気づかせる（落とし穴 97）
+        return new SubmissionResult(submitted,
+                settlements.workedOnPaidLeaveDates(employeeId, month));
     }
 
     /** 承認する（BR-11 の承認者）。 */

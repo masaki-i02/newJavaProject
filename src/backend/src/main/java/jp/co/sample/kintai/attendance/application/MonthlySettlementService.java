@@ -145,6 +145,36 @@ public class MonthlySettlementService {
                 .count();
     }
 
+    /**
+     * 承認済みの年休の日なのに実労働がある日（BR-16 / 06 API設計書 3.5）。
+     *
+     * <p><strong>行を持たない。</strong> 承認済みの取得日と日次勤怠を突き合わせて導く
+     * （落とし穴 39）。
+     *
+     * <p>この食い違いは、年休の承認後にその日へ打刻すると生まれる。
+     * 所定総からその日が除かれるのに実労働も乗るので、
+     * <strong>不足時間が最大 8 時間ぶん過少に出る一方で、社員は年休を 1 日失う</strong>
+     * （落とし穴 97）。取り消せるのは締め前だけなので、
+     * <strong>締め前に気づく経路</strong>として提出の応答に載せる。
+     *
+     * <p>判定を {@code approval} に写さない。承認済みの取得日も日次勤怠も
+     * ここから引くものであり、2 か所に置くと片方が古くなる（落とし穴 67）。
+     */
+    @Transactional(readOnly = true)
+    public List<LocalDate> workedOnPaidLeaveDates(EmployeeId employeeId, YearMonth month) {
+        SettlementPeriod period = periodOf(employeeId, month);
+        Set<LocalDate> leaveDates = paidLeaveDays.approvedOn(employeeId, period.period());
+        if (leaveDates.isEmpty()) {
+            return List.of();
+        }
+        return dailyAttendances.findByPeriod(employeeId, period.period()).stream()
+                .filter(day -> leaveDates.contains(day.workDate()))
+                .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
+                .map(DailyAttendance::workDate)
+                .sorted()
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public Optional<MonthlySettlement> find(EmployeeId employeeId, YearMonth month) {
         return settlements.find(employeeId, month);

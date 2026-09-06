@@ -43,7 +43,6 @@ import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 import jp.co.sample.kintai.support.WorkRules;
-import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
@@ -96,8 +95,6 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
     private WorkRuleRepository workRules;
     @Autowired
     private CompanyCalendarRepository calendarRepository;
-    @Autowired
-    private CompanyCalendar calendar;
 
     private EmployeeId yamadaId;
     private Requester yamada;
@@ -157,13 +154,16 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
 
         MonthlySettlement settlement = settlements.settle(yamadaId, OCTOBER);
 
-        var period = new DateRange(OCTOBER.atDay(1), RETIRED.plusDays(1));
-        assertThat(settlement.period().period()).isEqualTo(period);
+        // ★ 期待値を本番の関数から作らない。10/01〜10/15 の平日は 11 日（10/01 は木曜）。
+        //   workdayCountIn を使うと、そちらが壊れたときに両辺が一緒に動く
+        assertThat(settlement.period().period())
+                .isEqualTo(new DateRange(OCTOBER.atDay(1), RETIRED.plusDays(1)));
         assertThat(settlement.paidLeaveDays())
                 .as("引くのは期間の内側にある 10/05 の 1 日だけ")
                 .isEqualTo(1);
         assertThat(settlement.scheduledTotalTime())
-                .isEqualTo(Duration.ofHours(8L * (calendar.workdayCountIn(period) - 1)));
+                .as("所定労働日 11 日 − 年休 1 日 = 10 日ぶん")
+                .isEqualTo(Duration.ofHours(80));
     }
 
     /**
@@ -185,12 +185,13 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
 
         MonthlySettlement settlement = settlements.settle(yamadaId, OCTOBER);
 
-        var period = new DateRange(OCTOBER.atDay(1), OCTOBER.plusMonths(1).atDay(1));
+        // 10 月の平日は 22 日。うち 10/05 を所定休日へ変えたので所定労働日は 21 日
         assertThat(settlement.paidLeaveDays())
                 .as("所定労働日でなくなった日は数えない")
                 .isZero();
         assertThat(settlement.scheduledTotalTime())
-                .isEqualTo(Duration.ofHours(8L * calendar.workdayCountIn(period)));
+                .as("所定労働日 21 日ぶん。年休の 1 日は引かない")
+                .isEqualTo(Duration.ofHours(168));
     }
 
     private void approveLeaveOn(LocalDate leaveDate) {

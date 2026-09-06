@@ -2,8 +2,11 @@ package jp.co.sample.kintai.leave.application;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +17,7 @@ import jp.co.sample.kintai.leave.domain.PaidLeaveGrant;
 import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 
@@ -32,18 +36,23 @@ import jp.co.sample.kintai.shared.domain.Role;
 @Service
 public class PaidLeaveGrantService {
 
+    private static final Logger log = LoggerFactory.getLogger(PaidLeaveGrantService.class);
+
     private final PaidLeaveGrantRepository grants;
     private final EmployeeRepository employees;
     private final PaidLeaveGrantExecutor executor;
+    private final EmployeeVisibility visibility;
     private final Clock clock;
 
     public PaidLeaveGrantService(PaidLeaveGrantRepository grants,
                                  EmployeeRepository employees,
                                  PaidLeaveGrantExecutor executor,
+                                 EmployeeVisibility visibility,
                                  Clock clock) {
         this.grants = grants;
         this.employees = employees;
         this.executor = executor;
+        this.visibility = visibility;
         this.clock = clock;
     }
 
@@ -61,27 +70,45 @@ public class PaidLeaveGrantService {
         //   人事は自分に権限が無いことに気づけない（落とし穴 60）
         requireHumanResources(requester);
 
-        List<GrantResult.Granted> granted = new java.util.ArrayList<>();
-        List<GrantResult.Withheld> withheld = new java.util.ArrayList<>();
-        List<GrantResult.Skipped> skipped = new java.util.ArrayList<>();
+        List<GrantResult.Granted> granted = new ArrayList<>();
+        List<GrantResult.Withheld> withheld = new ArrayList<>();
+        List<GrantResult.Skipped> skipped = new ArrayList<>();
+        List<GrantResult.Failed> failed = new ArrayList<>();
 
         for (Employee employee : employees.findForDirectory(asOf, true)) {
-            for (PaidLeaveGrantExecutor.Outcome outcome : executor.grantFor(employee, asOf)) {
-                if (outcome.decision().isEmpty()) {
-                    skipped.add(new GrantResult.Skipped(employee.id(), outcome.grantedOn(),
-                            GrantResult.Skipped.ALREADY_GRANTED));
-                    continue;
-                }
-                switch (outcome.decision().orElseThrow()) {
-                    case GrantDecision.Granted value -> granted.add(new GrantResult.Granted(
-                            employee.id(), outcome.grantedOn(), value.days()));
-                    case GrantDecision.Withheld ignored -> withheld.add(
-                            new GrantResult.Withheld(employee.id(), outcome.grantedOn(),
-                                    outcome.rate().orElseThrow()));
-                }
+            // ★ 1 人の失敗を他の 99 人に波及させない。
+            //   ここで捕まえないと、例外がループを抜けて以降の社員が一件も処理されず、
+            //   結果も返らないので誰も気づけない（落とし穴 60）
+            try {
+                collect(employee, asOf, granted, withheld, skipped);
+            } catch (RuntimeException e) {
+                log.warn("年次有給休暇の付与に失敗しました: 社員 {} / 基準日 {}",
+                        employee.id().value(), asOf, e);
+                failed.add(new GrantResult.Failed(employee.id(),
+                        e.getClass().getSimpleName()));
             }
         }
-        return new GrantResult(asOf, granted, withheld, skipped);
+        return new GrantResult(asOf, granted, withheld, skipped, failed);
+    }
+
+    private void collect(Employee employee, LocalDate asOf,
+                         List<GrantResult.Granted> granted,
+                         List<GrantResult.Withheld> withheld,
+                         List<GrantResult.Skipped> skipped) {
+        for (PaidLeaveGrantExecutor.Outcome outcome : executor.grantFor(employee, asOf)) {
+            if (outcome.decision().isEmpty()) {
+                skipped.add(new GrantResult.Skipped(employee.id(), outcome.grantedOn(),
+                        GrantResult.Skipped.ALREADY_GRANTED));
+                continue;
+            }
+            switch (outcome.decision().orElseThrow()) {
+                case GrantDecision.Granted value -> granted.add(new GrantResult.Granted(
+                        employee.id(), outcome.grantedOn(), value.days()));
+                case GrantDecision.Withheld ignored -> withheld.add(
+                        new GrantResult.Withheld(employee.id(), outcome.grantedOn(),
+                                outcome.rate().orElseThrow()));
+            }
+        }
     }
 
     /**
@@ -106,8 +133,17 @@ public class PaidLeaveGrantService {
         return executor.reassess(employee, grant, deemedAttendedDays, deemedReason);
     }
 
+    /**
+     * その社員の付与の履歴。<strong>閲覧範囲を確かめてから返す</strong>（要件 4.1）。
+     *
+     * <p>付与には出勤率と、出勤扱いの理由（「産前産後休業」など）が載る。
+     * 絞らないと、誰でも他人の休業の事実を読めてしまう。
+     */
     @Transactional(readOnly = true)
-    public List<PaidLeaveGrant> grantsOf(EmployeeId employeeId) {
+    public List<PaidLeaveGrant> grantsOf(Requester requester, EmployeeId employeeId) {
+        if (!visibility.canView(requester, employeeId, LocalDate.now(clock))) {
+            throw new AccessDeniedException();
+        }
         return grants.findAll(employeeId);
     }
 

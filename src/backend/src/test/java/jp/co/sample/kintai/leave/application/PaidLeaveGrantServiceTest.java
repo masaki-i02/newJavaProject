@@ -25,6 +25,8 @@ import jp.co.sample.kintai.support.DailyAttendances;
 import jp.co.sample.kintai.support.Fixtures;
 import jp.co.sample.kintai.support.IntegrationTestBase;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
+import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
+import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
@@ -57,6 +59,9 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
     @Autowired
     private CompanyCalendar calendar;
 
+    @Autowired
+    private CompanyCalendarRepository calendarRepository;
+
     private Fixtures fixtures;
     private Requester hr;
     private Requester employee;
@@ -78,6 +83,24 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
          * 依頼そのものの不備は例外へ。全員を {@code skipped} にすると、
          * 人事は<strong>自分に権限が無いことに気づけない</strong>（落とし穴 60）。
          */
+        /**
+         * 付与の履歴には出勤率と、出勤扱いの理由（「産前産後休業」など）が載る。
+         * 絞らないと、<strong>誰でも他人の休業の事実を読める</strong>（要件 4.1）。
+         */
+        @Test
+        @DisplayName("IT-LV-122 配下でない社員の付与履歴は読めない")
+        void grantsOfIsScopedByVisibility() {
+            EmployeeId yamada = hire("E0001", HIRED, null);
+            EmployeeId otherId = hire("E0002", HIRED, null);
+            var other = new Requester(otherId, Set.of(Role.EMPLOYEE));
+
+            assertThatThrownBy(() -> service.grantsOf(other, yamada))
+                    .isInstanceOf(AccessDeniedException.class);
+            assertThat(service.grantsOf(new Requester(yamada, Set.of(Role.EMPLOYEE)), yamada))
+                    .as("本人は読める")
+                    .isEmpty();
+        }
+
         @Test
         @DisplayName("IT-LV-112 人事でない社員は付与を実行できない")
         void notHumanResources() {
@@ -105,15 +128,25 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
                     });
         }
 
-        /** 付与日の前日には到来していない。閾値の反対側。 */
+        /**
+         * 付与日の前日には到来していない。IT-LV-113 の閾値の反対側。
+         *
+         * <p><strong>入力は基準日だけを変える</strong>（落とし穴 12）。
+         * 出勤していない社員で試すと、付与日の判定が壊れていても
+         * 出勤率 0 で不付与になるだけなので、{@code granted()} は空のままである。
+         * <strong>行が 1 件も作られていないこと</strong>まで見て初めて検査になる。
+         */
         @Test
         @DisplayName("IT-LV-114 付与日の前日には付与されない")
         void dayBefore() {
-            EmployeeId yamada = hire("E0001", HIRED, null);
+            EmployeeId yamada = hireWorking("E0001", HIRED, null, 100);
 
             var result = service.grantAsOf(hr, FIRST_GRANT.minusDays(1));
 
             assertThat(result.granted()).noneMatch(g -> g.employeeId().equals(yamada));
+            assertThat(service.grantsOf(hr, yamada))
+                    .as("付与日が到来していないので、不付与の行すら作られない")
+                    .isEmpty();
         }
 
         /**
@@ -162,7 +195,7 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
             var result = service.grantAsOf(hr, FIRST_GRANT.plusYears(1));
 
             assertThat(result.granted()).noneMatch(g -> g.employeeId().equals(saburo));
-            assertThat(service.grantsOf(saburo)).isEmpty();
+            assertThat(service.grantsOf(hr, saburo)).isEmpty();
         }
 
         /** 付与日<strong>当日</strong>に在籍していれば付与される。閾値の反対側。 */
@@ -185,6 +218,7 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
             var result = service.grantAsOf(hr, FIRST_GRANT);
 
             assertThat(result.granted()).noneMatch(g -> g.employeeId().equals(future));
+            assertThat(service.grantsOf(hr, future)).isEmpty();
         }
     }
 
@@ -207,7 +241,7 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
                 assertThat(skipped.reason())
                         .isEqualTo(GrantResult.Skipped.ALREADY_GRANTED);
             });
-            assertThat(service.grantsOf(yamada)).hasSize(1);
+            assertThat(service.grantsOf(hr, yamada)).hasSize(1);
         }
 
         /**
@@ -221,21 +255,34 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
 
             service.grantAsOf(hr, FIRST_GRANT.plusYears(2));
 
-            assertThat(service.grantsOf(yamada))
+            assertThat(service.grantsOf(hr, yamada))
                     .extracting(PaidLeaveGrant::grantedOn)
                     .containsExactly(FIRST_GRANT, FIRST_GRANT.plusYears(1),
                             FIRST_GRANT.plusYears(2));
         }
 
-        /** 不付与でも連番は進むので、2 回目の付与日数は 11 日になる（BR-14）。 */
+        /**
+         * <strong>不付与でも継続勤務年数は進む</strong>（BR-14）。
+         *
+         * <p>0 回目を 8 割未達にして {@code Withheld} を挟み、
+         * それでも 1 回目が 11 日（＝ 1 年 6 か月の法定日数）になることを見る。
+         * 0 回目を付与にすると、連番が進むのか「前回の日数 + 1」なのかを区別できない。
+         */
         @Test
-        @DisplayName("IT-LV-119 2 回目の付与は 11 日")
+        @DisplayName("IT-LV-119 不付与を挟んでも 2 回目の付与は 11 日")
         void secondGrantDays() {
-            EmployeeId yamada = hireWorking("E0001", HIRED, null, 100);
+            // 0 回目の算定期間（183 日）のうち出勤は 100 日。所定労働日 150 日に対して
+            // 100 日なので 8 割（120 日）に届かず不付与になる
+            EmployeeId yamada = hireWorking("E0001", HIRED, null, 150, 100);
 
             var result = service.grantAsOf(hr, FIRST_GRANT.plusYears(1));
 
-            // ★ 社員でも絞る。同じ基準日には他の社員（人事）の付与も並ぶ
+            // ★ 社員でも絞る。同じ基準日には他の社員（人事）の付与も並ぶ（落とし穴 102）
+            assertThat(result.withheld())
+                    .filteredOn(w -> w.employeeId().equals(yamada)
+                            && w.grantedOn().equals(FIRST_GRANT))
+                    .as("0 回目は 8 割未達で不付与")
+                    .hasSize(1);
             assertThat(result.granted())
                     .filteredOn(g -> g.employeeId().equals(yamada)
                             && g.grantedOn().equals(FIRST_GRANT.plusYears(1)))
@@ -260,20 +307,36 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
      */
     private EmployeeId hireWorking(String number, LocalDate hiredOn, LocalDate retiredOn,
                                    int workdays) {
+        return hireWorking(number, hiredOn, retiredOn, workdays, workdays);
+    }
+
+    /**
+     * 出勤率を指定して社員を作る。
+     *
+     * <p><strong>暦日区分を登録しない日は所定労働日になる</strong>ので、
+     * 183 日の算定期間をそのまま使うと全労働日 183・出勤 0 で必ず不付与になる。
+     * 算定期間を所定休日で埋め、{@code workdays} 日だけを所定労働日に戻す。
+     *
+     * @param workdays 所定労働日にする日数（＝出勤率の分母）
+     * @param attended そのうち出勤する日数（＝分子）
+     */
+    private EmployeeId hireWorking(String number, LocalDate hiredOn, LocalDate retiredOn,
+                                   int workdays, int attended) {
+        if (attended > workdays) {
+            throw new IllegalArgumentException("出勤日が所定労働日を超えています");
+        }
         EmployeeId id = hire(number, hiredOn, retiredOn);
         // 2 回目の付与まで賄えるよう、入社から 3 年ぶんを所定休日で埋める
         for (LocalDate date = hiredOn; date.isBefore(hiredOn.plusYears(3));
                 date = date.plusDays(1)) {
-            jdbc.update("""
-                    INSERT INTO company_calendars (calendar_date, day_type, name)
-                    VALUES (?, 'NON_LEGAL_HOLIDAY', '所定休日')
-                    ON CONFLICT (calendar_date) DO NOTHING
-                    """, date);
+            calendarRepository.save(date, DayType.NON_LEGAL_HOLIDAY, "所定休日");
         }
         for (int i = 0; i < workdays; i++) {
             LocalDate date = hiredOn.plusDays(i);
-            jdbc.update("UPDATE company_calendars SET day_type = 'WORKDAY', name = '所定労働日'"
-                    + " WHERE calendar_date = ?", date);
+            calendarRepository.save(date, DayType.WORKDAY, "所定労働日");
+            if (i >= attended) {
+                continue;
+            }
             // ★ 本番の計算を通して作る。行を手で書くと内訳（slices）が空になり、
             //   「内訳の合計 = 実労働時間」という不変条件に弾かれる（落とし穴 37・55）
             dailyAttendances.save(id,

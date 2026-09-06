@@ -39,6 +39,14 @@ import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
+import jp.co.sample.kintai.leave.domain.AttendanceRate;
+import jp.co.sample.kintai.leave.domain.GrantDecision;
+import jp.co.sample.kintai.leave.domain.PaidLeaveGrant;
+import jp.co.sample.kintai.leave.domain.PaidLeaveGrantId;
+import jp.co.sample.kintai.leave.domain.PaidLeaveGrantRepository;
+import jp.co.sample.kintai.leave.domain.PaidLeaveRequest;
+import jp.co.sample.kintai.leave.domain.PaidLeaveRequestId;
+import jp.co.sample.kintai.leave.domain.PaidLeaveRequestRepository;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.WebIntegrationTestBase;
@@ -102,6 +110,10 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
     private TimeClockEventRepository timeClocks;
     @Autowired
     private DailyAttendanceRepository dailyAttendances;
+    @Autowired
+    private PaidLeaveGrantRepository grants;
+    @Autowired
+    private PaidLeaveRequestRepository leaveRequests;
 
     private EmployeeId yamada;
     private EmployeeId manager;
@@ -226,6 +238,62 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
             transition("closure", hr, "E0900", null, Role.EMPLOYEE, Role.HR)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("CLOSED"));
+        }
+
+        /**
+         * 年休の日に出勤していたら、提出の応答で知らせる（BR-16）。
+         *
+         * <p>この食い違いは、年休の承認後にその日へ打刻すると生まれる。
+         * 所定総からその日が除かれるのに実労働も乗るので、
+         * <strong>不足時間が過少に出る一方で社員は年休を 1 日失う</strong>（落とし穴 97）。
+         *
+         * <p><strong>提出は止めない。</strong> 手続きを不整合で止めない（落とし穴 19）。
+         * 取り消せるのは締め前だけなので、締め前に必ず通る提出で気づかせる。
+         */
+        @Test
+        @DisplayName("IT-LV-97 年休の日に出勤していると提出の応答に警告が出る")
+        void warnsWhenWorkedOnPaidLeaveDate() throws Exception {
+            approvedLeaveOn(LocalDate.of(2026, 4, 15));
+
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("SUBMITTED"))
+                    .andExpect(jsonPath("$.warnings[0].type")
+                            .value("paid-leave-date-worked"))
+                    .andExpect(jsonPath("$.warnings[0].dates[0]").value("2026-04-15"));
+        }
+
+        /** 食い違いが無ければ項目ごと出さない（落とし穴 76）。 */
+        @Test
+        @DisplayName("IT-LV-121 年休が無ければ警告の項目そのものを返さない")
+        void noWarningsWhenNothingIsWrong() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.warnings").doesNotExist());
+        }
+
+        /**
+         * 承認済みの年休を 1 件だけ作る。
+         *
+         * <p><strong>アプリケーション層は通せない。</strong>
+         * 実労働のある日の年休は承認できない（{@code leave-date-already-worked}）ので、
+         * この状態は「承認したあとに打刻した」経路でしか生まれない。
+         * 打刻を消してから承認して打ち直すより、行を直接作るほうが意図が読める。
+         */
+        private void approvedLeaveOn(LocalDate leaveDate) {
+            var grantId = PaidLeaveGrantId.generate();
+            grants.save(new PaidLeaveGrant(grantId, yamada,
+                    0, HIRED.plusMonths(6),
+                    AttendanceRate.of(120, 120),
+                    new GrantDecision.Granted(10),
+                    HIRED.plusMonths(6).atStartOfDay(), 1L));
+            var request = PaidLeaveRequest.submit(
+                    PaidLeaveRequestId.generate(),
+                    yamada, yamada, leaveDate, Optional.empty(),
+                    leaveDate.minusDays(7).atTime(9, 0));
+            leaveRequests.save(request);
+            leaveRequests.update(request.approve(manager, grantId,
+                    leaveDate.minusDays(6).atTime(9, 0)), request.version());
         }
 
         /** 遷移はすべて証跡に残る。<strong>どの遷移だったかも残す。</strong> */
