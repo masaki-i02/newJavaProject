@@ -2,6 +2,7 @@ package jp.co.sample.kintai.approval.domain;
 
 import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import jp.co.sample.kintai.shared.domain.EmployeeId;
@@ -43,4 +44,15 @@ public interface MonthlyAttendanceRepository {
      * {@code application} 層が {@code EmployeeVisibility} で判定する。
      */
     List<MonthlyAttendance> findSubmitted(YearMonth month);
+
+    /**
+     * その月の状態を社員ごとにまとめて返す。
+     *
+     * <p><strong>行が無い社員はキーごと現れない。</strong>
+     * 行の不在は「下書き」を意味するので（行は提出時に初めて作られる）、
+     * 既定値をここで埋めるとその事実が呼び出し側から見えなくなる。
+     *
+     * <p>100 名ぶんを 1 件ずつ引くと N+1 になるので、給与連携（BR-18）はこれを使う。
+     */
+    Map<EmployeeId, AttendanceState> findStates(YearMonth month);
 }

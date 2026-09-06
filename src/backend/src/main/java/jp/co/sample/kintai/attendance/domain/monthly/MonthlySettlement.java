@@ -92,6 +92,16 @@ public record MonthlySettlement(
                             .formatted(targetWorkingTime, workingTime, legalHolidayTime));
         }
 
+        // ★ 所定の範囲内で実際に働いた時間（所定総 − 不足）は、実労働を超えない。
+        //   不足時間はどちらの制度でも「所定総 − 実績（実績は所定で頭打ち）」の形なので、
+        //   引き算で残るのは実労働の一部である。
+        //   破れると給与へ渡す「所定超労働時間」（1.0 倍の追加支払）が負になる（BR-18）
+        if (scheduledTotalTime.minus(shortageTime).compareTo(workingTime) > 0) {
+            throw new IllegalArgumentException(
+                    "所定内の実績が実労働を超えています: 所定総 %s − 不足 %s > 実労働 %s"
+                            .formatted(scheduledTotalTime, shortageTime, workingTime));
+        }
+
         // ★ 時間外労働は対象労働時間（実労働 − 法定休日労働）の内側にある。
         //   割増の区分は実労働を分割するもので、実労働の外から生えるものではない。
         //   破れると「割増の付かない労働時間 = 実労働 − 法定休日労働 − 時間外」が負になり、
@@ -177,6 +187,36 @@ public record MonthlySettlement(
         if (value == null) {
             throw new IllegalArgumentException("%sに null は許されません".formatted(label));
         }
+    }
+
+    /**
+     * 所定内労働時間。<strong>月給に含まれており、追加の支払は要らない</strong>（BR-18 の⑩）。
+     *
+     * <p>所定の範囲内で実際に働いた時間である。
+     * 不足時間はどちらの制度でも「所定総 − 実績（実績は所定で頭打ち）」の形をしているので、
+     * 所定総から引くと実績のほうが残る。
+     *
+     * <ul>
+     *   <li>固定時間制 … {@code min(所定総, Σ min(その日の実労働, その日の所定))}</li>
+     *   <li>フレックス … {@code min(所定総, 対象労働時間)}</li>
+     * </ul>
+     */
+    public Duration scheduledInsideTime() {
+        return scheduledTotalTime.minus(shortageTime);
+    }
+
+    /**
+     * 所定超労働時間。<strong>通常の賃金 1.0 倍の追加支払が要る</strong>（BR-18 の⑪）。
+     *
+     * <p><strong>割増が付くかどうかとは関係が無い。</strong>
+     * 基礎賃金の要否は所定との比較だけで決まり、割増の区分（労基法 37 条）は別の切り方である。
+     * 所定総が法定総枠を上回る月では<strong>所定に届いていないのに時間外労働が生じる</strong>ので、
+     * この値が 0 のまま割増だけを支払う月がある。
+     *
+     * <p>法定休日には所定が無いので、法定休日労働は必ずここに入る。
+     */
+    public Duration beyondScheduledTime() {
+        return workingTime.minus(scheduledInsideTime());
     }
 
     /**

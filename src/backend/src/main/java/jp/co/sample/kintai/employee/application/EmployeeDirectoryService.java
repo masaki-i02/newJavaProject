@@ -3,6 +3,7 @@ package jp.co.sample.kintai.employee.application;
 import java.io.Serial;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -24,6 +25,7 @@ import jp.co.sample.kintai.employee.domain.OrganizationChart;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
 import jp.co.sample.kintai.shared.domain.Requester;
@@ -88,6 +90,37 @@ public class EmployeeDirectoryService {
                 .filter(row -> departmentId.isEmpty()
                         || row.department().map(d -> scope.contains(d.id())).orElse(false))
                 .toList();
+    }
+
+    /**
+     * 期間に 1 日でも在籍していた社員（BR-18）。
+     *
+     * <p><strong>全社員が対象になるので、人事とシステム管理者に限る。</strong>
+     * 閲覧範囲で絞る {@link #list} と違い、これは給与の対象を数え上げるための問いであり、
+     * 一部だけ返すと<strong>その社員の給与がその月に出ない</strong>ことになる。
+     *
+     * <p>退職者を必ず含める。除くと最終月の給与が出ない（落とし穴 63）。
+     */
+    @Transactional(readOnly = true)
+    public List<Employee> employedDuring(Requester requester, DateRange period) {
+        if (!requester.canReachEveryone()) {
+            throw new AccessDeniedException();
+        }
+        return employees.findEmployedDuring(period);
+    }
+
+    /**
+     * 識別子でまとめて読む（BR-18）。
+     *
+     * <p>全社員が対象になりうるので、人事とシステム管理者に限る。
+     * 給与連携が記録に残した対象社員を読み直すために使う。
+     */
+    @Transactional(readOnly = true)
+    public List<Employee> findByIds(Requester requester, Collection<EmployeeId> ids) {
+        if (!requester.canReachEveryone()) {
+            throw new AccessDeniedException();
+        }
+        return employees.findByIds(ids);
     }
 
     /** 社員 1 人。<strong>見てよいかを確かめてから返す。</strong> */

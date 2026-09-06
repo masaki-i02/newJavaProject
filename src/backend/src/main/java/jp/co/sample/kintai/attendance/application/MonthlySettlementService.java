@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
+import jp.co.sample.kintai.attendance.domain.monthly.MonthlyDayCounts;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlement;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementCalculator;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementRepository;
@@ -175,6 +176,78 @@ public class MonthlySettlementService {
                 .toList();
     }
 
+    /**
+     * 給与へ渡す日数（BR-18 の⑤⑥⑦⑧）。
+     *
+     * <p><strong>数え方をここに置く。</strong> 所定総労働時間は
+     * 「（所定労働日数 − 年休の日数）× 1 日の所定」として {@code calculate} が求めており、
+     * 呼び出し側が会社カレンダーを引いて数え直すと、
+     * <strong>所定総と所定労働日数が食い違う</strong>（CLAUDE.md 落とし穴 67）。
+     *
+     * <p><strong>所定労働日数は年休を引く前を返す。</strong>
+     * 給与側は日額（月給 ÷ 所定労働日数）で欠勤控除するので、
+     * 控除後を渡すと年休を取った月ほど 1 日あたりの控除が大きくなる。
+     *
+     * <p>欠勤日数は<strong>引き算で導かせない。</strong>
+     * 出勤日数は法定休日・所定休日の出勤を含むので、
+     * 所定労働日数から引くと負になる月がある（落とし穴 23・51）。
+     */
+    @Transactional(readOnly = true)
+    public MonthlyDayCounts dayCountsIn(EmployeeId employeeId, YearMonth month) {
+        SettlementPeriod period = periodOf(employeeId, month);
+        int scheduledDays = calendar.workdayCountIn(period.period());
+        int leaveDays = paidLeaveDaysIn(employeeId, period);
+
+        List<DailyAttendance> worked = dailyAttendances
+                .findByPeriod(employeeId, period.period()).stream()
+                .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
+                .toList();
+        int attendedDays = worked.size();
+        // ★ 欠勤は所定労働日の話なので、休日の出勤を数に入れない
+        int workedOnScheduledDays = (int) worked.stream()
+                .filter(day -> calendar.dayTypeOf(day.workDate()) == DayType.WORKDAY)
+                .count();
+        // ★ 年休の日に出勤した月（落とし穴 97）では所定労働日を超えうるので 0 で止める
+        int absentDays = Math.max(0, scheduledDays - leaveDays - workedOnScheduledDays);
+
+        return new MonthlyDayCounts(scheduledDays, attendedDays, leaveDays, absentDays);
+    }
+
+    /**
+     * その月に打刻が 1 件でもあるか（BR-18 の除外理由）。
+     *
+     * <p><strong>月次勤怠の行の有無で判定しない。</strong>
+     * 行は提出のときに初めて作られるので、行が無いことは「下書き」を意味する
+     * （[05 ドメインモデル設計書](../05_申請承認と締め/)）。
+     * 行で判定すると、1 か月まるまる働いて提出していないだけの社員が
+     * 「1 日も打刻が無い」と扱われる（落とし穴 120）。
+     */
+    @Transactional(readOnly = true)
+    public boolean hasTimeClockIn(EmployeeId employeeId, YearMonth month) {
+        SettlementPeriod period = periodOf(employeeId, month);
+        return !timeClocks.findWorkDatesWithEvents(employeeId, period.period()).isEmpty();
+    }
+
+    /**
+     * 提出の事前条件を満たすか（BR-18 の除外理由）。
+     *
+     * <p>{@link #requireCalculable(EmployeeId, YearMonth)} の真偽版である。
+     * 例外を投げる側だけだと、給与連携が
+     * <strong>除外の理由として扱うために例外を捕まえる</strong>ことになる。
+     *
+     * <p>判定そのものは写さない。同じ非公開メソッドを呼ぶ（落とし穴 67）。
+     */
+    @Transactional(readOnly = true)
+    public boolean isCalculable(EmployeeId employeeId, YearMonth month) {
+        SettlementPeriod period = periodOf(employeeId, month);
+        if (!incompleteWorkDates(employeeId, period).isEmpty()) {
+            return false;
+        }
+        // ★ 就業規則が 1 日でも欠けていると settle が落ちるので、提出もできない
+        return workRules.findEffectiveByPeriod(employeeId, period.period()).size()
+                == (int) period.period().days();
+    }
+
     @Transactional(readOnly = true)
     public Optional<MonthlySettlement> find(EmployeeId employeeId, YearMonth month) {
         return settlements.find(employeeId, month);
@@ -256,16 +329,26 @@ public class MonthlySettlementService {
      * 「未計算の日があります」だけでは、利用者はどこを直せばよいか分からない。
      */
     private void requireAllDaysCalculated(EmployeeId employeeId, SettlementPeriod period) {
-        DateRange scanRange = WeeklyOvertimeRule.scanRangeFor(period.period());
-        Set<LocalDate> calculated = dailyAttendances.findByPeriod(employeeId, scanRange)
-                .stream().map(DailyAttendance::workDate).collect(Collectors.toSet());
-        List<LocalDate> incomplete = timeClocks
-                .findWorkDatesWithEvents(employeeId, scanRange).stream()
-                .filter(workDate -> !calculated.contains(workDate))
-                .toList();
+        List<LocalDate> incomplete = incompleteWorkDates(employeeId, period);
         if (!incomplete.isEmpty()) {
             throw new DailyAttendanceIncompleteException(incomplete);
         }
+    }
+
+    /**
+     * 打刻があるのに日次勤怠が無い勤務日。
+     *
+     * <p><strong>投げる側と真偽を返す側で、この 1 つを共有する。</strong>
+     * 写すと、走査範囲の取り方を直したときに片方だけが古くなる（落とし穴 67）。
+     */
+    private List<LocalDate> incompleteWorkDates(EmployeeId employeeId,
+                                                SettlementPeriod period) {
+        DateRange scanRange = WeeklyOvertimeRule.scanRangeFor(period.period());
+        Set<LocalDate> calculated = dailyAttendances.findByPeriod(employeeId, scanRange)
+                .stream().map(DailyAttendance::workDate).collect(Collectors.toSet());
+        return timeClocks.findWorkDatesWithEvents(employeeId, scanRange).stream()
+                .filter(workDate -> !calculated.contains(workDate))
+                .toList();
     }
 
     /**

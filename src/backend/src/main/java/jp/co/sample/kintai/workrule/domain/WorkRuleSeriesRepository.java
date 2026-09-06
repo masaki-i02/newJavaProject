@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 
 /** 就業規則の系列と、社員への適用のポート。 */
@@ -33,4 +34,14 @@ public interface WorkRuleSeriesRepository {
      * 画面で検知するために置く。
      */
     List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date);
+
+    /**
+     * 期間に<strong>実際に適用されている</strong>系列（BR-18）。
+     *
+     * <p>割増賃金の基礎額の分母（労基則 19 条 1 項 4 号）は、
+     * その年度に使われている就業規則から導く。
+     * {@link #findAll()} で全系列を舐めると、<strong>廃止済みの系列や過去の版まで巻き込み</strong>、
+     * 一度でも違う所定の規則を作ったことがある会社は永久に出力できなくなる。
+     */
+    List<WorkRuleSeriesId> findSeriesIdsInUse(DateRange period);
 }

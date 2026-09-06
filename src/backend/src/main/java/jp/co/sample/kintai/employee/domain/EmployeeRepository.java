@@ -1,9 +1,11 @@
 package jp.co.sample.kintai.employee.domain;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 
 /** 社員のポート。実装は {@code infrastructure}。 */
@@ -32,6 +34,28 @@ public interface EmployeeRepository {
      * @param includeRetired 退職者を含めるか。<strong>絞るのはこれだけ</strong>
      */
     List<Employee> findForDirectory(LocalDate asOf, boolean includeRetired);
+
+    /**
+     * 在籍期間が指定期間と<strong>重なる</strong>社員（BR-18）。
+     *
+     * <p>{@link #findAll(LocalDate, boolean)} とは<strong>別の問い</strong>である。
+     * あちらは基準日 1 点なので、月中入社か月中退職のどちらかが必ず落ちる。
+     * 給与連携は「その月に 1 日でも在籍した社員」を数え上げるので、除くと
+     * <strong>退職者の最終月の給与が出ない</strong>（CLAUDE.md 落とし穴 63・75）。
+     *
+     * <p>社員番号順、同じ番号なら入社日順。
+     * 社員番号は在籍者のあいだでしか一意でないので（部分一意インデックス）、
+     * 番号だけでは順序が一意に決まらない月がある。
+     */
+    List<Employee> findEmployedDuring(DateRange period);
+
+    /**
+     * 識別子でまとめて読む。
+     *
+     * <p>1 件ずつ引くと社員数ぶんの問い合わせになる。
+     * 給与連携（BR-18）が記録に残した対象社員を読み直すときに使う。
+     */
+    List<Employee> findByIds(Collection<EmployeeId> ids);
 
     void save(Employee employee);
 

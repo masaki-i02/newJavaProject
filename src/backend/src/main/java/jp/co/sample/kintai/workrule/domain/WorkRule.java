@@ -62,13 +62,38 @@ public record WorkRule(WorkRuleId id, WorkRuleSeriesId seriesId, DateRange valid
         }
     }
 
-    /** 所定労働時間は法定労働時間を超えられない。超えるならそれは「所定」ではなく残業である。 */
-    private static void requireScheduledWithinStatutory(WorkingTimeSystem system,
-                                                        Duration statutoryDaily) {
-        Duration scheduled = switch (system) {
+    /**
+     * この規則の 1 日の所定労働時間。
+     *
+     * <p><strong>フレックスに「日々の所定」があるという意味ではない。</strong>
+     * フレックスの所定は清算期間の総労働時間（労基法 32 条の 3）であり、
+     * {@code standardDailyWorkingTime} はそれを算出するための<strong>係数</strong>である
+     * （就業規則 ドメインモデル設計書）。日々の残業判定には使わない。
+     *
+     * <p>用途は 2 つある。
+     * <ul>
+     *   <li>所定総労働時間の算出（{@code attendance} の月次清算）</li>
+     *   <li><strong>割増賃金の基礎額の分母</strong>（労基則 19 条 1 項 4 号。BR-18）</li>
+     * </ul>
+     *
+     * <p><strong>この {@code switch} を写さない。</strong>
+     * 制度を追加したときに直す場所が増える（CLAUDE.md 落とし穴 67）。
+     */
+    public Duration scheduledDailyWorkingTime() {
+        return scheduledDailyWorkingTimeOf(workingTimeSystem);
+    }
+
+    private static Duration scheduledDailyWorkingTimeOf(WorkingTimeSystem system) {
+        return switch (system) {
             case FixedTimeSystem fixed -> fixed.scheduledWorkingTime();
             case FlextimeSystem flex -> flex.standardDailyWorkingTime();
         };
+    }
+
+    /** 所定労働時間は法定労働時間を超えられない。超えるならそれは「所定」ではなく残業である。 */
+    private static void requireScheduledWithinStatutory(WorkingTimeSystem system,
+                                                        Duration statutoryDaily) {
+        Duration scheduled = scheduledDailyWorkingTimeOf(system);
         if (scheduled.compareTo(statutoryDaily) > 0) {
             throw new BusinessRuleViolationException("BR-04",
                     "所定労働時間が法定労働時間を超えています: %s > %s"

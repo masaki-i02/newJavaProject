@@ -2,6 +2,7 @@ package jp.co.sample.kintai.support;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +10,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.employee.domain.Assignment;
 import jp.co.sample.kintai.employee.domain.AssignmentRepository;
 import jp.co.sample.kintai.employee.domain.Department;
@@ -122,6 +124,23 @@ public final class Organization {
             public Optional<Employee> findByNumber(EmployeeNumber number) {
                 return employees.values().stream()
                         .filter(e -> e.number().equals(number)).findFirst();
+            }
+
+            @Override
+            public List<Employee> findByIds(Collection<EmployeeId> ids) {
+                // 事実だけを答える。絞り込みの規則は本番が持つ（落とし穴 37）
+                return ids.stream().map(employees::get)
+                        .filter(java.util.Objects::nonNull).toList();
+            }
+
+            @Override
+            public List<Employee> findEmployedDuring(DateRange period) {
+                return employees.values().stream()
+                        .filter(e -> e.activePeriod().overlaps(period))
+                        .sorted(java.util.Comparator
+                                .comparing((Employee e) -> e.number().value())
+                                .thenComparing(Employee::hiredOn))
+                        .toList();
             }
 
             @Override

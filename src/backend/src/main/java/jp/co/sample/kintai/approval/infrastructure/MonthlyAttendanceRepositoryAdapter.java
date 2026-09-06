@@ -3,13 +3,16 @@ package jp.co.sample.kintai.approval.infrastructure;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.YearMonth;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import jp.co.sample.kintai.approval.domain.AttendanceState;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendance;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceId;
 import jp.co.sample.kintai.approval.domain.MonthlyAttendanceRepository;
@@ -48,6 +51,20 @@ class MonthlyAttendanceRepositoryAdapter implements MonthlyAttendanceRepository 
     public List<MonthlyAttendance> findSubmitted(YearMonth month) {
         return jdbc.query(SELECT + " WHERE target_month = ? AND status = 'SUBMITTED'"
                 + " ORDER BY submitted_at", this::toAttendance, month.atDay(1));
+    }
+
+    @Override
+    public Map<EmployeeId, AttendanceState> findStates(YearMonth month) {
+        // ★ 行が無い社員はここに現れない。行の不在は「下書き」だが、
+        //   その既定をここで埋めると、呼び出し側が「行が無い」ことを見分けられなくなる
+        Map<EmployeeId, AttendanceState> states = new HashMap<>();
+        jdbc.query("SELECT employee_id, status FROM monthly_attendances"
+                        + " WHERE target_month = ?",
+                rs -> {
+                    states.put(new EmployeeId(rs.getObject("employee_id", UUID.class)),
+                            AttendanceState.valueOf(rs.getString("status")));
+                }, month.atDay(1));
+        return Map.copyOf(states);
     }
 
     @Override

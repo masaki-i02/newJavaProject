@@ -3,11 +3,11 @@
 | 項目 | 内容 |
 | --- | --- |
 | 文書番号 | KNT-DES-702 |
-| 版 | 0.2 |
+| 版 | 0.3 |
 | 対象スキーマ | `payroll_exports` / `payroll_export_targets` |
 | 関連要件 | BR-18 |
 | 関連文書 | [ドメインモデル設計書](ドメインモデル設計書.md) / [API設計書](API設計書.md) / [設計規約チェックリスト](../00_共通/設計規約チェックリスト.md) |
-| 改訂 | 0.2（2026-09-06）対象社員を行として残す形に変更。件数の列を落とした |
+| 改訂 | 0.3（2026-09-06）分母の導出元（年度・年間の所定労働日数・年間の所定労働時間）を残す形に変更 |
 
 ---
 
@@ -40,14 +40,24 @@ CREATE TABLE payroll_exports (
     exported_by   uuid        NOT NULL REFERENCES employees (id),
     -- ★ 監査の時刻はアプリケーションの時計ではなく DB の時計で打つ
     exported_at   timestamptz NOT NULL DEFAULT now(),
-    -- ★ この出力に使った 1 か月平均所定労働時間数（労基則 19 条 1 項 4 号）。
-    --   年度の値は後から動くので、支払の根拠として当時の値を残す
+    -- ★ この出力に使った割増賃金の基礎額の分母（労基則 19 条 1 項 4 号）と、その導出元。
+    --   年度の値は後から動くので、支払の根拠として当時の値を残す。
+    --   月平均だけを残すと、それが 261 日 × 480 分から出たのか
+    --   260 日 × 482 分から出たのかを後から言えない
+    fiscal_year             int NOT NULL,
+    annual_scheduled_days   int NOT NULL,
+    annual_scheduled_minutes int NOT NULL,
     monthly_average_minutes int NOT NULL,
 
     CONSTRAINT payroll_exports_month_check
         CHECK (target_month = date_trunc('month', target_month)::date),
     CONSTRAINT payroll_exports_average_check
-        CHECK (monthly_average_minutes > 0)
+        CHECK (annual_scheduled_days > 0 AND annual_scheduled_minutes > 0
+               AND monthly_average_minutes > 0),
+    -- ★ 導出できる値を列として持つので、食い違いを DB で禁じる（落とし穴 39）。
+    --   月平均は年間の所定を 12 で割った値（分未満切り捨て）である
+    CONSTRAINT payroll_exports_average_derivation_check
+        CHECK (monthly_average_minutes = annual_scheduled_minutes / 12)
 );
 
 -- ★ 監査の照会は「この月を誰がいつ出したか」。対象月から引く
@@ -61,6 +71,8 @@ CREATE INDEX payroll_exports_month_idx
 | `exported_by` | `employees (id)` への外部キー | 誰が持ち出したかは監査の中心である。社員番号を写すと、番号の再割り当てで別人を指す |
 | `exported_at` | `DEFAULT now()` | アプリケーションから渡さない。渡せる形にすると、監査の時刻を実行者が決められる |
 | `monthly_average_minutes` | `> 0` の `CHECK` | 0 だと給与側がゼロ除算する。カレンダー未登録の年度は出力そのものを拒否する（ドメインモデル設計書 4）|
+| `fiscal_year` / `annual_scheduled_days` / `annual_scheduled_minutes` | 導出元を残す | 月平均という**導出値だけでは検算できない**。カレンダーが変わった後は再現もできない。行数を列で持たないと決めた判断（1 の 4）と向きが逆に見えるが、あちらは**同じ事実の重複**、こちらは**導出元の保存**である |
+| 月平均と年間の所定の関係 | `CHECK` で縛る | 導出できる値を列として持つなら、食い違いを DB で禁じる（落とし穴 39）|
 | 一意制約 | **置かない** | 同じ月を何度でも出せる（BR-18）。一意にすると再出力そのものができなくなる |
 
 ### 2.2 payroll_export_targets（対象社員と除外の理由）
@@ -166,8 +178,11 @@ SELECT EXISTS (
 ### 3.4 出力の記録
 
 ```sql
-INSERT INTO payroll_exports (id, target_month, exported_by, monthly_average_minutes)
-VALUES (:id, :targetMonth, :exportedBy, :monthlyAverageMinutes)
+INSERT INTO payroll_exports (id, target_month, exported_by, fiscal_year,
+                             annual_scheduled_days, annual_scheduled_minutes,
+                             monthly_average_minutes)
+VALUES (:id, :targetMonth, :exportedBy, :fiscalYear,
+        :annualScheduledDays, :annualScheduledMinutes, :monthlyAverageMinutes)
 ```
 
 `exported_at` は渡さない。DB の既定値に任せる。
@@ -181,7 +196,8 @@ VALUES (:id, :targetMonth, :exportedBy, :monthlyAverageMinutes)
 | `payroll_exports_pkey` | PK | `id` |
 | `payroll_exports_exported_by_fkey` | FK | `employees (id)` |
 | `payroll_exports_month_check` | CHECK | 対象月は月初日 |
-| `payroll_exports_average_check` | CHECK | 月平均が正 |
+| `payroll_exports_average_check` | CHECK | 年間の所定と月平均が正 |
+| `payroll_exports_average_derivation_check` | CHECK | 月平均 = 年間の所定 ÷ 12 |
 | `payroll_exports_month_idx` | INDEX | 対象月から引く |
 | `payroll_export_targets_pkey` | PK | `(export_id, employee_id)` |
 | `payroll_export_targets_export_id_fkey` | FK | `payroll_exports (id)`（CASCADE）|
@@ -220,6 +236,7 @@ V1〜V8 を空のデータベースへ順に適用し、`psql` から直接確�
 | --- | --- | --- | --- |
 | IT-PAY-18 | 対象月に月初日以外を入れる | `payroll_exports_month_check` で拒否 | 確認 |
 | IT-PAY-19 | 月平均を 0 にする | `payroll_exports_average_check` で拒否 | 確認 |
+| IT-PAY-27 | **月平均が年間の所定 ÷ 12 と食い違う** | `payroll_exports_average_derivation_check` で拒否 | 未実施（0.3 で追加）|
 | IT-PAY-20 | 実在しない社員を実行者にする | `payroll_exports_exported_by_fkey` で拒否 | 確認 |
 | IT-PAY-21 | **同じ月を 2 回記録する** | 通る。再出力は正当である | 確認 |
 | IT-PAY-22 | `exported_at` を渡さずに挿入 | DB の `now()` が入る | 確認 |

@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleAssignment;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
@@ -94,6 +95,12 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
     public List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date) {
         return assignments.findEmployeesWithoutRuleOn(date).stream()
                 .map(EmployeeId::new).toList();
+    }
+
+    @Override
+    public List<WorkRuleSeriesId> findSeriesIdsInUse(DateRange period) {
+        return assignments.findSeriesIdsInUse(period.from(), period.toExclusive()).stream()
+                .map(WorkRuleSeriesId::new).toList();
     }
 
     private static WorkRuleSeries toDomain(WorkRuleSeriesEntity entity) {

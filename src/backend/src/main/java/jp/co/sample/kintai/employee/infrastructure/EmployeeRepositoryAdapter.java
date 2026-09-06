@@ -1,6 +1,7 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -11,6 +12,7 @@ import jp.co.sample.kintai.employee.domain.Email;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 
 /**
@@ -59,6 +61,22 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
                 ? jpa.findAllByOrderByEmployeeNumber()
                 : jpa.findNotRetiredOn(asOf);
         return rows.stream().map(EmployeeRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
+    public List<Employee> findEmployedDuring(DateRange period) {
+        return jpa.findEmployedDuring(period.from(), period.toExclusive()).stream()
+                .map(EmployeeRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
+    public List<Employee> findByIds(Collection<EmployeeId> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jpa.findByIdInOrderByEmployeeNumber(
+                        ids.stream().map(EmployeeId::value).toList()).stream()
+                .map(EmployeeRepositoryAdapter::toDomain).toList();
     }
 
     @Override

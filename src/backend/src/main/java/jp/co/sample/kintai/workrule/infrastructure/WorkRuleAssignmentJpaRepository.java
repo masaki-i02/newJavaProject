@@ -38,4 +38,20 @@ interface WorkRuleAssignmentJpaRepository extends JpaRepository<WorkRuleAssignme
              ORDER BY e.employee_number
             """, nativeQuery = true)
     List<UUID> findEmployeesWithoutRuleOn(@Param("date") LocalDate date);
+
+    /**
+     * 期間に<strong>実際に適用されている</strong>就業規則の系列。
+     *
+     * <p>全系列を舐めてはならない。8 年前に一度だけ使った版が 1 つ残っているだけで、
+     * <strong>以後すべての年度の給与出力が止まる</strong>（割増賃金の基礎額の分母が
+     * 1 つに定まらないと判定される）。
+     */
+    @Query(value = """
+            SELECT DISTINCT a.work_rule_series_id
+              FROM work_rule_assignments a
+             WHERE a.valid_from < :toExclusive
+               AND (a.valid_to IS NULL OR a.valid_to > :from)
+            """, nativeQuery = true)
+    List<UUID> findSeriesIdsInUse(@Param("from") LocalDate from,
+                                  @Param("toExclusive") LocalDate toExclusive);
 }

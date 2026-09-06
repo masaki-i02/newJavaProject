@@ -13,14 +13,24 @@ CREATE TABLE payroll_exports (
     exported_by   uuid        NOT NULL REFERENCES employees (id),
     -- ★ 監査の時刻はアプリケーションの時計ではなく DB の時計で打つ
     exported_at   timestamptz NOT NULL DEFAULT now(),
-    -- ★ この出力に使った 1 か月平均所定労働時間数（労基則 19 条 1 項 4 号）。
-    --   年度の値は後から動くので、支払の根拠として当時の値を残す
+    -- ★ この出力に使った割増賃金の基礎額の分母（労基則 19 条 1 項 4 号）と、その導出元。
+    --   年度の値は後から動くので、支払の根拠として当時の値を残す。
+    --   月平均だけを残すと、それが 261 日 × 480 分から出たのか
+    --   260 日 × 482 分から出たのかを後から言えない
+    fiscal_year             int NOT NULL,
+    annual_scheduled_days   int NOT NULL,
+    annual_scheduled_minutes int NOT NULL,
     monthly_average_minutes int NOT NULL,
 
     CONSTRAINT payroll_exports_month_check
         CHECK (target_month = date_trunc('month', target_month)::date),
     CONSTRAINT payroll_exports_average_check
-        CHECK (monthly_average_minutes > 0)
+        CHECK (annual_scheduled_days > 0 AND annual_scheduled_minutes > 0
+               AND monthly_average_minutes > 0),
+    -- ★ 導出できる値を列として持つので、食い違いを DB で禁じる（落とし穴 39）。
+    --   月平均は年間の所定を 12 で割った値（分未満切り捨て）である
+    CONSTRAINT payroll_exports_average_derivation_check
+        CHECK (monthly_average_minutes = annual_scheduled_minutes / 12)
 );
 
 -- ★ 監査の照会は「この月を誰がいつ出したか」。対象月から引く

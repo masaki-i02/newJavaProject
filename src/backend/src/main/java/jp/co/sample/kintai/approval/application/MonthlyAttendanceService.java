@@ -5,7 +5,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.UUID;
@@ -244,6 +247,27 @@ public class MonthlyAttendanceService {
      * <p>訂正の承認が「下書きに戻った」ことを応答へ載せるために使う。
      * <strong>行が無い月は下書き相当。</strong>
      */
+    /**
+     * その月の状態を社員ごとにまとめて返す（BR-18）。
+     *
+     * <p><strong>行が無い社員も「下書き」として返す。</strong>
+     * {@link #stateOf(EmployeeId, YearMonth)} と同じ既定である。
+     * ただし<strong>「行が無い」と「1 日も打刻が無い」は別の事実</strong>なので、
+     * 打刻の有無は {@code attendance} に問うこと（落とし穴 120）。
+     *
+     * <p>1 件ずつ引くと社員数ぶんの問い合わせになるので、一括で読む。
+     */
+    @Transactional(readOnly = true)
+    public Map<EmployeeId, AttendanceState> statesOf(YearMonth month,
+                                                     Collection<EmployeeId> employeeIds) {
+        Map<EmployeeId, AttendanceState> stored = attendances.findStates(month);
+        Map<EmployeeId, AttendanceState> states = new LinkedHashMap<>();
+        for (EmployeeId employeeId : employeeIds) {
+            states.put(employeeId, stored.getOrDefault(employeeId, AttendanceState.DRAFT));
+        }
+        return java.util.Collections.unmodifiableMap(states);
+    }
+
     @Transactional(readOnly = true)
     public AttendanceState stateOf(EmployeeId employeeId, YearMonth month) {
         return attendances.find(employeeId, month)
@@ -387,13 +411,20 @@ public class MonthlyAttendanceService {
         }
     }
 
-    /** 対象月の末日がまだ到来していない。 */
+    /**
+     * 対象月の末日がまだ到来していない。
+     *
+     * <p><strong>給与連携（BR-18）も同じ型を使う。</strong>
+     * 「対象月が終わっていない」は締めでも出力でも同じ業務ルールであり、
+     * コンテキストごとに違うエラー型や HTTP を割り当てると、
+     * 画面が条件ごとに分岐を書き分けることになる（CLAUDE.md 落とし穴 110・124）。
+     */
     public static final class MonthNotFinishedException extends DomainException {
 
         @Serial
         private static final long serialVersionUID = 1L;
 
-        MonthNotFinishedException(YearMonth month) {
+        public MonthNotFinishedException(YearMonth month) {
             super("対象月がまだ終わっていません: " + month);
         }
 

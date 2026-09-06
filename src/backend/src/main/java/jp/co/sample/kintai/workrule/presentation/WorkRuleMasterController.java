@@ -1,6 +1,8 @@
 package jp.co.sample.kintai.workrule.presentation;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -17,6 +19,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
+import jp.co.sample.kintai.workrule.application.WorkRuleMasterService;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.workrule.application.WorkRuleMasterService;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
@@ -46,6 +50,32 @@ class WorkRuleMasterController {
                 body.name());
     }
 
+    /**
+     * 期間の暦日区分をまとめて設定する（API設計書 3.2）。
+     *
+     * <p>年度ぶんを 1 日ずつ登録すると 365 回叩くことになる。
+     * 割増賃金の基礎額の分母（BR-18）は年度の全日が登録されていることを要求するので、
+     * この操作が無いと運用で満たせない。
+     */
+    @PostMapping("/calendars/bulk")
+    BulkResponse setDayTypes(@AuthenticationPrincipal AuthenticatedEmployee principal,
+                             @Valid @RequestBody BulkBody body) {
+        Map<java.time.DayOfWeek, WorkRuleMasterService.DayTypeAndName> byDayOfWeek =
+                body.rules().stream().collect(java.util.stream.Collectors.toMap(
+                        BulkRule::dayOfWeek,
+                        rule -> new WorkRuleMasterService.DayTypeAndName(
+                                rule.dayType(), rule.name())));
+        Map<LocalDate, WorkRuleMasterService.DayTypeAndName> overrides =
+                body.overrides().stream().collect(java.util.stream.Collectors.toMap(
+                        BulkOverride::date,
+                        override -> new WorkRuleMasterService.DayTypeAndName(
+                                override.dayType(), override.name())));
+
+        var result = master.暦日区分をまとめて設定する(principal.toRequester(),
+                new DateRange(body.from(), body.toExclusive()), byDayOfWeek, overrides);
+        return BulkResponse.from(result);
+    }
+
     @PostMapping("/employees/{employeeId}/work-rule-assignments")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void assign(@AuthenticationPrincipal AuthenticatedEmployee principal,
@@ -53,6 +83,50 @@ class WorkRuleMasterController {
                 @Valid @RequestBody AssignmentBody body) {
         master.就業規則を適用する(principal.toRequester(), new EmployeeId(employeeId),
                 new WorkRuleSeriesId(body.seriesId()), body.validFrom());
+    }
+
+    /** 一括設定。曜日の規則を当ててから、個別の日で上書きする。 */
+    record BulkBody(@NotNull LocalDate from, @NotNull LocalDate toExclusive,
+                    @NotNull List<BulkRule> rules, @NotNull List<BulkOverride> overrides) {
+    }
+
+    /** 曜日ごとの既定。指定の無い曜日は所定労働日。 */
+    record BulkRule(@NotNull java.time.DayOfWeek dayOfWeek, @NotNull DayType dayType,
+                    String name) {
+    }
+
+    /** 個別の日。曜日の規則より優先する（祝日は曜日で決まらない）。 */
+    record BulkOverride(@NotNull LocalDate date, @NotNull DayType dayType, String name) {
+    }
+
+    /**
+     * 一括設定の結果。
+     *
+     * <p>{@code warnings} は<strong>手続きを止めない知らせ</strong>である。
+     * 空なら項目ごと省く（CLAUDE.md 落とし穴 76）。
+     */
+    record BulkResponse(int registeredCount, Map<DayType, Integer> byDayType,
+                        @com.fasterxml.jackson.annotation.JsonInclude(
+                                com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+                        List<Warning> warnings) {
+
+        static BulkResponse from(WorkRuleMasterService.CalendarRegistration result) {
+            List<Warning> warnings = result.weeksWithoutLegalHoliday().stream()
+                    .map(week -> new Warning("no-legal-holiday-in-week",
+                            "%s から %s の 7 日間に法定休日がありません"
+                                    .formatted(week.from(), week.toExclusive().minusDays(1)),
+                            new WarningPeriod(week.from(), week.toExclusive())))
+                    .toList();
+            return new BulkResponse(result.registeredCount(), result.byDayType(), warnings);
+        }
+    }
+
+    /** 手続きを止めない知らせ。 */
+    record Warning(String code, String message, WarningPeriod period) {
+    }
+
+    /** 半開区間。 */
+    record WarningPeriod(LocalDate from, LocalDate toExclusive) {
     }
 
     /** 暦日区分。名称は祝日名などの表示用で、省略できる。 */
