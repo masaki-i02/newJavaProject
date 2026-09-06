@@ -196,7 +196,7 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
         @DisplayName("IT-AUTH-07 未認証で API を呼ぶと 401")
         void unauthenticated() throws Exception {
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
-                            .param("month", "2026-04"))
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
                     .andExpect(status().isUnauthorized());
         }
 
@@ -229,7 +229,7 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
             var jiro = hire("E0002", "鈴木 次郎", Optional.empty(), Role.EMPLOYEE);
 
             mockMvc.perform(get("/api/employees/{id}/attendances", jiro.value())
-                            .param("month", "2026-04")
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01")
                             .with(as(taro, "E0001", Role.EMPLOYEE)))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
@@ -242,7 +242,7 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
             var jiro = hire("E0002", "鈴木 次郎", Optional.empty(), Role.EMPLOYEE);
 
             mockMvc.perform(get("/api/employees/{id}/attendances", jiro.value())
-                            .param("month", "2026-04")
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01")
                             .with(as(taro, "E0001", Role.EMPLOYEE, Role.HR)))
                     .andExpect(status().isOk());
         }
@@ -297,7 +297,7 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"currentPassword\":\"wrong-password-here\","
                                     + "\"newPassword\":\"new-password-1234\"}"))
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:current-password-mismatch"));
         }
@@ -311,7 +311,7 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(("{\"currentPassword\":\"%s\","
                                     + "\"newPassword\":\"short\"}").formatted(PASSWORD)))
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:weak-password"));
         }
 

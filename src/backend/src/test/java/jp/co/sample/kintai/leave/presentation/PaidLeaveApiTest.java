@@ -417,7 +417,7 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             }
 
             submit(yamada, date)
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:insufficient-paid-leave"));
         }
@@ -426,7 +426,7 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
         @DisplayName("IT-LV-39 所定休日は指定できない")
         void notAWorkday() throws Exception {
             submit(yamada, LocalDate.of(2026, 11, 14))
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:not-a-workday"));
         }
 
@@ -437,7 +437,7 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
             retire(yamada, LocalDate.of(2026, 11, 30));
 
             submit(yamada, LocalDate.of(2026, 12, 1))
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:leave-date-not-in-service"));
         }

@@ -15,6 +15,8 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
+import jakarta.servlet.DispatcherType;
+
 /**
  * 認証・認可の設定（要件定義書 4 章 / API 設計書 3.9）。
  *
@@ -55,6 +57,14 @@ public class SecurityConfig {
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(requests -> requests
+                        // ★ サーブレットの ERROR 転送を通す。
+                        //   塞ぐと、必須パラメータの欠落（400）も綴りの誤り（404）も
+                        //   /error への内部転送を拒まれた結果として
+                        //   「本文の無い 403」になり、
+                        //   「権限が無い」と「要求が間違っている」を区別できない。
+                        //   ここで通すのは元の要求が済んだあとの内部転送だけで、
+                        //   新しい入口を開けるものではない
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         // ログインは未認証で通す。それ以外の /api は必ず認証を要求する
                         .requestMatchers("/api/sessions").permitAll()
                         // ★ 死活監視の口だけを開ける。開けないとコンテナの HEALTHCHECK も

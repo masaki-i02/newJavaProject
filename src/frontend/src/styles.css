@@ -1,0 +1,41 @@
+/* 配色とコンポーネントの見た目は画面設計書の範囲外（1 章）。
+   読めることだけを目的にした最小限にとどめる。 */
+:root {
+  font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.6;
+  color: #1a1a1a;
+}
+
+body { margin: 0; background: #f6f7f9; }
+
+header {
+  display: flex; align-items: baseline; gap: 1rem;
+  padding: 0.75rem 1.25rem; background: #24303f; color: #fff;
+}
+header h1 { font-size: 1rem; margin: 0; }
+header nav { display: flex; gap: 0.75rem; margin-left: auto; }
+header button { background: none; border: none; color: #cfd8e3; cursor: pointer; }
+header button[aria-current="page"] { color: #fff; text-decoration: underline; }
+
+main { max-width: 60rem; margin: 1.5rem auto; padding: 0 1.25rem; }
+
+section { background: #fff; border: 1px solid #dde3ea; border-radius: 6px;
+          padding: 1rem 1.25rem; margin-bottom: 1rem; }
+h2 { font-size: 1rem; margin-top: 0; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border-bottom: 1px solid #e6eaf0; padding: 0.35rem 0.5rem; text-align: left; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+button.action { padding: 0.5rem 1rem; margin-right: 0.5rem;
+                border: 1px solid #24303f; background: #24303f; color: #fff;
+                border-radius: 4px; cursor: pointer; }
+button.action:disabled { background: #b8c0cb; border-color: #b8c0cb; cursor: not-allowed; }
+button.secondary { background: #fff; color: #24303f; }
+
+.banner { border-left: 4px solid #b34; background: #fdf2f4; padding: 0.75rem 1rem;
+          margin-bottom: 1rem; border-radius: 4px; }
+.warning { border-left: 4px solid #d18b00; background: #fff8e6; padding: 0.75rem 1rem;
+           margin-bottom: 1rem; border-radius: 4px; }
+.field-error { color: #b34; font-size: 0.85rem; }
+.muted { color: #667; font-size: 0.85rem; }

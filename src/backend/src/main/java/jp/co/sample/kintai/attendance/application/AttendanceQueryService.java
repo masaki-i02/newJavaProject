@@ -1,7 +1,6 @@
 package jp.co.sample.kintai.attendance.application;
 
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,16 +56,77 @@ public class AttendanceQueryService {
     }
 
     /**
-     * その月の日次勤怠。
+     * 期間の日次勤怠（[03 API設計書 3.1]）。
      *
-     * <p>期間を<strong>暦月の半開区間</strong>で組み立てる。
-     * {@code atEndOfMonth()} を上限にすると月末日が漏れる。
+     * <p><strong>期間は半開区間で受ける。暦月に固定しない。</strong>
+     * 月中入社の初月は「入社日から翌月 1 日まで」であり、
+     * 暦月で受けると入社前の日まで問い合わせることになる。
+     *
+     * <p>閲覧の可否は<strong>期間の最終日</strong>（半開区間の上限の前日）で見る。
+     * 上限そのもので見ると、翌月に異動した部下の当月ぶんが見られなくなる。
      */
-    public List<DailyAttendance> findByMonth(Requester requester, EmployeeId employeeId,
-                                            YearMonth month) {
-        requireVisible(requester, employeeId, month.atEndOfMonth());
-        return dailyAttendances.findByPeriod(employeeId,
-                new DateRange(month.atDay(1), month.plusMonths(1).atDay(1)));
+    public List<DailyAttendance> findByPeriod(Requester requester, EmployeeId employeeId,
+                                              LocalDate from, LocalDate toExclusive) {
+        DateRange period = requireValidPeriod(from, toExclusive);
+        requireVisible(requester, employeeId, period.toExclusive().minusDays(1));
+        return dailyAttendances.findByPeriod(employeeId, period);
+    }
+
+    /**
+     * 期間の妥当性。
+     *
+     * <p><strong>{@code DateRange} の compact constructor に任せない。</strong>
+     * 利用者が送る値なので、{@code IllegalArgumentException} のまま素通しすると
+     * 理由の載らない 500 になる（CLAUDE.md 落とし穴 105）。
+     *
+     * <p>上限を置く。置かないと 1000 年ぶんを 1 回の要求で読み出せる。
+     * 画面が使うのは 1 か月ぶんなので、うるう年の 1 年（366 日）あれば足りる。
+     */
+    private static DateRange requireValidPeriod(LocalDate from, LocalDate toExclusive) {
+        if (from == null || toExclusive == null) {
+            throw new InvalidPeriodException("期間の指定がありません");
+        }
+        if (!from.isBefore(toExclusive)) {
+            throw new InvalidPeriodException(
+                    "期間の終わりは始まりより後でなければなりません: %s 〜 %s"
+                            .formatted(from, toExclusive));
+        }
+        long days = java.time.temporal.ChronoUnit.DAYS.between(from, toExclusive);
+        if (days > MAX_PERIOD_DAYS) {
+            throw new InvalidPeriodException(
+                    "一度に照会できるのは %d 日までです: %d 日".formatted(MAX_PERIOD_DAYS, days));
+        }
+        return new DateRange(from, toExclusive);
+    }
+
+    /** 一度に照会できる日数の上限。 */
+    private static final long MAX_PERIOD_DAYS = 366;
+
+    /** 期間の指定が不正。<strong>実装の不備ではなく業務エラーとして返す。</strong> */
+    public static final class InvalidPeriodException
+            extends jp.co.sample.kintai.shared.domain.DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        InvalidPeriodException(String message) {
+            super(message);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:invalid-period";
+        }
+
+        @Override
+        public jp.co.sample.kintai.shared.domain.DomainErrorKind kind() {
+            return jp.co.sample.kintai.shared.domain.DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "期間の指定が不正です";
+        }
     }
 
     /**

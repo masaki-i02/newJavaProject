@@ -9,9 +9,14 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import jp.co.sample.kintai.shared.domain.DetailedDomainException;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
@@ -70,6 +75,87 @@ public class ApiExceptionHandler {
                 .map(error -> new FieldError(error.getField(), error.getDefaultMessage()))
                 .toList();
         problem.setProperty("errors", errors);
+        return problem;
+    }
+
+    /**
+     * 必須のクエリパラメータが無い。
+     *
+     * <p><strong>Spring の既定に任せない。</strong>
+     * 既定では応答本文を持たないまま {@code /error} へ内部転送され、
+     * その転送を Spring Security の {@code anyRequest().denyAll()} が拒むので、
+     * <strong>利用者には本文の無い 403 として届く。</strong>
+     * 「権限が無い」と「要求が足りない」を取り違える。
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    ProblemDetail handleMissingParameter(MissingServletRequestParameterException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "必須のパラメータがありません: " + e.getParameterName());
+        problem.setType(URI.create("urn:kintai:error:validation-failed"));
+        problem.setTitle("入力形式が不正です");
+        problem.setProperty("errors",
+                List.of(new FieldError(e.getParameterName(), "必須です")));
+        return problem;
+    }
+
+    /**
+     * パラメータの型が合わない（{@code month=xxxx}・{@code {id}} が UUID でない）。
+     *
+     * <p><strong>実装の不備として 500 にしない。</strong>
+     * {@code UUID.fromString} も {@code LocalDate.parse} も
+     * {@code IllegalArgumentException} 系を投げるので、
+     * 下の {@code handleImplementationDefect} が拾って
+     * <strong>理由の載らない 500</strong> になっていた（CLAUDE.md 落とし穴 105）。
+     * 送った値が悪いことは利用者にしか直せない。
+     *
+     * <p><strong>受け取った値を応答に載せない。</strong>
+     * 送った本人は自分が送った値を知っている。載せると、
+     * そのまま画面へ出す実装で反射型 XSS の材料になる。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "パラメータの形式が正しくありません: " + e.getName());
+        problem.setType(URI.create("urn:kintai:error:validation-failed"));
+        problem.setTitle("入力形式が不正です");
+        problem.setProperty("errors", List.of(new FieldError(e.getName(), "形式が正しくありません")));
+        return problem;
+    }
+
+    /** 本文が JSON として読めない。送った側にしか直せないので 400 で返す。 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ProblemDetail handleUnreadableBody(HttpMessageNotReadableException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "要求の本文を読み取れません");
+        problem.setType(URI.create("urn:kintai:error:validation-failed"));
+        problem.setTitle("入力形式が不正です");
+        return problem;
+    }
+
+    /**
+     * その URL に対応する API が無い。
+     *
+     * <p>これも既定では本文の無い 403 になる。
+     * <strong>綴りの誤りが「権限が無い」と表示される</strong>ので、
+     * 利用者も開発者も原因に辿り着けない。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    ProblemDetail handleNoResource(NoResourceFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND,
+                "その URL の API はありません");
+        problem.setType(URI.create("urn:kintai:error:resource-not-found"));
+        problem.setTitle("見つかりません");
+        return problem;
+    }
+
+    /** その URL にその HTTP メソッドは無い。 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    ProblemDetail handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.METHOD_NOT_ALLOWED,
+                "その URL では %s を受け付けません".formatted(e.getMethod()));
+        problem.setType(URI.create("urn:kintai:error:method-not-allowed"));
+        problem.setTitle("使えないメソッドです");
         return problem;
     }
 

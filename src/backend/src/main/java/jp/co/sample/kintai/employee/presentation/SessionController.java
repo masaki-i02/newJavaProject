@@ -59,8 +59,18 @@ class SessionController {
                 signedIn.employee().number().value(), signedIn.employee().name(),
                 signedIn.roles());
 
-        // ★ セッションを作り直す。使い回すとセッション固定攻撃が成立する
-        httpRequest.changeSessionId();
+        // ★ セッションを作り直す。使い回すとセッション固定攻撃が成立する。
+        //   ただし「作り直す」には作り直す相手が要る。
+        //   まっさらなブラウザからの最初のログインにはセッションが無く、
+        //   changeSessionId() は IllegalStateException を投げる（＝ 500）。
+        //   CSRF トークンはクッキーに持たせている（CookieCsrfTokenRepository）ので
+        //   セッションを必要とせず、ここまでで作られていない。
+        //   MockMvc のテストは要求ごとにセッションを用意するため、この経路を通らない。
+        if (httpRequest.getSession(false) == null) {
+            httpRequest.getSession(true);
+        } else {
+            httpRequest.changeSessionId();
+        }
 
         Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(
                 principal, null, principal.getAuthorities());

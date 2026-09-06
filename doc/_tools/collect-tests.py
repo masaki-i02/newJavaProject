@@ -25,6 +25,7 @@ CONTEXTS = [
     ('05_申請承認と締め', '申請・承認・締め'),
     ('06_年次有給休暇', '年次有給休暇'),
     ('07_給与連携', '給与連携'),
+    ('90_画面', '画面'),
 ]
 
 TARGETS = [
@@ -164,28 +165,43 @@ def render_by_requirement(rows):
     return '\n'.join(out)
 
 
-# テストコードの置き場所。@DisplayName の先頭に書かれた ID を拾う
-TEST_SOURCE = os.path.normpath(
-    os.path.join(ROOT, '..', 'src', 'backend', 'src', 'test', 'java'))
-
+# テストコードの置き場所。
+#
+# ★ フロントエンドも見る。見ないと、画面のテストだけが突き合わせの外に置かれ、
+#   「一覧に無い ID がコードにだけある」状態を検出できない（落とし穴 107）。
+#   置き場所ごとに ID の書き方が違うので、正規表現も一緒に持つ。
 DISPLAY_NAME = re.compile(r'@DisplayName\("\s*((?:UT|IT)-[A-Z0-9]+-\d+)\b')
+JS_TEST_NAME = re.compile(
+    r"""\b(?:it|test)\(\s*['"`]\s*((?:UT|IT)-[A-Z0-9]+-\d+)\b""")
+
+TEST_SOURCES = [
+    (os.path.normpath(os.path.join(ROOT, '..', 'src', 'backend', 'src', 'test', 'java')),
+     ('.java',), DISPLAY_NAME, 'backend'),
+    (os.path.normpath(os.path.join(ROOT, '..', 'src', 'frontend', 'src')),
+     ('.test.ts', '.test.tsx'), JS_TEST_NAME, 'frontend'),
+    (os.path.normpath(os.path.join(ROOT, '..', 'src', 'frontend', 'e2e')),
+     ('.spec.ts',), JS_TEST_NAME, 'e2e'),
+]
 
 
 def collect_from_code():
     """テストコードにある ID → その ID を名乗るテストの場所（複数）。"""
     found = {}
-    if not os.path.isdir(TEST_SOURCE):
-        return found
-    for base, _, names in os.walk(TEST_SOURCE):
-        for name in names:
-            if not name.endswith('.java'):
+    for source, suffixes, pattern, label in TEST_SOURCES:
+        if not os.path.isdir(source):
+            continue
+        for base, _, names in os.walk(source):
+            if 'node_modules' in base.split(os.sep):
                 continue
-            path = os.path.join(base, name)
-            for number, line in enumerate(io.open(path, encoding='utf-8'), start=1):
-                m = DISPLAY_NAME.search(line)
-                if m:
-                    rel = os.path.relpath(path, TEST_SOURCE)
-                    found.setdefault(m.group(1), []).append(f'{rel}:{number}')
+            for name in names:
+                if not name.endswith(suffixes):
+                    continue
+                path = os.path.join(base, name)
+                for number, line in enumerate(io.open(path, encoding='utf-8'), start=1):
+                    m = pattern.search(line)
+                    if m:
+                        rel = '%s/%s' % (label, os.path.relpath(path, source))
+                        found.setdefault(m.group(1), []).append(f'{rel}:{number}')
     return found
 
 

@@ -180,7 +180,7 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_IN", "2026-04-06T09:00:00").andExpect(status().isCreated());
 
             punch("CLOCK_IN", "2026-04-06T09:30:00")
-                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(status().isUnprocessableContent())
                     .andExpect(jsonPath("$.type")
                             .value("urn:kintai:error:invalid-time-clock-sequence"))
                     .andExpect(jsonPath("$.title").value("打刻の順序が不正です"))
@@ -297,16 +297,49 @@ class TimeClockApiTest extends WebIntegrationTestBase {
 
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
                             .with(asTaro())
-                            .param("month", "2026-04"))
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.length()").value(1))
-                    .andExpect(jsonPath("$[0].workDate").value("2026-04-06"));
+                    .andExpect(jsonPath("$.from").value("2026-04-01"))
+                    .andExpect(jsonPath("$.toExclusive").value("2026-05-01"))
+                    .andExpect(jsonPath("$.days.length()").value(1))
+                    .andExpect(jsonPath("$.days[0].workDate").value("2026-04-06"));
         }
 
         /**
          * 月末日が漏れないこと。期間を {@code atEndOfMonth()} で組み立てると
          * 半開区間の上限がずれて末日が落ちる。
          */
+        /**
+         * <strong>合計が受け取った側で検算できること。</strong>
+         * これが 3.1 の看板である。排他区分の合計が実労働に一致しないと、
+         * 給与の側は「どれを足せばよいか」を自分で決めることになる。
+         */
+        @Test
+        @DisplayName("IT-API-32 期間の合計は排他区分の合計が実労働に一致する")
+        void totalsAreConsistent() throws Exception {
+            punch("CLOCK_IN", "2026-04-06T09:00:00");
+            punch("CLOCK_OUT", "2026-04-06T20:00:00");
+            punch("CLOCK_IN", "2026-04-07T09:00:00");
+            punch("CLOCK_OUT", "2026-04-07T18:00:00");
+
+            String body = mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            var totals = new tools.jackson.databind.ObjectMapper()
+                    .readTree(body).get("totals");
+            assertThat(totals.get("workingMinutes").asInt())
+                    .as("排他区分の合計が実労働に一致する")
+                    .isEqualTo(totals.get("baseMinutes").asInt()
+                            + totals.get("overtimeWithinStatutoryMinutes").asInt()
+                            + totals.get("overtimeBeyondStatutoryMinutes").asInt()
+                            + totals.get("legalHolidayMinutes").asInt());
+            // 2 日ぶんが足されていること（0 でも恒真に一致してしまう）
+            assertThat(totals.get("workingMinutes").asInt()).isGreaterThan(8 * 60);
+        }
+
         @Test
         @DisplayName("IT-API-12 月末日の勤怠も月次の一覧に現れる")
         void lastDayOfMonth() throws Exception {
@@ -315,10 +348,10 @@ class TimeClockApiTest extends WebIntegrationTestBase {
 
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
                             .with(asTaro())
-                            .param("month", "2026-04"))
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.length()").value(1))
-                    .andExpect(jsonPath("$[0].workDate").value("2026-04-30"));
+                    .andExpect(jsonPath("$.days.length()").value(1))
+                    .andExpect(jsonPath("$.days[0].workDate").value("2026-04-30"));
         }
 
         @Test
@@ -326,9 +359,9 @@ class TimeClockApiTest extends WebIntegrationTestBase {
         void emptyMonth() throws Exception {
             mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
                             .with(asTaro())
-                            .param("month", "2026-05"))
+                            .param("from", "2026-05-01").param("toExclusive", "2026-06-01"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.length()").value(0));
+                    .andExpect(jsonPath("$.days.length()").value(0));
         }
     }
 
@@ -430,6 +463,105 @@ class TimeClockApiTest extends WebIntegrationTestBase {
             punch("CLOCK_IN", MON.plusDays(1).atTime(9, 0).toString())
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.unclosedWorkDates.length()").value(0));
+        }
+    }
+
+    /**
+     * 要求そのものが誤っているときの返し方（IT-API-13〜18）。
+     *
+     * <p><strong>ブラウザから通して初めて出た欠陥である。</strong>
+     * 必須パラメータの欠落も綴りの誤りも、Spring の既定では
+     * 応答本文を持たないまま {@code /error} へ内部転送され、
+     * その転送を {@code anyRequest().denyAll()} が拒むので
+     * <strong>本文の無い 403</strong> として届いていた。
+     * 「権限が無い」と「要求が間違っている」を取り違える。
+     */
+    @Nested
+    @DisplayName("要求の誤り")
+    class BadRequests {
+
+        @Test
+        @DisplayName("IT-API-13 必須パラメータが無いと 400（403 ではない）")
+        void missingParameter() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:validation-failed"))
+                    .andExpect(jsonPath("$.errors[0].field").value("from"));
+        }
+
+        /**
+         * <strong>500 にしない。</strong>
+         * {@code LocalDate.parse} は {@code IllegalArgumentException} 系を投げるので、
+         * 実装の不備を拾うハンドラが先に捕まえて
+         * 理由の載らない 500 になっていた（CLAUDE.md 落とし穴 105）。
+         */
+        @Test
+        @DisplayName("IT-API-14 日付の形式が違うと 400（500 ではない）")
+        void malformedDate() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "xxxx").param("toExclusive", "2026-05-01"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:validation-failed"));
+        }
+
+        /** 経路の識別子が UUID でない場合も同じ。 */
+        @Test
+        @DisplayName("IT-API-15 経路の識別子が UUID でないと 400")
+        void malformedPathVariable() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", "not-a-uuid")
+                            .with(asTaro())
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("IT-API-16 存在しない URL は 404（403 ではない）")
+        void unknownUrl() throws Exception {
+            mockMvc.perform(get("/api/no-such-endpoint").with(asTaro()))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:resource-not-found"));
+        }
+
+        /**
+         * 期間の逆転。
+         *
+         * <p><strong>{@code DateRange} の compact constructor に任せない。</strong>
+         * 任せると {@code IllegalArgumentException} のまま 500 になる。
+         */
+        @Test
+        @DisplayName("IT-API-17 期間の終わりが始まりより後でないと 422")
+        void reversedPeriod() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "2026-05-01").param("toExclusive", "2026-04-01"))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:invalid-period"));
+        }
+
+        /** 上限を置かないと 1000 年ぶんを 1 回の要求で読み出せる。 */
+        @Test
+        @DisplayName("IT-API-18 期間が 366 日を超えると 422")
+        void tooLongPeriod() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "2026-01-01").param("toExclusive", "2027-01-03"))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:invalid-period"));
+        }
+
+        /** ちょうど 366 日は通る。境界の内側だけを試すと上限そのものを検査しない。 */
+        @Test
+        @DisplayName("IT-API-19 ちょうど 366 日は照会できる")
+        void exactlyMaxPeriod() throws Exception {
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "2026-01-01").param("toExclusive", "2027-01-02"))
+                    .andExpect(status().isOk());
         }
     }
 }

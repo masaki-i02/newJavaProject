@@ -274,13 +274,27 @@
 **期間は半開区間で受ける。** 月中入社の初月は「入社日から翌月 1 日まで」になり、
 暦月に固定できないため（[就業規則 3.2](../02_就業規則・カレンダー/ドメインモデル設計書.md)）。
 
+**期間は 366 日までとする。** 置かないと 1000 年ぶんを 1 回の要求で読み出せる。
+画面が使うのは 1 か月ぶんなので、うるう年の 1 年があれば足りる。
+
+**期間の検証を `DateRange` の compact constructor に任せない。**
+利用者が送る値なので、`IllegalArgumentException` のまま素通しすると
+**理由の載らない 500** になる（CLAUDE.md 落とし穴 105）。
+`invalid-period`（422）へ写す。
+
+| 応答 | 条件 |
+| --- | --- |
+| `200 OK` | — |
+| `400 validation-failed` | `from` / `toExclusive` が無い、または日付として読めない |
+| `422 invalid-period` | 期間が逆転している、または 366 日を超える |
+| `403 forbidden` | 閲覧範囲の外 |
+
 ```json
 {
   "from": "2026-04-01",
   "toExclusive": "2026-05-01",
   "days": [ /* DailyAttendance の配列。3.2 と同じ形 */ ],
   "totals": {
-    "attendedDays": 20,
     "workingMinutes": 10380,
     "breakMinutes": 1200,
     "baseMinutes": 8880,
@@ -288,18 +302,27 @@
     "overtimeBeyondStatutoryMinutes": 1500,
     "nightMinutes": 300,
     "legalHolidayMinutes": 0
-  },
-  "warnings": [
-    { "workDate": "2026-04-07", "type": "BREAK_TIME_SHORTAGE",
-      "message": "実労働 9 時間に対し休憩が 45 分です。60 分以上必要です" }
-  ]
+  }
 }
 ```
 
 `totals` に排他区分をすべて含めるのは、
 **`baseMinutes + overtimeWithin + overtimeBeyond + legalHoliday = workingMinutes`
 をクライアント側でも検算できるようにする**ためである。
-これが本設計の看板であり、応答から検算できないと意味がない。
+これが本設計の看板であり、応答から検算できないと意味がない（IT-API-32）。
+`nightMinutes` はこの式に入らない。深夜は排他区分ではなく**上乗せ**だからである
+（CLAUDE.md 落とし穴 5）。
+
+> **`totals` に日数を入れない。**
+> 出勤日数・所定労働日数は、年休の日（06）と法定休日の出勤で数え方が変わる。
+> ここで行を数えると、**月次清算と違う定義の同名の数**が並ぶ
+> （CLAUDE.md 落とし穴 67）。日数を持つのは
+> [月次清算](../04_勤怠_月次清算/API設計書.md) である。
+
+> **休憩不足の警告を一覧の項目として別に持たない。**
+> 同じ事実は各日の `breakRequirementSatisfied` がすでに持っている。
+> 2 か所に置くと、BR-08 の判定を直したときに片方だけが古くなる
+> （CLAUDE.md 落とし穴 64）。文言は画面が組み立てる。
 
 > **この応答に「時間外労働の合計」や「36 協定の消化率」は含めない。**
 > 日次の合計は、**制度を問わず**月次の確定値ではない。
