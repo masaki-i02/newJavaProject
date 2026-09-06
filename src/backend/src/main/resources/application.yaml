@@ -53,4 +53,22 @@ management:
   endpoints:
     web:
       exposure:
+        # health と info だけ。env・beans・configprops は出さない
+        # （設定値と依存の一覧は攻撃者に有用で、監視には要らない）
         include: health,info
+  endpoint:
+    health:
+      # ★ liveness と readiness を分ける。
+      #   分けないと、Flyway が 8 本のマイグレーションを流している最中に
+      #   トラフィックが入る
+      probes:
+        enabled: true
+      # 依存の状態を出すのは認証済みのときだけ。
+      # 未認証のプローブには UP / DOWN だけを返す
+      show-details: when-authorized
+  health:
+    # readiness に DB を含める。DB へ繋がらないアプリは要求を受けられない
+    readinessstate:
+      enabled: true
+    livenessstate:
+      enabled: true

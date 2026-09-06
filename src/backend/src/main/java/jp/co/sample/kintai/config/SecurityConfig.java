@@ -18,6 +18,12 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 /**
  * 認証・認可の設定（要件定義書 4 章 / API 設計書 3.9）。
  *
+ * <p><strong>死活監視の口を開ける。</strong>
+ * {@code anyRequest().denyAll()} は {@code /actuator/**} も塞ぐので、
+ * 開けないとコンテナの {@code HEALTHCHECK} が起動直後から永久に失敗する。
+ * 開けるのは {@code health} だけで、{@code env} や {@code beans} は塞いだままにする
+ * （設定値と依存の一覧は攻撃者に有用で、監視には要らない）。
+ *
  * <p><strong>ここに置くのは「ロールを持っているか」までである。</strong>
  * 「配下部署の社員か」「本人か」は組織の状態に依存する業務判断なので、
  * {@code application} 層が {@code OrganizationChart} を引いて行う。
@@ -51,6 +57,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(requests -> requests
                         // ログインは未認証で通す。それ以外の /api は必ず認証を要求する
                         .requestMatchers("/api/sessions").permitAll()
+                        // ★ 死活監視の口だけを開ける。開けないとコンテナの HEALTHCHECK も
+                        //   ロードバランサも、起動直後から永久に unhealthy を返す。
+                        //   開けるのは health だけで、env・beans・configprops は
+                        //   下の denyAll に落ちる（設定値と依存の一覧を外へ出さない）
+                        .requestMatchers("/actuator/health",
+                                "/actuator/health/liveness",
+                                "/actuator/health/readiness").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // ★ 未認証は 401。既定のままだとログイン画面へ 302 になり、

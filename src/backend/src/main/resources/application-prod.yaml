@@ -1,0 +1,52 @@
+# 本番プロファイル。`SPRING_PROFILES_ACTIVE=prod` で有効になる。
+#
+# ★ 既定値を持たない。
+#   application.yaml は開発の便宜のために localhost の資格情報を既定値に持つが、
+#   本番でそれを引き継ぐと、環境変数を渡し忘れたコンテナが黙って
+#   「localhost の開発 DB を探しに行く」状態になる。同居していれば繋がってしまう。
+#   ここで既定値を空にしておくと、未設定なら起動が失敗する。
+#   起動しないほうが、誤った DB へ書き込むよりはるかに安全である。
+spring:
+  datasource:
+    url: ${KINTAI_DB_URL}
+    username: ${KINTAI_DB_USER}
+    password: ${KINTAI_DB_PASSWORD}
+    hikari:
+      # PostgreSQL の max_connections（既定 100）との関係を明示する。
+      # 1 インスタンス運用（ADR 0009）なので 20 で足りる。
+      # テストで 10 個のコンテキストが積み上がって max_connections に届いた
+      # ことがある（CLAUDE.md 落とし穴 82）ので、上限は必ず書く
+      maximum-pool-size: 20
+      minimum-idle: 5
+
+  jpa:
+    # 本番では SQL を出さない。個人情報と労働時間がログへ流れる
+    show-sql: false
+
+server:
+  # ★ 締めや一括締めの途中で切られると、どこまで進んだか分からなくなる。
+  #   進行中の要求を終えてから止める
+  shutdown: graceful
+  # リバースプロキシ配下で動かす。付けないと Secure クッキーとスキーム判定が壊れる
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      # 勤怠の画面は打刻のたびに開くので、長すぎない値にする
+      timeout: 30m
+      cookie:
+        # HTTPS 前提。付けないと平文で運ばれる
+        secure: true
+        http-only: true
+        # 同一オリジンで配信する（CORS を開けない）。Lax で足りる
+        same-site: lax
+
+spring.lifecycle:
+  # graceful shutdown の猶予
+  timeout-per-shutdown-phase: 30s
+
+logging:
+  level:
+    root: INFO
+    jp.co.sample.kintai: INFO
+    # 本番で SQL を出さない
+    org.hibernate.SQL: WARN
