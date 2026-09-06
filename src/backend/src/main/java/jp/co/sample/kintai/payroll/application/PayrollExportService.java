@@ -1,8 +1,6 @@
 package jp.co.sample.kintai.payroll.application;
 
-import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -54,20 +52,17 @@ public class PayrollExportService {
     private final MonthlySettlementService settlements;
     private final WorkRuleMasterService workRules;
     private final PayrollExportRepository exports;
-    private final Clock clock;
 
     public PayrollExportService(EmployeeDirectoryService employees,
                                 MonthlyAttendanceService attendances,
                                 MonthlySettlementService settlements,
                                 WorkRuleMasterService workRules,
-                                PayrollExportRepository exports,
-                                Clock clock) {
+                                PayrollExportRepository exports) {
         this.employees = employees;
         this.attendances = attendances;
         this.settlements = settlements;
         this.workRules = workRules;
         this.exports = exports;
-        this.clock = clock;
     }
 
     /**
@@ -80,7 +75,8 @@ public class PayrollExportService {
     @Transactional
     public PayrollExport export(Requester requester, YearMonth month) {
         requireHumanResources(requester);
-        requireMonthFinished(month);
+        // ★ 判定式は写さない。05 の公開メソッドを呼ぶ（落とし穴 67）
+        attendances.requireMonthFinished(month);
 
         // ★ 分母を先に確かめる。カレンダー未登録の年度は 365 日として計算されてしまい、
         //   割増の単価が法定を大きく下回る（落とし穴 123）
@@ -235,19 +231,6 @@ public class PayrollExportService {
 
     private DateRange monthRange(YearMonth month) {
         return new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
-    }
-
-    /**
-     * 対象月が終わっているか。
-     *
-     * <p><strong>依頼そのものの不備なので例外にする</strong>（落とし穴 60）。
-     * 結果に載せると、人事は「まだ出せる月だ」と誤解する。
-     */
-    private void requireMonthFinished(YearMonth month) {
-        LocalDate today = LocalDate.now(clock);
-        if (!today.isAfter(month.atEndOfMonth())) {
-            throw new MonthlyAttendanceService.MonthNotFinishedException(month);
-        }
     }
 
     /**

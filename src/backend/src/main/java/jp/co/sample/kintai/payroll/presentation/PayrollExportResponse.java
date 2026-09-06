@@ -40,6 +40,9 @@ public record PayrollExportResponse(UUID exportId, YearMonth month,
                 .map(entry -> new ExcludedEmployee(
                         numbers.getOrDefault(entry.getKey(), entry.getKey().value().toString()),
                         entry.getValue().orElseThrow().name()))
+                // ★ 並び順は表示側で決める。永続化アダプタが employees を JOIN すると、
+                //   ArchUnit が見ない SQL の中に他コンテキストへの辺が生まれる
+                .sorted(java.util.Comparator.comparing(ExcludedEmployee::employeeNumber))
                 .toList();
         return new PayrollExportResponse(export.id().value(), export.month(),
                 export.exportedAt().orElse(null), export.monthlyAverageMinutes(),

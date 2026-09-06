@@ -384,6 +384,11 @@ public class WorkRuleMasterService {
 
         requireCalendarRegistered(fiscalYear, period, registered);
         requireWithinStatutoryYear(fiscalYear, period, annualTotal);
+        // ★ 全日を休日として登録した年度。分母が 0 になり、給与側がゼロ除算する。
+        //   業務エラーとして返す。素通りさせると集約の compact constructor で 500 になる
+        if (annualTotal.isZero()) {
+            throw new NoScheduledWorkdayException(fiscalYear);
+        }
 
         return AnnualScheduledHours.of(fiscalYear, registered.workdayCountIn(period),
                 annualTotal);
@@ -739,6 +744,32 @@ public class WorkRuleMasterService {
         @Override
         public String title() {
             return "所定労働日に就業規則が適用されていません";
+        }
+    }
+
+    /** 年度に所定労働日が 1 日も無い。分母が 0 になるので出力できない。 */
+    public static final class NoScheduledWorkdayException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        NoScheduledWorkdayException(int fiscalYear) {
+            super("%d 年度に所定労働日が 1 日もありません".formatted(fiscalYear));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:no-scheduled-workday";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "年度に所定労働日がありません";
         }
     }
 

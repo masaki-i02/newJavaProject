@@ -354,7 +354,15 @@ public class MonthlyAttendanceService {
      * <p><strong>これを見ないと、月初でも提出・承認・締めが通る。</strong>
      * 勤務日がまだ来ていないので「未確定の日」が空になるためで、
      * 締めてしまうと戻す手段が無い。
+     *
+     * <p><strong>公開する。</strong> 給与連携（BR-18）も同じ条件を課すが、
+     * 述語を写すと片方だけが古くなる（CLAUDE.md 落とし穴 67）。
+     * 例外の型を共有するだけでは、判定式が 2 か所に残る。
      */
+    public void requireMonthFinished(YearMonth month) {
+        requireMonthFinished(month, LocalDate.now(clock));
+    }
+
     private void requireMonthFinished(YearMonth month, LocalDate today) {
         if (!today.isAfter(month.atEndOfMonth())) {
             throw new MonthNotFinishedException(month);

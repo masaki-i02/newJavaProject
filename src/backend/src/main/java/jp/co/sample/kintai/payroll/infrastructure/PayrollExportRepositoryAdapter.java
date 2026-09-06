@@ -113,15 +113,20 @@ class PayrollExportRepositoryAdapter implements PayrollExportRepository {
      *
      * <p><strong>並び順を固定する。</strong> 記録の照会と CSV の作り直しで
      * 順序が変わると、同じ記録から違う順の CSV が出る。
+     *
+     * <p><strong>{@code employees} を JOIN しない。</strong>
+     * 社員番号順にしたくなるが、それは {@code employee} が所有する概念であり、
+     * ArchUnit は SQL の文字列を見ないので<strong>依存図に無い辺が黙って増える</strong>。
+     * ここは決定的な順序（社員の識別子）までを担い、
+     * 社員番号順に並べるのは {@code presentation} の責務にする。
      */
     private PayrollExport withTargets(PayrollExport export) {
         Map<EmployeeId, Optional<ExclusionReason>> targets = new LinkedHashMap<>();
         jdbc.query("""
                 SELECT t.employee_id, t.excluded_reason
                   FROM payroll_export_targets t
-                  JOIN employees e ON e.id = t.employee_id
                  WHERE t.export_id = ?
-                 ORDER BY e.employee_number, e.hired_on
+                 ORDER BY t.employee_id
                 """, rs -> {
             targets.put(new EmployeeId(rs.getObject("employee_id", UUID.class)),
                     Optional.ofNullable(rs.getString("excluded_reason"))
