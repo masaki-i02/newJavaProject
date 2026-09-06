@@ -9,7 +9,8 @@ graph LR
     payroll -->|"月次清算・所定労働日数・出勤日数"| attendance
     payroll -->|"在籍していた社員・社員番号"| employee
     payroll -->|"月次勤怠の状態（除外理由）"| approval
-    payroll -->|"MonthClosureQuery（締め判定）"| shared
+    payroll -->|"暦日区分・1 日の所定・年間の所定"| workrule
+    payroll -->|"共有語彙（EmployeeId・DateRange・Requester）"| shared
     attendance --> workrule
     attendance --> shared
     approval --> shared

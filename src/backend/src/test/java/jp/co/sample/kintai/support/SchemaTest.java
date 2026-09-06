@@ -41,6 +41,8 @@ class SchemaTest extends IntegrationTestBase {
                 "paid_leave_grants",
                 "paid_leave_request_events",
                 "paid_leave_requests",
+                "payroll_export_targets",
+                "payroll_exports",
                 "time_clock_correction_items",
                 "time_clock_correction_requests",
                 "time_clock_events",
