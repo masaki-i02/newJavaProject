@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
@@ -133,16 +134,30 @@ public final class MonthlySettlementCalculator {
     }
 
     /**
-     * 対象月に計上する通算分。<strong>暦日が清算期間に入るものだけ。</strong>
+     * 対象月に計上する通算分。<strong>勤務日が清算期間に入るものだけ。</strong>
      *
      * <p>走査範囲は月をはみ出すので（{@link WeeklyOvertimeRule#scanRangeFor}）、
      * 絞らないと前月末の法定休日から持ち越した分を当月にも計上してしまう。
+     *
+     * <p><strong>暦日ではなく勤務日で振り分ける。</strong>
+     * 実労働・法定休日労働・深夜はすべて勤務日で月へ振り分けており（BR-03）、
+     * 週 40 時間超も {@code YearMonth.from(day.workDate())} で振り分けている。
+     * 通算分だけを暦日で振り分けると、月末が法定休日でその勤務が翌日に及んだとき、
+     * <strong>同じ労働の基礎賃金と割増が別の月に分かれる</strong>形になりうる。
+     *
+     * <p>現在の日次計算では、法定休日の勤務日は所定 0 なので、
+     * 8 時間を超えた持ち越しを<strong>日次が既に法定外残業として計上している</strong>。
+     * そのため追加分が月をまたぐ勤務日に付くことは無く、暦日で振り分けても結果は同じである。
+     * <strong>それは日次側の性質に頼った一致であって、この関数が保証しているものではない。</strong>
+     * 基準をそろえておかないと、日次の分類を変えたときに
+     * 「実労働 0 の月が時間外だけを引き受ける」状態が黙って生まれる。
      */
     private static Duration chargedCarryOver(List<HolidayCarryOver> carryOvers,
                                              SettlementPeriod period) {
         return carryOvers.stream()
-                .filter(carryOver -> period.period().contains(carryOver.calendarDate()))
-                .map(HolidayCarryOver::additionalOvertime)
+                .flatMap(carryOver -> carryOver.additionalByWorkDate().entrySet().stream())
+                .filter(entry -> period.period().contains(entry.getKey()))
+                .map(Map.Entry::getValue)
                 .reduce(Duration.ZERO, Duration::plus);
     }
 

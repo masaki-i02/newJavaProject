@@ -92,6 +92,22 @@ public record MonthlySettlement(
                             .formatted(targetWorkingTime, workingTime, legalHolidayTime));
         }
 
+        // ★ 時間外労働は対象労働時間（実労働 − 法定休日労働）の内側にある。
+        //   割増の区分は実労働を分割するもので、実労働の外から生えるものではない。
+        //   破れると「割増の付かない労働時間 = 実労働 − 法定休日労働 − 時間外」が負になり、
+        //   給与へ渡す内訳が成り立たない（BR-18）。
+        //
+        //   破り方は「月へ振り分ける基準が項目ごとに違う」形で現れる。
+        //   実労働は勤務日、時間外の一部は暦日、という状態を作ると、
+        //   月末が法定休日でその勤務が翌日に及んだ月に、実労働 0 で時間外だけの月ができる。
+        //   いまはどちらも勤務日にそろえてあるので起きない（UT-BR07-13）。
+        //   この検査は、そろっていることを集約の側で言い切るために置く。
+        if (overtimeTime.compareTo(targetWorkingTime) > 0) {
+            throw new IllegalArgumentException(
+                    "時間外労働が対象労働時間を超えています: 時間外 %s / 対象 %s"
+                            .formatted(overtimeTime, targetWorkingTime));
+        }
+
         // ★ 制度ごとに時間外の内訳が決まる
         switch (workingTimeSystem) {
             case FIXED -> {

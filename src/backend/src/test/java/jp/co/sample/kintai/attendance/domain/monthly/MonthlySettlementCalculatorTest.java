@@ -721,6 +721,51 @@ class MonthlySettlementCalculatorTest {
             assertThat(result.dailyOvertimeTime()).isZero();
             assertThat(result.weeklyOvertimeTime()).isZero();
         }
+
+        /**
+         * <strong>実労働と時間外は同じ月に計上される。</strong>
+         *
+         * <p>月末が法定休日で、その勤務が翌月へ及ぶ月に効く。
+         * 実労働・法定休日労働・深夜は勤務日で月へ振り分けている（BR-03）ので、
+         * 通算分だけを暦日で振り分けると、
+         * <strong>同じ労働の基礎賃金が 5 月、割増が 6 月</strong>に分かれ、
+         * 6 月は実労働 0 のまま時間外だけを引き受けることになる。
+         * 「割増の付かない労働時間 = 実労働 − 法定休日労働 − 時間外」が負になり、
+         * 給与へ渡す内訳が成り立たない（BR-18 / UT-BR05-30）。
+         *
+         * <p>この形では通算の追加分は生じない。法定休日の勤務日は所定 0 なので、
+         * 8 時間を超えた持ち越しを<strong>日次が既に法定外残業として計上している</strong>
+         * （UT-BR07-07）。ここで確かめるのは通算分の値ではなく、
+         * <strong>時間外がどの月に載るか</strong>である。
+         */
+        @Test
+        @DisplayName("UT-BR07-13 月末の法定休日から翌月へ及ぶ勤務の時間外は勤務日の月が引き受ける")
+        void overtimeIsChargedToTheMonthOfTheWorkDate() {
+            weekdaysOnly(YearMonth.of(2026, 5));
+            weekdaysOnly(YearMonth.of(2026, 6));
+            // 5/31(日・法定休日) 22:00 → 6/1(月) 14:00。6 月に他の勤務は無い
+            var day = realDay(LocalDate.of(2026, 5, 31),
+                    Punches.on("2026-05-31").in("22:00").out("2026-06-01T14:00").build(),
+                    WorkRules.fixed());
+
+            var june = calculator.calculate(TARO, period(2026, 6), List.of(),
+                    fixedRule(), Duration.ZERO, 0);
+            var may = calculator.calculate(TARO, period(2026, 5), List.of(day),
+                    fixedRule(), Duration.ZERO, 0);
+
+            assertThat(june.workingTime()).as("勤務日 5/31 は 6 月の実労働ではない").isZero();
+            assertThat(june.overtimeTime())
+                    .as("実労働 0 の月が時間外だけを引き受けてはならない").isZero();
+            assertThat(may.workingTime()).as("22:00 → 翌 14:00 の 16 時間")
+                    .isEqualTo(Duration.ofHours(16));
+            assertThat(may.overtimeTime())
+                    .as("0 時以降の 14 時間のうち 8 時間超の 6 時間。日次が計上している")
+                    .isEqualTo(Duration.ofHours(6));
+            assertThat(may.workingTime().minus(may.legalHolidayTime())
+                    .minus(may.overtimeTime()))
+                    .as("割増の付かない労働時間。法定休日 2 時間と法定外残業 6 時間を除いた残り")
+                    .isEqualTo(Duration.ofHours(8));
+        }
     }
 
     /** 9:00–18:00（休憩 1 時間）を本番の日次計算に通す。 */
@@ -768,7 +813,7 @@ class MonthlySettlementCalculatorTest {
 
         /**
          * <strong>前月末の法定休日から持ち越した分を当月に計上しない。</strong>
-         * 持ち越し先の暦日が前月なら、それは前月の清算が引き受ける。
+         * 超過が生じた勤務日が前月なら、それは前月の清算が引き受ける（UT-BR07-13）。
          */
         @Test
         @DisplayName("UT-BR05-23 走査範囲に入る前月の通算分を当月に計上しない")
@@ -786,7 +831,7 @@ class MonthlySettlementCalculatorTest {
             var result = calculator.calculate(TARO, june, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.carriedOverOvertimeTime())
-                    .as("持ち越し先の暦日 6/1 は 6 月なので 6 月が引き受ける")
+                    .as("8 時間を超えたのは 6/1 の勤務なので 6 月が引き受ける")
                     .isEqualTo(Duration.ofHours(6));
         }
 
@@ -878,6 +923,28 @@ class MonthlySettlementCalculatorTest {
                     List.of(week)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("週次の時間外と週ごとの内訳が一致しません");
+        }
+
+        /**
+         * <strong>時間外は対象労働時間の内側にある。</strong>
+         *
+         * <p>割増の区分は実労働を分割するものであり、実労働の外から生えることはない。
+         * 破れると給与へ渡す「割増の付かない労働時間」が負になる（BR-18）。
+         * 実際に、通算分を暦日で月へ振り分けていたときに
+         * <strong>実労働 0 で時間外 6 時間の月</strong>が作れていた（UT-BR07-13）。
+         */
+        @Test
+        @DisplayName("UT-BR05-30 時間外が対象労働時間を超えると生成できない")
+        void overtimeCannotExceedTheTargetWorkingTime() {
+            assertThatThrownBy(() -> new MonthlySettlement(TARO, period(2026, 5), SERIES,
+                    WorkingTimeSystemType.FIXED,
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO,
+                    Duration.ZERO, Duration.ofMinutes(10_628),
+                    Duration.ZERO, Duration.ZERO, Duration.ofHours(6), Duration.ofHours(6),
+                    Duration.ZERO, Duration.ZERO, 0, List.of(),
+                    AgreementUsage.of(Duration.ofHours(6), Duration.ZERO, Duration.ZERO)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("時間外労働が対象労働時間を超えています");
         }
 
         /** 時間外の内訳だけを差し替えた清算結果を作る。 */
