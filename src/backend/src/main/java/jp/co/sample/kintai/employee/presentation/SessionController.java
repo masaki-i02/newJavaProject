@@ -66,7 +66,11 @@ class SessionController {
         //   CSRF トークンはクッキーに持たせている（CookieCsrfTokenRepository）ので
         //   セッションを必要とせず、ここまでで作られていない。
         //   MockMvc のテストは要求ごとにセッションを用意するため、この経路を通らない。
-        httpRequest.changeSessionId();
+        if (httpRequest.getSession(false) == null) {
+            httpRequest.getSession(true);
+        } else {
+            httpRequest.changeSessionId();
+        }
 
         Authentication authentication = UsernamePasswordAuthenticationToken.authenticated(
                 principal, null, principal.getAuthorities());
