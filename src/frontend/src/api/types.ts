@@ -77,13 +77,28 @@ export interface AttendanceList {
   readonly days: readonly DailyAttendance[];
 }
 
+/**
+ * 日次の勤怠（03 API 設計書 3.1）。
+ *
+ * ★ 時間外は 2 列である。1 つに束ねない。
+ *   法定内残業（所定超・法定内。割増 0%）と法定外残業（法定超。割増 25%）は
+ *   支払う賃金が違う（CLAUDE.md 落とし穴 115）。
+ *   `overtimeMinutes` という項目はサーバに存在しない。
+ *
+ * ★ 月次の `MonthlySettlement.overtimeMinutes` とは別物である。
+ *   月次は 1 列で、フレックスでは日次からは導けない。
+ */
 export interface DailyAttendance {
   readonly workDate: WallClockDate;
+  readonly dayType: string;
   readonly workingMinutes: number;
   readonly breakMinutes: number;
-  readonly overtimeMinutes: number;
+  readonly baseMinutes: number;
+  readonly overtimeWithinStatutoryMinutes: number;
+  readonly overtimeBeyondStatutoryMinutes: number;
   readonly nightMinutes: number;
   readonly legalHolidayMinutes: number;
+  readonly breakRequirementSatisfied: boolean;
 }
 
 export interface MonthlySettlement {
@@ -107,12 +122,21 @@ export interface HistoryEntry {
 
 export interface Approver {
   readonly kind: ApproverKind;
-  readonly employeeId?: string;
+  // ★ 省略ではなく null が来る。ApproverResponse に @JsonInclude が無いため。
+  //   `?:` と書くと `null` は型の上で存在しないことになり、
+  //   `!== undefined` で判定した瞬間に承認者欄へ null と表示される
+  readonly employeeId: string | null;
 }
 
+/**
+ * 手続きを止めない知らせ（05 API 設計書 2.2）。
+ *
+ * ★ `dates` は必ず 1 件以上ある。サーバは日付が無ければ警告そのものを載せない。
+ *   省略可能と書くと、画面に恒真の分岐が残り続ける。
+ */
 export interface Warning {
   readonly type: string;
-  readonly dates?: readonly WallClockDate[];
+  readonly dates: readonly WallClockDate[];
 }
 
 /**

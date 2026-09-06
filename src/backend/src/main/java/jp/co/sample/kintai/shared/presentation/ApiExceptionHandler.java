@@ -2,19 +2,25 @@ package jp.co.sample.kintai.shared.presentation;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -122,11 +128,58 @@ public class ApiExceptionHandler {
         return problem;
     }
 
-    /** 本文が JSON として読めない。送った側にしか直せないので 400 で返す。 */
+    /**
+     * 本文が JSON として読めない。送った側にしか直せないので 400 で返す。
+     *
+     * <p><strong>原因がドメイン例外なら、そちらへ渡す。</strong>
+     * 本文の record にドメインの値オブジェクト（compact constructor つき）を
+     * 置くと、Jackson が生成の失敗をこの例外に包む。
+     * Spring は<strong>例外そのものの型で先に照合する</strong>ので、
+     * 委譲しないと {@link #handleDomain} は一度も呼ばれず、
+     * 業務エラーが理由の載らない 400 に化ける（CLAUDE.md 落とし穴 105）。
+     */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ProblemDetail handleUnreadableBody(HttpMessageNotReadableException e) {
+        for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof DomainException domain) {
+                return handleDomain(domain);
+            }
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
                 "要求の本文を読み取れません");
+        problem.setType(URI.create("urn:kintai:error:validation-failed"));
+        problem.setTitle("入力形式が不正です");
+        return problem;
+    }
+
+    /**
+     * {@code Content-Type} が違う。
+     *
+     * <p>付け忘れは日常的に起きるのに、変換していないと
+     * {@code type} を持たない Spring 既定の JSON が返り、
+     * 画面はそれを「不明なエラー」としか扱えない。
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    ProblemDetail handleUnsupportedMediaType(HttpMediaTypeNotSupportedException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "この API は JSON だけを受け付けます");
+        problem.setType(URI.create("urn:kintai:error:unsupported-media-type"));
+        problem.setTitle("形式が違います");
+        return problem;
+    }
+
+    /**
+     * 引数そのものに付けた制約（{@code @Max} など）に反する。
+     *
+     * <p>{@code @RequestBody} の検証（{@link MethodArgumentNotValidException}）とは
+     * <strong>別の例外</strong>である。片方だけ変換すると、
+     * 同じ「入力が不正」が経路によって違う形で返る。
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    ProblemDetail handleParameterValidation(HandlerMethodValidationException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "パラメータが受け付けられる範囲を超えています");
         problem.setType(URI.create("urn:kintai:error:validation-failed"));
         problem.setTitle("入力形式が不正です");
         return problem;
@@ -148,15 +201,30 @@ public class ApiExceptionHandler {
         return problem;
     }
 
-    /** その URL にその HTTP メソッドは無い。 */
+    /**
+     * その URL にその HTTP メソッドは無い。
+     *
+     * <p><strong>{@code Allow} を付ける。</strong> RFC 9110 が 405 に必須と定めている。
+     * 本文だけを返すと、何なら使えるのかを総当たりで探すことになる。
+     *
+     * <p>反射しているのは要求行のメソッドだが、
+     * Spring Security の {@code StrictHttpFirewall} が標準の 8 種類以外を
+     * 先に弾くので、任意の文字列がここへ届くことはない。
+     */
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    ProblemDetail handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+    ResponseEntity<ProblemDetail> handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.METHOD_NOT_ALLOWED,
                 "その URL では %s を受け付けません".formatted(e.getMethod()));
         problem.setType(URI.create("urn:kintai:error:method-not-allowed"));
         problem.setTitle("使えないメソッドです");
-        return problem;
+        HttpHeaders headers = new HttpHeaders();
+        Set<HttpMethod> allowed = e.getSupportedHttpMethods();
+        if (allowed != null && !allowed.isEmpty()) {
+            headers.setAllow(allowed);
+        }
+        return new ResponseEntity<>(problem, headers, HttpStatus.METHOD_NOT_ALLOWED);
     }
 
     /** 他の利用者が先に更新した。読んだ値で上書きすると相手の更新を黙って消す。 */

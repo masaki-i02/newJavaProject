@@ -84,7 +84,7 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
       {attendance?.warnings?.map((warning) => (
         <div className="warning" role="status" key={warning.type}>
           <strong>{warningLabel(warning.type)}</strong>
-          {warning.dates !== undefined && `：${warning.dates.map(shortDateOf).join('・')}`}
+          ：{warning.dates.map(shortDateOf).join('・')}
         </div>
       ))}
 
@@ -143,7 +143,8 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
               <thead>
                 <tr>
                   <th>日</th><th className="num">実労働</th><th className="num">休憩</th>
-                  <th className="num">時間外</th><th className="num">深夜</th>
+                  <th className="num">法定内残業</th>
+                  <th className="num">法定外残業</th><th className="num">深夜</th>
                   <th className="num">法定休日</th>
                 </tr>
               </thead>
@@ -153,7 +154,9 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
                     <td>{shortDateOf(day.workDate)}</td>
                     <td className="num">{minutes(day.workingMinutes)}</td>
                     <td className="num">{minutes(day.breakMinutes)}</td>
-                    <td className="num">{minutes(day.overtimeMinutes)}</td>
+                    {/* ★ 1 列に束ねない。割増 0% と 25% で支払う賃金が違う */}
+                    <td className="num">{minutes(day.overtimeWithinStatutoryMinutes)}</td>
+                    <td className="num">{minutes(day.overtimeBeyondStatutoryMinutes)}</td>
                     <td className="num">{minutes(day.nightMinutes)}</td>
                     <td className="num">{minutes(day.legalHolidayMinutes)}</td>
                   </tr>

@@ -554,6 +554,55 @@ class TimeClockApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:invalid-period"));
         }
 
+        @Test
+        @DisplayName("IT-API-33 Content-Type が JSON でないと 415")
+        void unsupportedMediaType() throws Exception {
+            mockMvc.perform(post("/api/employees/{id}/time-clocks", taro.value())
+                            .with(asTaro())
+                            .contentType(MediaType.TEXT_PLAIN)
+                            .content("CLOCK_IN"))
+                    .andExpect(status().isUnsupportedMediaType())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:unsupported-media-type"));
+        }
+
+        /** RFC 9110 は 405 に {@code Allow} を必須と定める。 */
+        @Test
+        @DisplayName("IT-API-34 使えないメソッドは 405 で Allow を返す")
+        void methodNotAllowed() throws Exception {
+            mockMvc.perform(org.springframework.test.web.servlet.request
+                            .MockMvcRequestBuilders
+                            .put("/api/employees/{id}/time-clocks", taro.value())
+                            .with(asTaro()))
+                    .andExpect(status().isMethodNotAllowed())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                            .header().string("Allow",
+                                    org.hamcrest.Matchers.containsString("POST")));
+        }
+
+        /**
+         * <strong>日時は秒まで。</strong>
+         *
+         * <p>打刻は {@code Clock} から（ナノ秒まで）、証跡は DB の {@code now()} から
+         * （マイクロ秒まで）来るので、変換の側でそろえないと
+         * 設計書の書式（{@code 2026-04-07T09:00:00}）と食い違う。
+         * 秒が 0 のときに {@code toString()} が秒を省くのも防ぐ。
+         */
+        @Test
+        @DisplayName("IT-API-35 日時は秒までで、秒が 0 でも省かれない")
+        void secondPrecision() throws Exception {
+            punch("CLOCK_IN", "2026-04-06T09:00:00");
+            punch("CLOCK_OUT", "2026-04-06T18:00:00");
+
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .with(asTaro())
+                            .param("from", "2026-04-01").param("toExclusive", "2026-05-01"))
+                    .andExpect(status().isOk())
+                    // ★ 秒が 0 でも省かない。toString() に任せると 09:00 になる
+                    .andExpect(jsonPath("$.days[0].slices[0].startedAt")
+                            .value("2026-04-06T09:00:00"));
+        }
+
         /** ちょうど 366 日は通る。境界の内側だけを試すと上限そのものを検査しない。 */
         @Test
         @DisplayName("IT-API-19 ちょうど 366 日は照会できる")

@@ -58,12 +58,19 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(requests -> requests
                         // ★ サーブレットの ERROR 転送を通す。
-                        //   塞ぐと、必須パラメータの欠落（400）も綴りの誤り（404）も
-                        //   /error への内部転送を拒まれた結果として
-                        //   「本文の無い 403」になり、
+                        //   守るのは「@ExceptionHandler が拾えない失敗」である。
+                        //   拾える失敗（必須パラメータの欠落・URL の綴りの誤り・
+                        //   型の不一致）は ApiExceptionHandler が
+                        //   ステータスを直接立てるので、そもそも ERROR 転送に入らない。
+                        //   この行が効くのは、DispatcherServlet の外や手前で起きる失敗:
+                        //     - StrictHttpFirewall の拒否（/api/%2e%2e/me）
+                        //     - 406 Not Acceptable（本文を書けない）
+                        //   塞ぐと、この 2 つが「本文の無い 403」になり、
                         //   「権限が無い」と「要求が間違っている」を区別できない。
+                        //   実測で確かめた（IT-OPS-12）。
                         //   ここで通すのは元の要求が済んだあとの内部転送だけで、
-                        //   新しい入口を開けるものではない
+                        //   新しい入口を開けるものではない（/error への直接要求は
+                        //   REQUEST ディスパッチなので下の denyAll に落ちる）
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         // ログインは未認証で通す。それ以外の /api は必ず認証を要求する
                         .requestMatchers("/api/sessions").permitAll()

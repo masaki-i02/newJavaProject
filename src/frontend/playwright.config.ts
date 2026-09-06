@@ -13,6 +13,8 @@ import { defineConfig } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  // ★ 実行のたびに前提データを入れ直す。手順書に書くだけだと必ず忘れる
+  globalSetup: './e2e/globalSetup.ts',
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

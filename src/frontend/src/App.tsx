@@ -45,8 +45,14 @@ export function App() {
             <button onClick={() => setScreen('approvals')}
                     aria-current={screen === 'approvals' ? 'page' : undefined}>承認</button>
           )}
+          {/* ★ 空の値を検証へ渡さない。`<input type="month">` は値を消せるので、
+                  そのまま渡すと同期例外で画面ごと落ちる。
+                  消したときは月を変えない（前の月のまま） */}
           <input type="month" value={month} aria-label="対象月"
-                 onChange={(e) => setMonth(asYearMonth(e.target.value))} />
+                 onChange={(e) => {
+                   const value = e.target.value;
+                   if (value !== '') setMonth(asYearMonth(value));
+                 }} />
         </nav>
       </header>
       {screen === 'punch' && <Punch user={user} />}

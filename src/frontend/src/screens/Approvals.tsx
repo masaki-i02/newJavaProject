@@ -33,7 +33,9 @@ export function Approvals({ month }: { month: YearMonth }) {
     }
   }, [month]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  // ★ 月を切り替えたら開いている詳細を閉じる。
+  //   残すと、別の月の内容を見ながら決裁することになる
+  useEffect(() => { setSelected(null); void reload(); }, [reload]);
 
   async function open(row: MonthlyAttendance) {
     setProblem(null);
@@ -56,7 +58,10 @@ export function Approvals({ month }: { month: YearMonth }) {
         : { version: selected.version };
       // ★ 応答は遷移したあとの版と可否を返す。返さないと画面は必ず 1 回 409 を踏む
       setSelected(await post<MonthlyAttendance>(
-        `/api/employees/${selected.employeeId}/monthly-attendances/${month}/${path}`,
+        // ★ 月は開いている対象から取る。画面の月セレクタから取ると、
+        //   詳細を開いたまま月を切り替えたときに
+        //   「表示している月と違う月」を承認・差戻ししてしまう
+        `/api/employees/${selected.employeeId}/monthly-attendances/${selected.month}/${path}`,
         body));
       await reload();
     } catch (error) {
@@ -103,7 +108,7 @@ export function Approvals({ month }: { month: YearMonth }) {
 
       {selected !== null && (
         <section>
-          <h2>{selected.employeeId} の {month}</h2>
+          <h2>{selected.employeeId} の {selected.month}</h2>
           <p className="muted">
             状態：{stateLabel(selected.status)} ／ 版：{selected.version}
             {selected.approver !== undefined

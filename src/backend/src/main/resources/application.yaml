@@ -49,6 +49,23 @@ kintai:
       # 深夜に実行する。付与日は 0 時に到来するので、その日のうちに作られる
       cron: "0 30 2 * * *"
 
+server:
+  error:
+    # ★ 既定値に頼らない。
+    #   ERROR ディスパッチを Security で通しているので、
+    #   未認証の相手にも Spring の既定のエラー応答が届く。
+    #   いまの既定はどれも安全側だが、
+    #   誰かが障害調査のために on_param を足した瞬間、
+    #   未認証の相手が ?trace=true でスタックトレースを引けるようになる
+    #   （CLAUDE.md 落とし穴 123 と同型）。明示して固定する
+    whitelabel:
+      # API サーバに HTML のエラーページは要らない
+      enabled: false
+    include-message: never
+    include-stacktrace: never
+    include-exception: false
+    include-binding-errors: never
+
 logging:
   pattern:
     # 開発は読みやすいテキスト。相関 ID だけを足す（本番は JSON。application-prod.yaml）

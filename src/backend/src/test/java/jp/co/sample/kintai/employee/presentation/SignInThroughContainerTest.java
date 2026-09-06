@@ -118,6 +118,41 @@ class SignInThroughContainerTest {
         assertThat(signIn("wrong-password-x").statusCode()).isEqualTo(401);
     }
 
+    /**
+     * <strong>ディスパッチャの手前で拒まれた要求も、理由が読める形で返る。</strong>
+     *
+     * <p>{@code StrictHttpFirewall} は {@code DispatcherServlet} より前で拒むので、
+     * {@code @ExceptionHandler} は一度も呼ばれない。
+     * サーブレットの ERROR 転送で {@code /error} へ回されるが、
+     * その転送を {@code anyRequest().denyAll()} が拒むと
+     * <strong>本文の無い 403</strong> になる。
+     * 「権限が無い」と「URL が不正」を取り違える。
+     *
+     * <p>これが {@code SecurityConfig} の
+     * {@code dispatcherTypeMatchers(ERROR).permitAll()} が守っている唯一の経路である。
+     * <strong>MockMvc では踏めない</strong>（ERROR 転送を再現しない）。
+     */
+    @Test
+    @DisplayName("IT-OPS-12 ディスパッチャの手前で拒まれた要求は 400 で、本文がある")
+    void rejectedByFirewallKeepsABody() throws Exception {
+        var request = java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create(
+                        "http://localhost:%d/api/%%2e%%2e/me".formatted(port)))
+                .GET().build();
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            var response = client.send(request,
+                    java.net.http.HttpResponse.BodyHandlers.ofString(
+                            java.nio.charset.StandardCharsets.UTF_8));
+
+            assertThat(response.statusCode())
+                    .as("403 なら ERROR 転送が塞がれている")
+                    .isEqualTo(400);
+            assertThat(response.body())
+                    .as("本文が無いと、利用者も運用も原因に辿り着けない")
+                    .isNotEmpty();
+        }
+    }
+
     private java.net.http.HttpResponse<String> signIn(String password) throws Exception {
         var request = java.net.http.HttpRequest
                 .newBuilder(java.net.URI.create(

@@ -11,13 +11,17 @@ createdb -h 127.0.0.1 -p 55432 -U kintai kintai_e2e   # 初回のみ
 cd ../backend && KINTAI_DB_URL=jdbc:postgresql://127.0.0.1:55432/kintai_e2e \
   KINTAI_DB_USER=kintai KINTAI_DB_PASSWORD=kintai ./gradlew bootRun
 
-# 3. 初期データを入れる（社員 2 人・部署・就業規則・カレンダー）
-psql -h 127.0.0.1 -p 55432 -U kintai -d kintai_e2e -f e2e/seed.sql
-
-# 4. 開発サーバとシナリオ
+# 3. 開発サーバとシナリオ
+#    前提データは globalSetup が毎回入れ直すので、手で流す必要は無い
 npm run dev &
 npm run e2e
 ```
+
+> **前提データは実行のたびに入れ直される**（`e2e/globalSetup.ts` が `seed.sql` を流す）。
+> 手順書に「先に流すこと」と書くだけだと必ず忘れ、
+> 2 回目の実行が「すでに退勤済み」から始まって
+> **製品の欠陥と見分けがつかない形で落ちる**（CLAUDE.md 落とし穴 137）。
+> `psql` が見つからなければ、黙って続けずに落とす。
 
 > **`kintai_test` を使わない。** バックエンドを起動したまま
 > `./gradlew test` を流すと、同じ DB を 2 つのプロセスが掴んで
