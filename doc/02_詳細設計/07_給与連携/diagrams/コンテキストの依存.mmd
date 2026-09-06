@@ -1,0 +1,21 @@
+graph LR
+    payroll["payroll<br/>給与連携"]
+    attendance["attendance<br/>打刻・日次・月次清算"]
+    approval["approval<br/>申請・承認・締め"]
+    employee["employee<br/>社員・組織"]
+    workrule["workrule<br/>就業規則・カレンダー"]
+    shared["shared<br/>共有語彙・ポート"]
+
+    payroll -->|"月次清算・所定労働日数・出勤日数"| attendance
+    payroll -->|"在籍していた社員・社員番号"| employee
+    payroll -->|"月次勤怠の状態（除外理由）"| approval
+    payroll -->|"MonthClosureQuery（締め判定）"| shared
+    attendance --> workrule
+    attendance --> shared
+    approval --> shared
+    employee --> shared
+
+    classDef new fill:#fde8d7,stroke:#c46a1c,stroke-width:2px
+    classDef existing fill:#eef2f7,stroke:#5b6b80
+    class payroll new
+    class attendance,approval,employee,workrule,shared existing

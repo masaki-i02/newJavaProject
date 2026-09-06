@@ -4,8 +4,13 @@ flowchart TD
     workrule["workrule<br/>就業規則・カレンダー"]
     employee["employee<br/>社員・組織"]
     leave["leave<br/>年次有給休暇"]
+    payroll["payroll<br/>給与連携"]
     shared["shared<br/>共通の型<br/>コンテキストをまたぐポート"]
 
+    payroll --> approval
+    payroll --> attendance
+    payroll --> employee
+    payroll --> shared
     leave --> approval
     leave --> attendance
     leave --> workrule

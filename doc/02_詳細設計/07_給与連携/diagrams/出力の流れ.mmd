@@ -1,0 +1,16 @@
+flowchart TB
+    start(["人事が対象月を指定<br/>POST /api/payroll/exports"]) --> finished{"対象月は<br/>終わっているか"}
+    finished -- いいえ --> err["422 month-not-finished<br/>依頼そのものの不備"]
+    finished -- はい --> roster["対象月に在籍していた社員を数え上げる<br/>（月中入社・月中退職を含む）"]
+    roster --> loop{"社員ごと"}
+    loop --> closed{"その月は<br/>締め済みか"}
+    closed -- いいえ --> reason["除外する<br/>NOT_SUBMITTED / NOT_APPROVED<br/>/ NOT_CLOSED / NO_MONTHLY_ATTENDANCE"]
+    closed -- はい --> read["保存済みの月次清算を読む<br/>（計算し直さない）"]
+    read --> row["PayrollRow を組み立てる<br/>⑨+⑩+⑪+⑫+⑬ = ⑧ を検査"]
+    reason --> record
+    row --> record["payroll_exports に記録<br/>（誰が・いつ・何月・件数）"]
+    record --> resp["201 + 除外した社員の一覧"]
+    resp --> csv(["GET /api/payroll/exports/{id}<br/>text/csv"])
+
+    classDef err fill:#fdecec,stroke:#c0392b
+    class err err
