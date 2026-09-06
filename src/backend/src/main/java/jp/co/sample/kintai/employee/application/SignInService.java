@@ -33,9 +33,29 @@ import jp.co.sample.kintai.shared.domain.Role;
  * <p><strong>存在しない社員番号でも照合と同じ時間を使う。</strong>
  * 照合を飛ばすと、BCrypt の計算時間ぶんだけ応答が速くなり、
  * 応答時間の差から社員番号の存在が分かる。
+ *
+ * <p><strong>成功も失敗もログに残す。</strong>
+ * 応答で理由を区別しないのは利用者に対する扱いであって、
+ * 運用する側が「誰が何回失敗しているか」を知る必要は別にある。
+ * 記録が無いと、総当たりが行われていることに気づく手段がまったく無い
+ * （本システムはロックアウトを設けていないので、検知だけでも価値がある）。
  */
 @Service
 public class SignInService {
+
+    /**
+     * 認証の記録。
+     *
+     * <p><strong>応答で区別しないことと、記録しないことは別である。</strong>
+     * 利用者に理由を教えないのは総当たりを防ぐためだが、
+     * <strong>運用する側は「誰が何回失敗しているか」を知る必要がある。</strong>
+     * 記録が無いと、総当たりが行われていることに気づく手段がまったく無い。
+     *
+     * <p><strong>パスワードは書かない。</strong> 試された値も書かない。
+     * ログは監査証跡ではないが、それでも平文の資格情報を置く場所ではない。
+     */
+    private static final org.slf4j.Logger AUDIT =
+            org.slf4j.LoggerFactory.getLogger("jp.co.sample.kintai.audit.signin");
 
     private final EmployeeRepository employees;
     private final EmployeeCredentialRepository credentials;
@@ -69,18 +89,28 @@ public class SignInService {
         if (found.isEmpty()) {
             // ★ 見つからなくても照合と同じだけ時間を使う。応答時間で在籍を悟らせない
             hasher.wasteTime();
+            // ★ 記録には理由を書く。応答で区別しないことと、記録しないことは別である
+            AUDIT.warn("ログイン失敗 employeeNumber={} reason=NO_SUCH_EMPLOYEE",
+                    employeeNumber.value());
             throw new AuthenticationFailedException();
         }
         Employee employee = found.get();
         Optional<EmployeeCredential> credential = credentials.find(employee.id());
         if (credential.isEmpty()) {
             hasher.wasteTime();
+            AUDIT.warn("ログイン失敗 employeeNumber={} reason=NO_CREDENTIAL",
+                    employeeNumber.value());
             throw new AuthenticationFailedException();
         }
         if (!hasher.matches(password, credential.get().passwordHash())) {
+            AUDIT.warn("ログイン失敗 employeeNumber={} reason=BAD_PASSWORD",
+                    employeeNumber.value());
             throw new AuthenticationFailedException();
         }
-        return new SignedIn(employee, effectiveRolesOf(employee, today));
+        Set<Role> roles = effectiveRolesOf(employee, today);
+        AUDIT.info("ログイン成功 employeeNumber={} employeeId={} roles={}",
+                employeeNumber.value(), employee.id().value(), roles);
+        return new SignedIn(employee, roles);
     }
 
     /**

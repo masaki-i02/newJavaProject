@@ -71,6 +71,12 @@ public class SecurityConfig {
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(
                                 new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                // ★ 認証された利用者をアクセスログへ渡す。
+                //   アクセスログのフィルタは Security より外側にあり、
+                //   戻ってきた時点では SecurityContextHolder が消えている
+                .addFilterAfter(new AuthenticatedUserTaggingFilter(),
+                        org.springframework.security.web.access.intercept
+                                .AuthorizationFilter.class)
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
@@ -98,5 +104,32 @@ public class SecurityConfig {
     @Bean
     PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * 認証された利用者を要求属性へ置く。
+     *
+     * <p>アクセスログのフィルタは Spring Security より<strong>外側</strong>にある。
+     * 外側に置くのは、Security が 401 で弾いた要求もログに残すためである。
+     * その代わり {@code chain.doFilter} から戻った時点では
+     * {@code SecurityContextHolder} が既に空なので、
+     * <strong>内側にいるうちに書き写しておく。</strong>
+     */
+    private static final class AuthenticatedUserTaggingFilter
+            extends org.springframework.web.filter.OncePerRequestFilter {
+
+        @Override
+        protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
+                                        jakarta.servlet.http.HttpServletResponse response,
+                                        jakarta.servlet.FilterChain chain)
+                throws jakarta.servlet.ServletException, java.io.IOException {
+            var authentication = org.springframework.security.core.context
+                    .SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated()
+                    && !"anonymousUser".equals(authentication.getPrincipal())) {
+                request.setAttribute(RequestLoggingFilter.USER, authentication.getName());
+            }
+            chain.doFilter(request, response);
+        }
     }
 }

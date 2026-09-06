@@ -49,6 +49,11 @@ kintai:
       # 深夜に実行する。付与日は 0 時に到来するので、その日のうちに作られる
       cron: "0 30 2 * * *"
 
+logging:
+  pattern:
+    # 開発は読みやすいテキスト。相関 ID だけを足す（本番は JSON。application-prod.yaml）
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{requestId:-}] %logger{36} - %msg%n"
+
 management:
   endpoints:
     web:

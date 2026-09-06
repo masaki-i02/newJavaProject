@@ -45,8 +45,21 @@ spring.lifecycle:
   timeout-per-shutdown-phase: 30s
 
 logging:
+  # ★ 1 行 1 レコードの JSON にする。
+  #   既定のテキスト形式だと、複数行のスタックトレースを 1 レコードとして
+  #   扱えないので、grep でも docker logs でも障害を追えない。
+  #   Spring Boot が構造化ログを持っているので、追加の依存を入れない
+  structured:
+    format:
+      console: ecs
+  # ★ 相関 ID を全部の行に載せる。
+  #   例外のログ行とアクセスログの行を同じ ID で突き合わせられる
+  include-application-name: true
   level:
     root: INFO
     jp.co.sample.kintai: INFO
-    # 本番で SQL を出さない
+    # アクセスログと認証の記録。落とすと障害調査と総当たりの検知ができなくなる
+    jp.co.sample.kintai.access: INFO
+    jp.co.sample.kintai.audit: INFO
+    # 本番で SQL を出さない。個人情報と労働時間がログへ流れる
     org.hibernate.SQL: WARN
