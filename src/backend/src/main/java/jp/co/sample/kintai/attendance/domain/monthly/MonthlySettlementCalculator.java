@@ -47,10 +47,13 @@ public final class MonthlySettlementCalculator {
      * @param workRule   その月に適用される就業規則。
      *                   月中に改定された場合は<strong>末日時点の版</strong>を渡す
      * @param annualUsedBefore 当年度の当月より前の 36 協定の累計
+     * @param paidLeaveDays    年次有給休暇を取得した日数（BR-16）。
+     *                         <strong>清算期間の中にあり、カレンダー上 {@code WORKDAY} である、
+     *                         承認済みの年休の日数</strong>を渡す。3 つの条件は呼ぶ側が絞る
      */
     public MonthlySettlement calculate(EmployeeId employeeId, SettlementPeriod period,
                                        List<DailyAttendance> days, WorkRule workRule,
-                                       Duration annualUsedBefore) {
+                                       Duration annualUsedBefore, int paidLeaveDays) {
         if (employeeId == null || period == null || days == null || workRule == null
                 || annualUsedBefore == null) {
             throw new IllegalArgumentException("月次清算の引数に null は許されません");
@@ -81,7 +84,7 @@ public final class MonthlySettlementCalculator {
                     flexOvertime(targetWorkingTime, statutoryTotalLimit);
         };
 
-        Duration scheduledTotalTime = scheduledTotalOf(workRule, period);
+        Duration scheduledTotalTime = scheduledTotalOf(workRule, period, paidLeaveDays);
         Duration shortage = shortageOf(workRule, inPeriod, targetWorkingTime,
                 scheduledTotalTime);
 
@@ -92,7 +95,7 @@ public final class MonthlySettlementCalculator {
                 overtime.daily(), overtime.weekly(), overtime.carriedOver(),
                 overtime.total(),
                 shortage,
-                nightTime, overtime.weeks(),
+                nightTime, paidLeaveDays, overtime.weeks(),
                 AgreementUsage.of(overtime.total(), legalHolidayTime, annualUsedBefore));
     }
 
@@ -240,9 +243,24 @@ public final class MonthlySettlementCalculator {
      *
      * <p><strong>清算期間の所定労働日数で数える。</strong> 暦月ではない。
      * 4/15 入社の初月を暦月で数えると、所定総が実態の倍近くになり不足時間が水増しされる。
+     *
+     * <p><strong>法定労働時間の総枠（{@code statutoryTotalLimit}）は年休で変わらない。</strong>
+     * 総枠は暦日数だけで決まる（労基法 32 条の 3）。減らすと、フレックスの時間外
+     * （対象労働時間 − 総枠）が水増しされる。
      */
-    private Duration scheduledTotalOf(WorkRule workRule, SettlementPeriod period) {
-        int workdays = calendar.workdayCountIn(period.period());
+    private Duration scheduledTotalOf(WorkRule workRule, SettlementPeriod period,
+                                      int paidLeaveDays) {
+        // ★ 年休の日は所定労働日から除く（BR-16）。
+        //   除かないと、適法に休んだ社員の月次清算に所定 1 日ぶんの不足時間が立つ。
+        //   固定時間制とフレックスの両方が、この 1 か所で正しくなる
+        int workdays = calendar.workdayCountIn(period.period()) - paidLeaveDays;
+        if (workdays < 0) {
+            // 呼ぶ側が「カレンダー上 WORKDAY である日」に絞っていれば起こらない。
+            // 起きたなら絞りが漏れているので、負の所定総を保存する前に落とす
+            throw new IllegalArgumentException(
+                    "年休の日数が所定労働日数を超えています: 年休 %d / 所定労働日 %d"
+                            .formatted(paidLeaveDays, calendar.workdayCountIn(period.period())));
+        }
         return switch (workRule.workingTimeSystem()) {
             case FixedTimeSystem fixed ->
                     fixed.scheduledWorkingTime().multipliedBy(workdays);

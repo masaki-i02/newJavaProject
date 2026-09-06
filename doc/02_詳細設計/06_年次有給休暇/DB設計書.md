@@ -409,7 +409,9 @@ SELECT g.employee_id,
 
 **閲覧範囲で絞る。** 絞らないと、一般の承認者が
 **配下でない社員の年休の取得状況**を見られる（要件 4.1）。
-判定は `shared.domain.EmployeeVisibility` が行う。
+判定は `shared.domain.EmployeeVisibility` が行い、**絞りは `application` 層に置く**（4.3）。
+`:visibleEmployeeIds` はその結果を SQL へ渡す形を示したもので、
+100 名規模では読み出してから絞っても差はない。
 
 インデックスは既存の `paid_leave_grants_employee_granted_on_idx (employee_id, granted_on)`
 がそのまま効く。**新しいインデックスは置かない。**
@@ -428,9 +430,13 @@ SELECT g.employee_id,
 SELECT r.id, r.employee_id, r.leave_date, r.requested_at, r.version
   FROM paid_leave_requests r
  WHERE r.status = 'SUBMITTED'
-   AND r.employee_id = ANY(:visibleEmployeeIds)
  ORDER BY r.leave_date, r.requested_at;
 ```
+
+**閲覧範囲では絞らない。** 絞るのは `application` 層である
+（`EmployeeVisibility.canView`）。訂正申請（[05](../05_申請承認と締め/API設計書.md)）と
+同じ形にそろえた。「配下部署か」は組織と基準日に依存するので、
+SQL に写すと**組織の解決を 2 か所に持つ**ことになる（落とし穴 13 と同型）。
 
 ### 4.4 年休の取得日（`attendance` からの問い合わせ）
 

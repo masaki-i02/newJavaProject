@@ -141,7 +141,7 @@ class MonthlySettlementCalculatorTest {
             var days = flexDays(YearMonth.of(2026, 5), 20, Duration.ofHours(7));
             weekdaysOnly(YearMonth.of(2026, 5));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.targetWorkingTime()).isEqualTo(Duration.ofMinutes(8_400));
             assertThat(result.overtimeTime()).isZero();
@@ -161,7 +161,7 @@ class MonthlySettlementCalculatorTest {
             // 20 日 × 8.5 時間 = 10,200 分。9,600 < 10,200 < 10,628
             var days = flexDays(YearMonth.of(2026, 5), 20, Duration.ofMinutes(510));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.targetWorkingTime()).isEqualTo(Duration.ofMinutes(10_200));
             assertThat(result.overtimeTime()).as("総枠内なので時間外 0").isZero();
@@ -176,7 +176,7 @@ class MonthlySettlementCalculatorTest {
             // 20 日 × 9 時間 = 10,800 分。総枠 10,628 分を 172 分超える
             var days = flexDays(YearMonth.of(2026, 5), 20, Duration.ofHours(9));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.overtimeTime()).isEqualTo(Duration.ofMinutes(172));
             assertThat(result.shortageTime()).isZero();
@@ -194,7 +194,7 @@ class MonthlySettlementCalculatorTest {
             // 10 日 × 12 時間 = 7,200 分。日々 4 時間ずつ超えているが総枠内
             var days = flexDays(YearMonth.of(2026, 5), 10, Duration.ofHours(12));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.overtimeTime()).isZero();
             assertThat(result.dailyOvertimeTime()).isZero();
@@ -210,7 +210,7 @@ class MonthlySettlementCalculatorTest {
             var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_628),
                     Duration.ofHours(9));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.targetWorkingTime()).isEqualTo(result.statutoryTotalLimit());
             assertThat(result.overtimeTime()).isZero();
@@ -230,7 +230,7 @@ class MonthlySettlementCalculatorTest {
             var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_080),
                     Duration.ofHours(9));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.scheduledTotalTime()).isEqualTo(Duration.ofMinutes(10_080));
             assertThat(result.shortageTime()).isZero();
@@ -252,7 +252,7 @@ class MonthlySettlementCalculatorTest {
                     daily.flexNightDay(LocalDate.of(2026, 5, 4),
                             Duration.ofHours(9), Duration.ofMinutes(30)));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.nightTime()).isEqualTo(Duration.ofMinutes(150));
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(19));
@@ -267,7 +267,7 @@ class MonthlySettlementCalculatorTest {
             weekdaysOnly(YearMonth.of(2026, 5));
 
             var result = calculator.calculate(TARO, may, List.of(), flexRule(),
-                    Duration.ZERO);
+                    Duration.ZERO, 0);
 
             assertThat(result.workingTime()).isZero();
             assertThat(result.overtimeTime()).isZero();
@@ -295,7 +295,7 @@ class MonthlySettlementCalculatorTest {
             var days = flexTotalling(YearMonth.of(2026, 6), Duration.ofMinutes(10_400),
                     Duration.ofHours(9));
 
-            var result = calculator.calculate(TARO, june, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, june, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.statutoryTotalLimit()).isEqualTo(Duration.ofMinutes(10_285));
             assertThat(result.scheduledTotalTime()).isEqualTo(Duration.ofMinutes(10_560));
@@ -319,7 +319,7 @@ class MonthlySettlementCalculatorTest {
                     Duration.ofMinutes(9_600), Duration.ofMinutes(10_628),
                     Duration.ZERO, Duration.ZERO, Duration.ZERO,
                     Duration.ofMinutes(10), Duration.ofMinutes(10),
-                    Duration.ZERO, List.of(), AgreementUsage.of(Duration.ofMinutes(10),
+                    Duration.ZERO, 0, List.of(), AgreementUsage.of(Duration.ofMinutes(10),
                             Duration.ZERO, Duration.ZERO)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("所定総が法定総枠以下なのに、時間外と不足が同時に");
@@ -349,7 +349,7 @@ class MonthlySettlementCalculatorTest {
                             Duration.ofHours(9)));
             days.add(daily.legalHolidayDay(LocalDate.of(2026, 5, 3), Duration.ofHours(8)));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofMinutes(11_180));
             assertThat(result.legalHolidayTime()).isEqualTo(Duration.ofHours(8));
@@ -372,7 +372,7 @@ class MonthlySettlementCalculatorTest {
             var days = List.of(daily.legalHolidayDay(LocalDate.of(2026, 5, 3),
                     Duration.ofHours(8)));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.agreementUsage().subjectTime())
                     .as("限度時間の対象は時間外労働だけ").isZero();
@@ -402,7 +402,7 @@ class MonthlySettlementCalculatorTest {
                         Duration.ofHours(9)));
             }
 
-            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.dailyOvertimeTime()).isEqualTo(Duration.ofHours(6));
             assertThat(result.weeklyOvertimeTime()).isEqualTo(Duration.ofHours(8));
@@ -429,7 +429,7 @@ class MonthlySettlementCalculatorTest {
                         Duration.ofHours(9)));
             }
 
-            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.scheduledTotalTime())
                     .as("所定総 10,080 分 < 総枠 10,628 分")
@@ -466,7 +466,7 @@ class MonthlySettlementCalculatorTest {
                 date = date.plusDays(1);
             }
 
-            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(19 * 8 + 12));
             assertThat(result.shortageTime())
@@ -487,7 +487,7 @@ class MonthlySettlementCalculatorTest {
                         Duration.ofHours(9)));
             }
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.weeklyOvertimeTime()).isZero();
             assertThat(result.dailyOvertimeTime()).isZero();
@@ -546,7 +546,7 @@ class MonthlySettlementCalculatorTest {
             weekdaysOnly(YearMonth.of(2026, 4));
 
             var result = calculator.calculate(TARO, april, List.of(), flexRule(),
-                    Duration.ZERO);
+                    Duration.ZERO, 0);
 
             int workdaysInPeriod = calendar.workdayCountIn(april.period());
             assertThat(workdaysInPeriod)
@@ -567,7 +567,7 @@ class MonthlySettlementCalculatorTest {
                     overtime, Duration.ZERO, overtime,
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     overtime, Duration.ZERO, Duration.ZERO, overtime,
-                    Duration.ZERO, Duration.ZERO, List.of(),
+                    Duration.ZERO, Duration.ZERO, 0, List.of(),
                     AgreementUsage.of(overtime, Duration.ZERO, Duration.ZERO));
         }
 
@@ -610,7 +610,7 @@ class MonthlySettlementCalculatorTest {
             var saturday = realDay(LocalDate.of(2026, 5, 9), WorkRules.fixed());
 
             var result = calculator.calculate(TARO, may, List.of(saturday), fixedRule(),
-                    Duration.ZERO);
+                    Duration.ZERO, 0);
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.dailyOvertimeTime()).as("8 時間を超えていない").isZero();
@@ -635,7 +635,7 @@ class MonthlySettlementCalculatorTest {
                         Duration.ofHours(8)));
             }
 
-            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(32));
             assertThat(result.overtimeTime()).isZero();
@@ -657,7 +657,7 @@ class MonthlySettlementCalculatorTest {
             var days = flexTotalling(YearMonth.of(2026, 5), Duration.ofMinutes(10_628 + 4_200),
                     Duration.ofHours(12));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.overtimeTime()).isEqualTo(Duration.ofHours(70));
             assertThat(result.overtimeOver60Time()).isEqualTo(Duration.ofHours(10));
@@ -689,7 +689,7 @@ class MonthlySettlementCalculatorTest {
                 days.add(realDay(LocalDate.of(2026, 5, 4).plusDays(i), WorkRules.fixed()));
             }
 
-            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.carriedOverOvertimeTime())
                     .as("月曜の暦日は 6 + 8 = 14 時間。8 時間超の 6 時間")
@@ -715,7 +715,7 @@ class MonthlySettlementCalculatorTest {
                             .out("2026-05-04T06:00").build(), WorkRules.flex()),
                     realDay(LocalDate.of(2026, 5, 4), WorkRules.flex()));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.carriedOverOvertimeTime()).isZero();
             assertThat(result.dailyOvertimeTime()).isZero();
@@ -760,7 +760,7 @@ class MonthlySettlementCalculatorTest {
                     daily.flexDay(LocalDate.of(2026, 4, 30), Duration.ofHours(8)),
                     daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
 
-            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
 
             assertThat(result.workingTime())
                     .as("4/30 の 8 時間は 5 月の実労働ではない").isEqualTo(Duration.ofHours(8));
@@ -783,7 +783,7 @@ class MonthlySettlementCalculatorTest {
                     .out("2026-06-01T06:00").build(), WorkRules.fixed()));
             days.add(realDay(LocalDate.of(2026, 6, 1), WorkRules.fixed()));
 
-            var result = calculator.calculate(TARO, june, days, fixedRule(), Duration.ZERO);
+            var result = calculator.calculate(TARO, june, days, fixedRule(), Duration.ZERO, 0);
 
             assertThat(result.carriedOverOvertimeTime())
                     .as("持ち越し先の暦日 6/1 は 6 月なので 6 月が引き受ける")
@@ -799,7 +799,7 @@ class MonthlySettlementCalculatorTest {
                     daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)));
 
             assertThatThrownBy(() ->
-                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
+                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("同じ勤務日の日次勤怠が 2 件以上あります");
         }
@@ -812,7 +812,7 @@ class MonthlySettlementCalculatorTest {
                     daily.flexDay(LocalDate.of(2026, 3, 2), Duration.ofHours(8)));
 
             assertThatThrownBy(() ->
-                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO))
+                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("走査範囲の外の日次勤怠");
         }
@@ -827,7 +827,7 @@ class MonthlySettlementCalculatorTest {
                     Duration.ofHours(9));
 
             var result = calculator.calculate(TARO, may, days, flexRule(),
-                    Duration.ofHours(359));
+                    Duration.ofHours(359), 0);
 
             assertThat(result.agreementUsage().annualUsedBefore())
                     .isEqualTo(Duration.ofHours(359));
@@ -889,7 +889,7 @@ class MonthlySettlementCalculatorTest {
                     Duration.ofHours(100), Duration.ZERO, Duration.ofHours(100),
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     daily, weekly, carriedOver, total,
-                    Duration.ZERO, Duration.ZERO, breakdown,
+                    Duration.ZERO, Duration.ZERO, 0, breakdown,
                     AgreementUsage.of(total, Duration.ZERO, Duration.ZERO));
         }
     }
@@ -905,4 +905,121 @@ class MonthlySettlementCalculatorTest {
             }
         }
     }
+    /**
+     * 年次有給休暇と所定総労働時間（BR-05 / BR-16）。
+     *
+     * <p><strong>年休の日は所定労働日から除く。</strong>
+     * 除かないと、適法に休んだ社員の月次清算に所定 1 日ぶんの不足時間が立つ。
+     */
+    @Nested
+    @DisplayName("年次有給休暇（BR-16）")
+    class PaidLeave {
+
+        /**
+         * 31 日の所定労働日のうち 30 日出勤し、1 日を年休にした月
+         * （{@code TestCalendar.allWorkdays()} なので 5 月は 31 日すべてが所定労働日）。
+         *
+         * <p>年休を数えなければ所定総 248 時間に対して実労働 240 時間で
+         * <strong>不足 8 時間</strong>が立つ。数えれば所定総が 240 時間になり不足 0。
+         */
+        @Test
+        @DisplayName("UT-LV-44 固定時間制で年休 1 日の不足時間が立たない")
+        void fixedNoShortage() {
+            var may = period(2026, 5);
+            var days = daily.week(LocalDate.of(2026, 5, 1), 30, Duration.ofHours(8));
+
+            var withoutLeave = calculator.calculate(TARO, may, days, fixedRule(),
+                    Duration.ZERO, 0);
+            var withLeave = calculator.calculate(TARO, may, days, fixedRule(),
+                    Duration.ZERO, 1);
+
+            assertThat(withoutLeave.shortageTime()).isEqualTo(Duration.ofHours(8));
+            assertThat(withLeave.shortageTime()).isZero();
+        }
+
+        @Test
+        @DisplayName("UT-LV-45 フレックスで年休 1 日ぶん所定総が減る")
+        void flexScheduledTotalDrops() {
+            var may = period(2026, 5);
+            var days = daily.flexDaysTotalling(LocalDate.of(2026, 5, 1),
+                    Duration.ofHours(240), Duration.ofHours(8));
+
+            var withoutLeave = calculator.calculate(TARO, may, days, flexRule(),
+                    Duration.ZERO, 0);
+            var withLeave = calculator.calculate(TARO, may, days, flexRule(),
+                    Duration.ZERO, 1);
+
+            assertThat(withoutLeave.scheduledTotalTime()
+                    .minus(withLeave.scheduledTotalTime())).isEqualTo(Duration.ofHours(8));
+            assertThat(withLeave.shortageTime()).isZero();
+        }
+
+        /**
+         * <strong>総枠は暦日数だけで決まる</strong>（労基法 32 条の 3）。
+         *
+         * <p>所定総だけを見るテストでは、総枠まで一緒に減らす変異を殺せない
+         * （CLAUDE.md 落とし穴 43）。時間外がちょうど発生する労働時間を与え、
+         * 年休の有無で時間外が変わらないことを確かめる。
+         */
+        @Test
+        @DisplayName("UT-LV-60 フレックスで年休を取っても法定総枠は変わらない")
+        void flexLimitUnchanged() {
+            var may = period(2026, 5);
+            // 総枠 10,628 分を 100 分超える労働
+            var days = daily.flexDaysTotalling(LocalDate.of(2026, 5, 1),
+                    Duration.ofMinutes(10_728), Duration.ofHours(9));
+
+            var withoutLeave = calculator.calculate(TARO, may, days, flexRule(),
+                    Duration.ZERO, 0);
+            var withLeave = calculator.calculate(TARO, may, days, flexRule(),
+                    Duration.ZERO, 1);
+
+            assertThat(withLeave.statutoryTotalLimit())
+                    .isEqualTo(withoutLeave.statutoryTotalLimit());
+            assertThat(withLeave.overtimeTime()).isEqualTo(withoutLeave.overtimeTime());
+            assertThat(withLeave.overtimeTime()).isEqualTo(Duration.ofMinutes(100));
+        }
+
+        /** 説明のための数値として結果に残す。所定総がなぜその値かを後から辿れるようにする。 */
+        @Test
+        @DisplayName("UT-LV-46 年休の日数が清算結果に残る")
+        void paidLeaveDaysAreKept() {
+            var may = period(2026, 5);
+            var days = daily.week(LocalDate.of(2026, 5, 1), 30, Duration.ofHours(8));
+
+            assertThat(calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 3)
+                    .paidLeaveDays()).isEqualTo(3);
+        }
+
+        /**
+         * <strong>欠勤との対比。</strong> 年休と欠勤はどちらも実労働 0 の所定労働日だが、
+         * 年休は所定総から除き、欠勤は除かない。
+         */
+        @Test
+        @DisplayName("UT-LV-47 欠勤 1 日は不足時間が立つ")
+        void absenceStillCountsAsShortage() {
+            var may = period(2026, 5);
+            var days = daily.week(LocalDate.of(2026, 5, 1), 30, Duration.ofHours(8));
+
+            assertThat(calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0)
+                    .shortageTime()).isEqualTo(Duration.ofHours(8));
+        }
+
+        /**
+         * 呼ぶ側が「カレンダー上 {@code WORKDAY} である日」に絞っていれば起こらない。
+         * 起きたなら絞りが漏れているので、<strong>負の所定総を保存する前に落とす</strong>。
+         */
+        @Test
+        @DisplayName("UT-LV-61 年休の日数が所定労働日数を超えると例外になる")
+        void moreLeaveThanWorkdays() {
+            var may = period(2026, 5);
+            var days = daily.week(LocalDate.of(2026, 5, 1), 1, Duration.ofHours(8));
+
+            assertThatThrownBy(() ->
+                    calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 999))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("所定労働日数を超えています");
+        }
+    }
+
 }

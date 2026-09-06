@@ -11,6 +11,11 @@ spring:
 
 kintai:
   business-zone: Asia/Tokyo
+  paid-leave:
+    grant-scheduler:
+      # ★ テストで年休の付与バッチを動かさない。
+      #   固定した時計とは無関係に実時刻で走り、テストの前提を黙って書き換える
+      enabled: false
 
 logging:
   level:

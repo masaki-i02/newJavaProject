@@ -42,6 +42,13 @@ spring:
 # 変換は shared.domain.BusinessZone（Asia/Tokyo）に集約する（アーキテクチャ設計書 6.3）。
 # 設定値にはしない。あとから変えると、過去に記録した打刻の解釈まで遡って変わる
 
+kintai:
+  paid-leave:
+    grant-scheduler:
+      enabled: true
+      # 深夜に実行する。付与日は 0 時に到来するので、その日のうちに作られる
+      cron: "0 30 2 * * *"
+
 management:
   endpoints:
     web:

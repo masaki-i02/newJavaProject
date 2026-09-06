@@ -190,6 +190,31 @@ public class MonthlyAttendanceService {
                         .formatted(correctionRequestId)), OptionalLong.empty());
     }
 
+    /**
+     * 年休の承認・取消により下書きへ戻す（BR-16）。
+     *
+     * <p><strong>提出済でなければ何もしない。</strong>
+     * 年休は下書きの月でも承認されうるが、戻すべき状態は提出済だけである。
+     *
+     * <p><strong>申請中の取下げでは呼ばない。</strong>
+     * 承認されていない年休は所定総を変えていないので、戻す理由が無い。
+     * 呼ぶと、取り下げただけで承認者の待ち行列からその月が消え、
+     * しかも {@code REVERT_BY_LEAVE} という嘘の証跡が残る（CLAUDE.md 落とし穴 95）。
+     */
+    @Transactional
+    public void revertByLeave(EmployeeId employeeId, YearMonth month, EmployeeId actor,
+                              UUID leaveRequestId) {
+        Optional<MonthlyAttendance> found = attendances.find(employeeId, month);
+        if (found.isEmpty()
+                || !(found.get().status() instanceof MonthlyAttendanceStatus.Submitted)) {
+            return;
+        }
+        MonthlyAttendance current = found.get();
+        apply(current, current.revertByLeave(), ApprovalEventKind.REVERT_BY_LEAVE,
+                actor, Optional.of("年次有給休暇の承認・取消による自動差戻し（申請 ID: %s）"
+                        .formatted(leaveRequestId)), OptionalLong.empty());
+    }
+
     /** その月の状態。閲覧範囲を確かめてから返す。 */
     @Transactional(readOnly = true)
     public Optional<MonthlyAttendance> find(Requester requester, EmployeeId employeeId,

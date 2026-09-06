@@ -28,6 +28,9 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * @param overtimeTime        時間外労働の合計
  * @param shortageTime        不足時間。欠勤控除の対象
  * @param nightTime           深夜労働の合計
+ * @param paidLeaveDays       年次有給休暇を取得した日数（BR-16）。
+ *                            <strong>所定総がなぜその値なのかを説明するための数値</strong>であり、
+ *                            {@code leave} が所有する概念（申請・付与）ではない
  * @param weeklyBreakdown     週ごとの内訳。<strong>当該月が引き受ける分</strong>
  * @param agreementUsage      36 協定の消化状況
  */
@@ -47,6 +50,7 @@ public record MonthlySettlement(
         Duration overtimeTime,
         Duration shortageTime,
         Duration nightTime,
+        int paidLeaveDays,
         List<WeeklyOvertimeCharge> weeklyBreakdown,
         AgreementUsage agreementUsage) {
 
@@ -76,6 +80,9 @@ public record MonthlySettlement(
             }
         }
         weeklyBreakdown = List.copyOf(weeklyBreakdown);
+        if (paidLeaveDays < 0) {
+            throw new IllegalArgumentException("年休の日数を負にはできません: " + paidLeaveDays);
+        }
 
         // ★ 対象労働時間 = 実労働 − 法定休日労働。
         //   法定休日を含めると、休日に働いた分だけ時間外が水増しされ 35% と 25% の二重取りになる

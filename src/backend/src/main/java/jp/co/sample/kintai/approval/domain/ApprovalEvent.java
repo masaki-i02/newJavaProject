@@ -34,7 +34,8 @@ public record ApprovalEvent(MonthlyAttendanceId monthlyAttendanceId,
 
     private static boolean requiresComment(ApprovalEventKind kind) {
         return switch (kind) {
-            case REJECT, REVOKE_APPROVAL, REVERT_BY_CORRECTION, PROXY_SUBMIT -> true;
+            case REJECT, REVOKE_APPROVAL, REVERT_BY_CORRECTION, REVERT_BY_LEAVE,
+                 PROXY_SUBMIT -> true;
             case SUBMIT, APPROVE, CLOSE -> false;
         };
     }

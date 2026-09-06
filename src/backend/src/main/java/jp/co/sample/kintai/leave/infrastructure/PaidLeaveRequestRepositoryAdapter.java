@@ -113,14 +113,9 @@ class PaidLeaveRequestRepositoryAdapter implements PaidLeaveRequestRepository {
     }
 
     @Override
-    public List<PaidLeaveRequest> findPending(List<EmployeeId> visibleEmployeeIds) {
-        if (visibleEmployeeIds.isEmpty()) {
-            return List.of();
-        }
-        UUID[] ids = visibleEmployeeIds.stream().map(EmployeeId::value).toArray(UUID[]::new);
-        return jdbc.query(SELECT + " WHERE status = 'SUBMITTED' AND employee_id = ANY(?)"
-                        + " ORDER BY leave_date, requested_at",
-                this::toRequest, (Object) ids);
+    public List<PaidLeaveRequest> findPending() {
+        return jdbc.query(SELECT + " WHERE status = 'SUBMITTED'"
+                + " ORDER BY leave_date, requested_at", this::toRequest);
     }
 
     @Override

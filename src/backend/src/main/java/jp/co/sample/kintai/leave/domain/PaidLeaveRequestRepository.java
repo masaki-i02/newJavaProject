@@ -23,8 +23,14 @@ public interface PaidLeaveRequestRepository {
     /** その期間の承認済みの取得日。{@code PaidLeaveDays} の実装が使う。 */
     List<LocalDate> findApprovedDates(EmployeeId employeeId, DateRange period);
 
-    /** 承認待ちの一覧。閲覧できる社員に絞る。 */
-    List<PaidLeaveRequest> findPending(List<EmployeeId> visibleEmployeeIds);
+    /**
+     * 承認待ちの一覧。
+     *
+     * <p><strong>閲覧範囲では絞らない。</strong>
+     * 「配下部署か」は組織と基準日に依存するので、SQL に写すと
+     * 組織の解決を 2 か所に持つことになる。絞るのは {@code application} 層である。
+     */
+    List<PaidLeaveRequest> findPending();
 
     /** 証跡を追記する。 */
     void appendEvent(LeaveRequestEvent event);

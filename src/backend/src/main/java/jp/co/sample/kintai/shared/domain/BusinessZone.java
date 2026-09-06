@@ -22,8 +22,17 @@ import java.time.ZoneId;
  */
 public final class BusinessZone {
 
+    /**
+     * ゾーンの名前。
+     *
+     * <p>注釈の属性（{@code @Scheduled(zone = ...)}）は定数式しか受け取れないので、
+     * {@link #ID} を渡せない。<strong>文字列をその場に書かない。</strong>
+     * 2 か所に書くと、片方だけを直した状態が生まれる。
+     */
+    public static final String NAME = "Asia/Tokyo";
+
     /** {@code Asia/Tokyo}。 */
-    public static final ZoneId ID = ZoneId.of("Asia/Tokyo");
+    public static final ZoneId ID = ZoneId.of(NAME);
 
     private BusinessZone() {
     }

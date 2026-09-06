@@ -28,5 +28,14 @@ public enum ApprovalEventKind {
     REVOKE_APPROVAL,
 
     /** 訂正申請の承認による自動差戻し。<strong>理由が必須。</strong> */
-    REVERT_BY_CORRECTION
+    REVERT_BY_CORRECTION,
+
+    /**
+     * 年次有給休暇の承認・取消による自動差戻し（BR-16）。<strong>理由が必須。</strong>
+     *
+     * <p><strong>{@code REVERT_BY_CORRECTION} を流用しない。</strong>
+     * どちらも提出済 → 下書きだが原因が違う。区別できないと、
+     * 打刻を一度も訂正していない社員の履歴に「訂正による差戻し」が並ぶ。
+     */
+    REVERT_BY_LEAVE
 }

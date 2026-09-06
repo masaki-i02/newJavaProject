@@ -85,6 +85,19 @@ public record MonthlyAttendance(MonthlyAttendanceId id, EmployeeId employeeId,
         return withStatus(new MonthlyAttendanceStatus.Draft());
     }
 
+    /**
+     * 年休の承認・取消により下書きへ戻す（BR-16）。
+     *
+     * <p>年休を取得した日は所定労働日数から除かれる（BR-05）ので、
+     * 年休の承認と取消は<strong>月次清算を変える。</strong>
+     * 訂正の承認とまったく同じ形で、承認者が見た内容と確定する内容が
+     * 食い違わないようにする。
+     */
+    public MonthlyAttendance revertByLeave() {
+        requireStatus(MonthlyAttendanceStatus.Submitted.class, "年休による差戻し");
+        return withStatus(new MonthlyAttendanceStatus.Draft());
+    }
+
     /** 締める（人事）。<strong>締め済からの遷移は定義しない。</strong> */
     public MonthlyAttendance close(EmployeeId closedBy, LocalDateTime at) {
         var approved = requireStatus(MonthlyAttendanceStatus.Approved.class, "締め");

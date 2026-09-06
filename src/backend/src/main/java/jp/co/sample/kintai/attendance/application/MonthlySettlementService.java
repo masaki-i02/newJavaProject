@@ -29,9 +29,11 @@ import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.EmployeeVisibility;
 import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
+import jp.co.sample.kintai.shared.domain.PaidLeaveDays;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
+import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
@@ -56,6 +58,7 @@ public class MonthlySettlementService {
     private final CompanyCalendar calendar;
     private final MonthClosureQuery monthClosure;
     private final EmployeeVisibility visibility;
+    private final PaidLeaveDays paidLeaveDays;
 
     public MonthlySettlementService(DailyAttendanceRepository dailyAttendances,
                                     TimeClockEventRepository timeClocks,
@@ -64,7 +67,8 @@ public class MonthlySettlementService {
                                     EmployeeRepository employees,
                                     CompanyCalendar calendar,
                                     MonthClosureQuery monthClosure,
-                                    EmployeeVisibility visibility) {
+                                    EmployeeVisibility visibility,
+                                    PaidLeaveDays paidLeaveDays) {
         this.dailyAttendances = dailyAttendances;
         this.timeClocks = timeClocks;
         this.settlements = settlements;
@@ -73,6 +77,7 @@ public class MonthlySettlementService {
         this.calendar = calendar;
         this.monthClosure = monthClosure;
         this.visibility = visibility;
+        this.paidLeaveDays = paidLeaveDays;
     }
 
     /**
@@ -114,7 +119,30 @@ public class MonthlySettlementService {
                 settlements.annualSubjectTimeBefore(employeeId, period.month());
 
         return new MonthlySettlementCalculator(calendar)
-                .calculate(employeeId, period, days, workRule, annualBefore);
+                .calculate(employeeId, period, days, workRule, annualBefore,
+                        paidLeaveDaysIn(employeeId, period));
+    }
+
+    /**
+     * 所定労働日数から除く年休の日数（BR-16）。
+     *
+     * <p><strong>3 つの条件をすべて課す。</strong> どれを落としても実害がある。
+     *
+     * <ul>
+     *   <li><strong>清算期間（暦月 ∩ 在籍期間）の中</strong> …
+     *       落とすと、月中入社・月中退職の月で在籍していない日の年休を引いてしまう</li>
+     *   <li><strong>カレンダー上 {@code WORKDAY}</strong> …
+     *       年休を承認したあとにカレンダーでその日を休日に変えると（未締めなら通る）、
+     *       所定労働日数より年休の日数が多くなる。負の所定総は保存できないので
+     *       業務エラーですらない 500 になる（CLAUDE.md 落とし穴 81 と同型）</li>
+     *   <li><strong>承認済み</strong> … ポートがそう定義している。
+     *       未処理・却下・取下げで所定総が変わってはいけない</li>
+     * </ul>
+     */
+    private int paidLeaveDaysIn(EmployeeId employeeId, SettlementPeriod period) {
+        return (int) paidLeaveDays.approvedOn(employeeId, period.period()).stream()
+                .filter(date -> calendar.dayTypeOf(date) == DayType.WORKDAY)
+                .count();
     }
 
     @Transactional(readOnly = true)
