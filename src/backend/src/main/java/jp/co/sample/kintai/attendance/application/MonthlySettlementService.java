@@ -16,6 +16,7 @@ import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceRepository;
 import jp.co.sample.kintai.attendance.domain.TimeClockEventRepository;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlyDayCounts;
+import jp.co.sample.kintai.attendance.domain.monthly.AgreementUsage;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlement;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementCalculator;
 import jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementRepository;
@@ -303,6 +304,70 @@ public class MonthlySettlementService {
             throw new AccessDeniedException();
         }
         return settlements.find(employeeId, month);
+    }
+
+    /**
+     * 36 協定の超過者一覧（04 API 設計書 4）。
+     *
+     * <p><strong>判定はドメインに任せる。</strong>
+     * 「超えているか」は年度の累計と休日労働の扱いを含む業務ルールであり、
+     * {@code AgreementUsage} が持っている。SQL の {@code WHERE} に写すと
+     * 同じ規則が 2 か所に分かれる（落とし穴 69）。
+     *
+     * <p><strong>限度時間に休日労働を数えない。</strong>
+     * 36 条 3 項・4 項の対象は時間外労働だけで、休日労働を含めるのは
+     * 6 項 2 号・3 号という<strong>別の規制</strong>である（落とし穴 52）。
+     *
+     * <p>社員番号・氏名・部署は返さない。{@code employee} が所有する概念である。
+     */
+    @Transactional(readOnly = true)
+    public List<AgreementAlert> agreementAlerts(Requester requester, YearMonth month,
+                                                AlertType type) {
+        if (!requester.has(Role.HR)) {
+            throw new AccessDeniedException();
+        }
+        return settlements.findByMonth(month).stream()
+                .map(settlement -> new AgreementAlert(settlement.employeeId(),
+                        settlement.agreementUsage()))
+                .filter(alert -> type.matches(alert.usage()))
+                .toList();
+    }
+
+    /**
+     * 一覧に載せる条件。
+     *
+     * <p><strong>月と年を分けて絞れるようにする。</strong>
+     * 月の限度を超えた社員と、年の限度に迫っている社員では、
+     * 人事が取る手段（当月の是正 / 特別条項の検討）が違う。
+     */
+    public enum AlertType {
+        /** 月の限度時間（原則 45 時間）を超えた。 */
+        MONTHLY {
+            @Override
+            boolean matches(AgreementUsage usage) {
+                return usage.exceedsMonthly();
+            }
+        },
+        /** 年の限度時間（原則 360 時間）を超えた。 */
+        ANNUAL {
+            @Override
+            boolean matches(AgreementUsage usage) {
+                return usage.exceedsAnnual();
+            }
+        },
+        /** どちらかを超えた。既定。 */
+        ALL {
+            @Override
+            boolean matches(AgreementUsage usage) {
+                return usage.exceedsMonthly() || usage.exceedsAnnual();
+            }
+        };
+
+        abstract boolean matches(AgreementUsage usage);
+    }
+
+    /** 超過している社員 1 人ぶん。 */
+    public record AgreementAlert(EmployeeId employeeId, AgreementUsage usage) {
     }
 
     /** その月の版。楽観ロックのために画面へ返す。 */

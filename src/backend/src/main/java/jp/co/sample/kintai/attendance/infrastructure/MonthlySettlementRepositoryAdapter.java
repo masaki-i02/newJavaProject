@@ -136,21 +136,30 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
         }
     }
 
+    /**
+     * 月次清算を読む列と写し方。
+     *
+     * <p><strong>1 か所に置く。</strong> 1 人ぶんと月まるごとで別々に書くと、
+     * 列を足したときに片方だけが古くなる（CLAUDE.md 落とし穴 67）。
+     */
+    private static final String SELECT_SETTLEMENT = """
+            SELECT employee_id, target_month,
+                   id, period_from, period_to_exclusive, work_rule_series_id,
+                   working_time_system, working_minutes, legal_holiday_minutes,
+                   target_working_minutes, scheduled_total_minutes,
+                   statutory_total_limit_minutes, daily_overtime_minutes,
+                   weekly_overtime_minutes, carried_over_overtime_minutes,
+                   overtime_minutes, shortage_minutes, night_minutes,
+                   paid_leave_days,
+                   annual_agreement_subject_before_minutes,
+                   monthly_agreement_limit_minutes, annual_agreement_limit_minutes
+              FROM monthly_settlements
+            """;
+
     @Override
     public Optional<MonthlySettlement> find(EmployeeId employeeId, YearMonth month) {
-        List<Row> rows = jdbc.query("""
-                SELECT id, period_from, period_to_exclusive, work_rule_series_id,
-                       working_time_system, working_minutes, legal_holiday_minutes,
-                       target_working_minutes, scheduled_total_minutes,
-                       statutory_total_limit_minutes, daily_overtime_minutes,
-                       weekly_overtime_minutes, carried_over_overtime_minutes,
-                       overtime_minutes, shortage_minutes, night_minutes,
-                       paid_leave_days,
-                       annual_agreement_subject_before_minutes,
-                       monthly_agreement_limit_minutes, annual_agreement_limit_minutes
-                FROM monthly_settlements
-                WHERE employee_id = ? AND target_month = ?
-                """,
+        List<Row> rows = jdbc.query(SELECT_SETTLEMENT
+                + " WHERE employee_id = ? AND target_month = ?",
                 (rs, rowNum) -> new Row(
                         (UUID) rs.getObject("id"),
                         rs.getObject("period_from", LocalDate.class),
@@ -171,11 +180,48 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         rs.getInt("monthly_agreement_limit_minutes"),
                         rs.getInt("annual_agreement_limit_minutes")),
                 employeeId.value(), month.atDay(1));
-        if (rows.isEmpty()) {
-            return Optional.empty();
-        }
-        Row row = rows.getFirst();
-        return Optional.of(new MonthlySettlement(
+        return rows.stream().findFirst().map(row -> toDomain(employeeId, month, row));
+    }
+
+    /**
+     * その月に計算済みの月次清算をすべて読む（36 協定の超過者一覧）。
+     *
+     * <p><strong>「超えているか」で SQL 側に絞らせない。</strong>
+     * 限度時間の判定は年度の累計と休日労働の扱いを含む業務ルールであり、
+     * {@code AgreementUsage} が持っている。SQL に写すと 2 か所に分かれる
+     * （CLAUDE.md 落とし穴 69）。行を読んでドメインに判定させる。
+     */
+    @Override
+    public List<MonthlySettlement> findByMonth(YearMonth month) {
+        return jdbc.query(SELECT_SETTLEMENT
+                + " WHERE target_month = ? ORDER BY employee_id",
+                (rs, rowNum) -> java.util.Map.entry(
+                        new EmployeeId((UUID) rs.getObject("employee_id")), new Row(
+                        (UUID) rs.getObject("id"),
+                        rs.getObject("period_from", LocalDate.class),
+                        rs.getObject("period_to_exclusive", LocalDate.class),
+                        (UUID) rs.getObject("work_rule_series_id"),
+                        rs.getString("working_time_system"),
+                        rs.getInt("working_minutes"), rs.getInt("legal_holiday_minutes"),
+                        rs.getInt("target_working_minutes"),
+                        rs.getInt("scheduled_total_minutes"),
+                        rs.getInt("statutory_total_limit_minutes"),
+                        rs.getInt("daily_overtime_minutes"),
+                        rs.getInt("weekly_overtime_minutes"),
+                        rs.getInt("carried_over_overtime_minutes"),
+                        rs.getInt("overtime_minutes"), rs.getInt("shortage_minutes"),
+                        rs.getInt("night_minutes"),
+                        rs.getInt("paid_leave_days"),
+                        rs.getInt("annual_agreement_subject_before_minutes"),
+                        rs.getInt("monthly_agreement_limit_minutes"),
+                        rs.getInt("annual_agreement_limit_minutes"))),
+                month.atDay(1)).stream()
+                .map(entry -> toDomain(entry.getKey(), month, entry.getValue()))
+                .toList();
+    }
+
+    private MonthlySettlement toDomain(EmployeeId employeeId, YearMonth month, Row row) {
+        return new MonthlySettlement(
                 employeeId,
                 new SettlementPeriod(month, new DateRange(row.from(), row.toExclusive())),
                 new WorkRuleSeriesId(row.seriesId()),
@@ -187,7 +233,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 row.paidLeaveDays(), weeksOf(row.id()),
                 new AgreementUsage(of(row.overtime()), of(row.legalHoliday()),
                         of(row.monthlyLimit()), of(row.annualLimit()),
-                        of(row.annualBefore()))));
+                        of(row.annualBefore())));
     }
 
     /**

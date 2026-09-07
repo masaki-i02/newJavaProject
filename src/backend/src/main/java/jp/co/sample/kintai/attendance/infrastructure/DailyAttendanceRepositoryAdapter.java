@@ -46,8 +46,29 @@ class DailyAttendanceRepositoryAdapter implements DailyAttendanceRepository {
         this.jdbc = jdbc;
     }
 
+    /**
+     * その勤務日の版。
+     *
+     * <p><strong>行が無ければ 0 を返し、行がある場合は必ず 1 以上である。</strong>
+     * 作成時に 1 を入れておかないと「行が無い」と「作られたばかり」が
+     * 同じ値になり、古い版がそのまま一致して楽観ロックが素通りする
+     * （CLAUDE.md 落とし穴 57）。
+     */
+    @Override
+    public long currentVersion(EmployeeId employeeId, LocalDate workDate) {
+        List<Long> found = jdbc.queryForList("""
+                SELECT version FROM daily_attendances
+                WHERE employee_id = ? AND work_date = ?
+                """, Long.class, employeeId.value(), workDate);
+        return found.isEmpty() ? 0L : found.getFirst();
+    }
+
     @Override
     public void save(EmployeeId employeeId, DailyAttendance attendance, WorkRuleId workRuleId) {
+        // ★ 版は消す前に読む。消してから読むと必ず 0 になり、
+        //   再計算のたびに版が 1 へ戻って楽観ロックが働かなくなる
+        long next = currentVersion(employeeId, attendance.workDate()) + 1;
+
         // 再計算なので、同じ社員・同じ勤務日の行は内訳ごと消して入れ直す。
         // ON DELETE CASCADE により slices も消える
         jdbc.update("DELETE FROM daily_attendances WHERE employee_id = ? AND work_date = ?",
@@ -61,8 +82,8 @@ class DailyAttendanceRepositoryAdapter implements DailyAttendanceRepository {
                         working_time_system, work_rule_id, working_minutes, break_minutes,
                         base_minutes, overtime_within_statutory_minutes,
                         overtime_beyond_statutory_minutes, night_minutes,
-                        legal_holiday_minutes, break_requirement_satisfied)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        legal_holiday_minutes, break_requirement_satisfied, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 id, employeeId.value(), attendance.workDate(), attendance.dayType().name(),
                 attendance.workingTimeSystem().name(), workRuleId.value(),
@@ -71,7 +92,7 @@ class DailyAttendanceRepositoryAdapter implements DailyAttendanceRepository {
                 minutes(attendance.overtimeWithinStatutoryTime()),
                 minutes(attendance.overtimeBeyondStatutoryTime()),
                 minutes(attendance.nightTime()), minutes(attendance.legalHolidayTime()),
-                breakSatisfied);
+                breakSatisfied, next);
 
         int sequenceNo = 1;
         for (WorkSlice slice : attendance.slices()) {

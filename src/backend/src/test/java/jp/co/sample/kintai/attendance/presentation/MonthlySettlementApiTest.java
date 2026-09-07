@@ -342,4 +342,131 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isCreated());
         }
     }
+
+    /**
+     * 36 協定の超過者一覧と日次の再計算（IT-API-36〜41）。
+     *
+     * <p><strong>どちらも設計書にあって実装が無かった経路である</strong>
+     * （CLAUDE.md 落とし穴 138）。
+     */
+    @Nested
+    @DisplayName("超過者一覧と日次の再計算")
+    class AlertsAndDailyRecalculation {
+
+        /** 45 時間を超えるまで残業する。5 月の平日に 4 時間ずつ足す。 */
+        private void overtimeUntilExceeded() {
+            for (LocalDate d = MAY.atDay(1); d.isBefore(MAY.plusMonths(1).atDay(1));
+                    d = d.plusDays(1)) {
+                if (d.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                        || d.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+                    continue;
+                }
+                punch(d, new TimeClockEvent.ClockIn(d.atTime(9, 0)));
+                punch(d, new TimeClockEvent.BreakStart(d.atTime(12, 0)));
+                punch(d, new TimeClockEvent.BreakEnd(d.atTime(13, 0)));
+                punch(d, new TimeClockEvent.ClockOut(d.atTime(22, 0)));
+                calculate(d);
+            }
+            settlements.settle(taro, MAY);
+        }
+
+        @Test
+        @DisplayName("IT-API-36 限度時間を超えた社員が一覧に現れる")
+        void exceeded() throws Exception {
+            overtimeUntilExceeded();
+
+            mockMvc.perform(get("/api/settlements/agreement-alerts")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .param("month", "2026-05"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.month").value("2026-05"))
+                    .andExpect(jsonPath("$.alerts[0].employeeId")
+                            .value(taro.value().toString()))
+                    .andExpect(jsonPath("$.alerts[0].exceedsMonthly").value(true))
+                    .andExpect(jsonPath("$.summary.monthlyExceeded").value(1))
+                    // ★ 社員番号・氏名は返さない。employee が所有する概念である
+                    .andExpect(jsonPath("$.alerts[0].employeeNumber").doesNotExist())
+                    .andExpect(jsonPath("$.alerts[0].name").doesNotExist());
+        }
+
+        /**
+         * <strong>超えていない月は載せない。</strong>
+         * 全員を返して画面に絞らせると、限度時間の判定が画面にも生まれる。
+         */
+        @Test
+        @DisplayName("IT-API-37 超えていない社員は一覧に現れない")
+        void notExceeded() throws Exception {
+            regularDay(LocalDate.of(2026, 5, 1));
+            settlements.settle(taro, MAY);
+
+            mockMvc.perform(get("/api/settlements/agreement-alerts")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .param("month", "2026-05"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.alerts.length()").value(0))
+                    .andExpect(jsonPath("$.summary.monthlyExceeded").value(0));
+        }
+
+        @Test
+        @DisplayName("IT-API-38 人事でなければ超過者一覧を見られない")
+        void requiresHumanResources() throws Exception {
+            mockMvc.perform(get("/api/settlements/agreement-alerts")
+                            .with(as(taro, "E0001", Role.EMPLOYEE))
+                            .param("month", "2026-05"))
+                    .andExpect(status().isForbidden());
+        }
+
+        /** 日次の再計算。版が一致すれば通り、版が上がる。 */
+        @Test
+        @DisplayName("IT-API-39 人事は日次を計算し直せ、版が 1 つ上がる")
+        void recalculateDaily() throws Exception {
+            LocalDate workDate = LocalDate.of(2026, 5, 1);
+            regularDay(workDate);
+
+            mockMvc.perform(post("/api/employees/{id}/attendances/{date}/recalculation",
+                            taro.value(), workDate)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\": 1}"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.workDate").value("2026-05-01"))
+                    .andExpect(jsonPath("$.workingMinutes").value(480));
+
+            // 2 回目は版が 2 になっているので、版 1 では通らない
+            mockMvc.perform(post("/api/employees/{id}/attendances/{date}/recalculation",
+                            taro.value(), workDate)
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\": 1}"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:optimistic-lock-failure"));
+        }
+
+        @Test
+        @DisplayName("IT-API-40 本人は日次を計算し直せない")
+        void notForEmployee() throws Exception {
+            LocalDate workDate = LocalDate.of(2026, 5, 1);
+            regularDay(workDate);
+
+            mockMvc.perform(post("/api/employees/{id}/attendances/{date}/recalculation",
+                            taro.value(), workDate)
+                            .with(as(taro, "E0001", Role.EMPLOYEE))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\": 1}"))
+                    .andExpect(status().isForbidden());
+        }
+
+        /** 計算されていない日を「計算し直す」ことはできない。 */
+        @Test
+        @DisplayName("IT-API-41 日次勤怠が無い日の再計算は 404")
+        void notCalculated() throws Exception {
+            mockMvc.perform(post("/api/employees/{id}/attendances/{date}/recalculation",
+                            taro.value(), "2026-05-07")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\": 0}"))
+                    .andExpect(status().isNotFound());
+        }
+    }
 }

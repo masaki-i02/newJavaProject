@@ -102,7 +102,7 @@
 | `DELETE` | `/api/employees/{id}/retirement` | 退職の取消 | `ADMIN` |
 | `GET` | `/api/employees/{id}/assignments` | 所属履歴 | 本人 / 上長 / `HR` / `ADMIN` |
 | `POST` | `/api/employees/{id}/assignments` | 異動の登録 | `ADMIN` |
-| `GET` | `/api/employees/{id}/approver` | 指定月の承認者 | 本人 / `HR` / `ADMIN` |
+| `GET` | `/api/employees/{id}/monthly-attendances/{month}/approver` | 指定月の承認者（[05 が所有](../05_申請承認と締め/API設計書.md)）| 本人 / 上長 / `HR` / `ADMIN` |
 | `GET` | `/api/departments` | 部署ツリー | `APPROVER` / `HR` / `ADMIN` |
 | `POST` | `/api/departments` | 部署の登録 | `ADMIN` |
 | `PATCH` | `/api/departments/{id}` | 部署の更新 | `ADMIN` |
@@ -113,7 +113,7 @@
 
 | ロール | 社員一覧の範囲 | 組織図 |
 | --- | --- | --- |
-| `EMPLOYEE` のみ | 自分自身のみ | **見られない**（自分の所属と承認者は `GET /api/me` と `/approver` で取得） |
+| `EMPLOYEE` のみ | 自分自身のみ | **見られない**（自分の所属は `GET /api/me`、承認者は `GET .../monthly-attendances/{month}/approver` で取得） |
 | `APPROVER` | 自分 + 自分が長を務める部署の配下すべて | 自分が長を務める部署以下 |
 | `HR` / `ADMIN` | 全社員 | 全社 |
 
@@ -129,6 +129,15 @@
 **この判定は Spring Security のロール判定だけでは表現できない。**
 「自分が長を務める部署の配下か」は組織の状態に依存する業務判断であり、
 `application` 層が `OrganizationChart` を用いて行う。
+
+> **承認者の照会は月の下に置く。**
+> 第 1 版は `/api/employees/{id}/approver?month=` としていたが、
+> **月に依存しない承認者は存在しない**（BR-11 の基準日は対象月初日であり、
+> 異動すれば月ごとに変わる）。
+> パスが月を含まないと「その社員の承認者」という月と無関係な概念があるように読め、
+> 呼ぶ側が `month` を省いて当月の値を全期間へ当てる。
+> 導出そのものを持つのは `approval.ApproverPolicy` なので、
+> エンドポイントも 05 が所有する `monthly-attendances` の下に置く。
 
 ---
 

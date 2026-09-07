@@ -110,8 +110,20 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
                 .toList();
     }
 
+    /**
+     * 版を 1 つ進める。
+     *
+     * <p><strong>SQL の側で条件つきに進める。</strong>
+     * 読んでから書くと、その隙間に別の要求が入る。
+     * 更新できた行数が 0 なら、誰かが先に改定している。
+     */
+    @Override
+    public boolean bumpVersion(WorkRuleSeriesId id, long expectedVersion) {
+        return series.bumpVersion(id.value(), expectedVersion) == 1;
+    }
+
     private static WorkRuleSeries toDomain(WorkRuleSeriesEntity entity) {
         return new WorkRuleSeries(new WorkRuleSeriesId(entity.getId()), entity.getName(),
-                WorkRuleMapper.toOptional(entity.getAbolishedOn()));
+                WorkRuleMapper.toOptional(entity.getAbolishedOn()), entity.getVersion());
     }
 }

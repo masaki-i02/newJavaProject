@@ -85,6 +85,28 @@ class WorkRuleRepositoryAdapter implements WorkRuleRepository {
         rules.save(entity);
     }
 
+    /**
+     * 改定する。閉じるほうを<strong>先に流し切ってから</strong>入れる。
+     *
+     * <p>{@code save} を 2 回呼ぶだけでは足りない。
+     * Hibernate は 1 回のフラッシュで<strong>INSERT を UPDATE より先に</strong>実行するので、
+     * 「閉じてから入れた」つもりでも DB には「入れてから閉じた」順で届き、
+     * 期間が重なって {@code work_rules_no_overlap} に弾かれる。
+     */
+    @Override
+    public void revise(List<WorkRule> closed, WorkRule added) {
+        for (WorkRule version : closed) {
+            UUID id = version.id().value();
+            WorkRuleEntity entity = rules.findById(id).orElseGet(() -> new WorkRuleEntity(id));
+            WorkRuleMapper.apply(version, entity);
+            rules.saveAndFlush(entity);
+        }
+        UUID id = added.id().value();
+        WorkRuleEntity entity = new WorkRuleEntity(id);
+        WorkRuleMapper.apply(added, entity);
+        rules.saveAndFlush(entity);
+    }
+
     private List<WorkRuleAssignment> assignmentsOf(EmployeeId employeeId) {
         return assignments.findByEmployeeIdOrderByValidFrom(employeeId.value()).stream()
                 .map(row -> new WorkRuleAssignment(

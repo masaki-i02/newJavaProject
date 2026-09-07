@@ -7,11 +7,13 @@ import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,9 +21,9 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
-import jp.co.sample.kintai.workrule.application.WorkRuleMasterService;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.workrule.application.WorkRuleMasterService;
+import jp.co.sample.kintai.workrule.application.WorkRuleQueryService;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 
@@ -36,9 +38,94 @@ import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
 class WorkRuleMasterController {
 
     private final WorkRuleMasterService master;
+    private final WorkRuleQueryService queries;
 
-    WorkRuleMasterController(WorkRuleMasterService master) {
+    WorkRuleMasterController(WorkRuleMasterService master, WorkRuleQueryService queries) {
         this.master = master;
+        this.queries = queries;
+    }
+
+    /**
+     * 会社カレンダー（API 設計書 3.1）。
+     *
+     * <p><strong>ロールで拒まない。</strong> 所定労働日は全社員の労働条件であり、
+     * 自分がいつ働く約束になっているかは本人が確かめられる必要がある。
+     *
+     * <p><strong>未登録の日も {@code WORKDAY} として返す。</strong>
+     * 「配列に無い日は所定労働日」という暗黙の規則を受け取る側に持たせない。
+     */
+    @GetMapping("/calendars")
+    CalendarResponse calendars(@AuthenticationPrincipal AuthenticatedEmployee principal,
+                               @RequestParam LocalDate from,
+                               @RequestParam LocalDate toExclusive) {
+        return CalendarResponse.of(
+                queries.カレンダー(principal.toRequester(), from, toExclusive));
+    }
+
+    /**
+     * 就業規則が引けない在籍者（API 設計書 2.4）。
+     *
+     * <p><strong>この一覧が空でないと、その社員の勤怠は計算できない。</strong>
+     * 「在籍者全員に規則が適用されている」ことは DB では守れないので、
+     * 人事が気づける経路をここに置く（落とし穴 19 の打刻は通るが計算が止まる状態）。
+     */
+    @GetMapping("/work-rule-assignments/unassigned")
+    UnassignedResponse unassigned(@AuthenticationPrincipal AuthenticatedEmployee principal,
+                                  @RequestParam(required = false) LocalDate date) {
+        var found = queries.規則の無い在籍者(principal.toRequester(),
+                java.util.Optional.ofNullable(date));
+        return new UnassignedResponse(found.date(),
+                found.employeeIds().stream().map(id -> id.value().toString()).toList());
+    }
+
+    /** 社員への適用履歴。本人と上長も見られる（自分の労働条件そのものである）。 */
+    @GetMapping("/employees/{employeeId}/work-rule-assignments")
+    List<AssignmentResponse> assignments(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId) {
+        return queries.適用履歴(principal.toRequester(), new EmployeeId(employeeId)).stream()
+                .map(AssignmentResponse::of).toList();
+    }
+
+    /** カレンダーの応答。`workdayCount` はフレックスの所定総労働時間の表示に要る。 */
+    record CalendarResponse(LocalDate from, LocalDate toExclusive,
+                            List<Day> days, int workdayCount) {
+
+        static CalendarResponse of(WorkRuleQueryService.CalendarView view) {
+            return new CalendarResponse(view.period().from(), view.period().toExclusive(),
+                    view.days().stream()
+                            .map(day -> new Day(day.date(), day.dayType().name()))
+                            .toList(),
+                    view.workdayCount());
+        }
+
+        record Day(LocalDate date, String dayType) {
+        }
+    }
+
+    /**
+     * 規則の無い在籍者。
+     *
+     * <p><strong>社員番号も氏名も返さない。</strong>
+     * {@code employee} が所有する概念であり、ここに混ぜると
+     * {@code workrule} が持っていない情報の提供者になる（設計規約チェックリスト 3）。
+     */
+    record UnassignedResponse(LocalDate date, List<String> employeeIds) {
+    }
+
+    /** 適用の 1 件。期間は半開区間で返す。 */
+    record AssignmentResponse(String workRuleSeriesId, LocalDate validFrom,
+                              @com.fasterxml.jackson.annotation.JsonInclude(
+                                      com.fasterxml.jackson.annotation.JsonInclude
+                                              .Include.NON_NULL)
+                              LocalDate validToExclusive) {
+
+        static AssignmentResponse of(
+                jp.co.sample.kintai.workrule.domain.WorkRuleAssignment assignment) {
+            DateRange period = assignment.period();
+            return new AssignmentResponse(assignment.seriesId().value().toString(),
+                    period.from(), period.isUnbounded() ? null : period.toExclusive());
+        }
     }
 
     @PutMapping("/calendars/{date}")

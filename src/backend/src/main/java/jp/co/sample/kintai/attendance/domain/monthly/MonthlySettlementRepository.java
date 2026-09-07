@@ -39,6 +39,15 @@ public interface MonthlySettlementRepository {
     Optional<MonthlySettlement> find(EmployeeId employeeId, YearMonth month);
 
     /**
+     * その月に計算済みの月次清算をすべて返す（36 協定の超過者一覧）。
+     *
+     * <p><strong>「超えている行だけ」を返さない。</strong>
+     * 限度時間の判定は {@code AgreementUsage} が持つ業務ルールである。
+     * 絞り込みを SQL へ写すと、判定が 2 か所に分かれる（落とし穴 69）。
+     */
+    java.util.List<MonthlySettlement> findByMonth(YearMonth month);
+
+    /**
      * 当年度の、指定月より前の 36 協定対象時間の累計（BR-12）。
      *
      * <p>年度をまたぐと 0 から数え直す。暦年で数えると 1 月に上限がリセットされ、

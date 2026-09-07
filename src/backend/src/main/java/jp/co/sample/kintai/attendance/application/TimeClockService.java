@@ -23,6 +23,7 @@ import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
 import jp.co.sample.kintai.shared.domain.Requester;
+import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
@@ -262,6 +263,76 @@ public class TimeClockService {
         return calculateIfClosed(employeeId, workDate,
                 timeClocks.findByWorkDate(employeeId, workDate),
                 unclosedWorkDates(employeeId, workDate));
+    }
+
+    /**
+     * 人事の指示で日次を計算し直す（03 API 設計書 3.3）。
+     *
+     * <p><strong>計算そのものは {@link #recalculate(EmployeeId, LocalDate)} に任せる。</strong>
+     * 手順を書き写すと、丸めや勤務日の扱いを直したときに片方だけが古くなる
+     * （CLAUDE.md 落とし穴 67）。ここが足すのは<strong>4 つの検査</strong>だけである。
+     *
+     * <ol>
+     *   <li>人事か（本人には開放しない。要件 4 章の {@code EMPLOYEE} に再計算は無い）</li>
+     *   <li>対象の日次勤怠が存在するか（無い日を「計算し直す」ことはできない）</li>
+     *   <li>締め済みの月でないか（確定した値が予告なく動く）</li>
+     *   <li>版が一致するか（画面が見ていない結果を上書きしない）</li>
+     * </ol>
+     *
+     * <p><strong>就業規則の改定を契機に自動では走らせない。</strong>
+     * 改定した瞬間に過去の全社員の勤怠が変わると、確定済みの値が予告なく動く。
+     */
+    @Transactional
+    public DailyAttendance recalculate(Requester requester, EmployeeId employeeId,
+                                       LocalDate workDate, long expectedVersion) {
+        if (!requester.has(Role.HR)) {
+            throw new AccessDeniedException();
+        }
+        if (dailyAttendances.find(employeeId, workDate).isEmpty()) {
+            throw new DailyAttendanceNotCalculatedException(workDate);
+        }
+        YearMonth month = YearMonth.from(workDate);
+        if (!monthClosure.acceptsTimeClock(employeeId, month)) {
+            throw new MonthNotOpenForTimeClockException(workDate);
+        }
+        long current = dailyAttendances.currentVersion(employeeId, workDate);
+        if (current != expectedVersion) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "日次勤怠 %s は版 %d ではありません".formatted(workDate, expectedVersion));
+        }
+        recalculate(employeeId, workDate);
+        return dailyAttendances.find(employeeId, workDate)
+                .orElseThrow(() -> new DailyAttendanceNotCalculatedException(workDate));
+    }
+
+    /**
+     * 計算し直そうとした日に、日次勤怠が無い。
+     *
+     * <p>打刻が無い日・未退勤の日は計算されないので、<strong>正常に起こりうる</strong>。
+     */
+    public static final class DailyAttendanceNotCalculatedException extends DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        DailyAttendanceNotCalculatedException(LocalDate workDate) {
+            super("その勤務日の日次勤怠はまだ計算されていません: " + workDate);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:resource-not-found";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.NOT_FOUND;
+        }
+
+        @Override
+        public String title() {
+            return "日次勤怠が見つかりません";
+        }
     }
 
     /** 現在時刻（会社基準の壁掛け時計）。画面が「今日」を組み立てるのに使う。 */

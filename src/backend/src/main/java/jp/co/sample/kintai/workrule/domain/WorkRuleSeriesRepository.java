@@ -17,6 +17,18 @@ public interface WorkRuleSeriesRepository {
     void save(WorkRuleSeries series);
 
     /**
+     * 系列の版を 1 つ進める。改定を積んだことを表す。
+     *
+     * <p><strong>版は系列にだけ持たせる</strong>（API 設計書 2.1）。
+     * 更新の対象は系列（改称・廃止）と改定であり、版そのものは追記されるだけで
+     * 書き換えない。
+     *
+     * @return 進められたら {@code true}。<strong>{@code false} は
+     *         「その版はもう古い」ことを意味する</strong>（誰かが先に改定した）
+     */
+    boolean bumpVersion(WorkRuleSeriesId id, long expectedVersion);
+
+    /**
      * 社員に系列を適用する。
      *
      * <p><strong>指すのは版ではなく系列である。</strong>

@@ -35,4 +35,17 @@ public interface WorkRuleRepository {
     List<WorkRule> findVersionsOf(WorkRuleSeriesId seriesId);
 
     void save(WorkRule workRule);
+
+    /**
+     * 改定する。<strong>現行版を閉じてから新しい版を入れるまでを 1 つの操作にする。</strong>
+     *
+     * <p>呼ぶ側で {@code save} を 2 回に分けると、
+     * <strong>JPA が INSERT を UPDATE より先に流す</strong>ので、
+     * 一瞬だけ期間が重なって {@code work_rules_no_overlap} に弾かれる。
+     * 順序は永続化の都合なので、永続化の側に閉じ込める（落とし穴 73）。
+     *
+     * @param closed 閉じた現行版（0 件のこともある。初版より前へは改定できない）
+     * @param added  追加する版
+     */
+    void revise(java.util.List<WorkRule> closed, WorkRule added);
 }

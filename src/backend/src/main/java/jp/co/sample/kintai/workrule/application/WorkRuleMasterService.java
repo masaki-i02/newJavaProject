@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import org.springframework.stereotype.Service;
@@ -33,6 +34,14 @@ import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendarRepository;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.RegisteredCalendar;
+import jp.co.sample.kintai.workrule.domain.FlextimeSystem;
+import jp.co.sample.kintai.workrule.domain.NightWindow;
+import jp.co.sample.kintai.workrule.domain.PremiumRates;
+import jp.co.sample.kintai.workrule.domain.ScheduleCapacityWarning;
+import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
+import jp.co.sample.kintai.workrule.domain.WorkRuleId;
+import jp.co.sample.kintai.workrule.domain.WorkRuleSeries;
+import jp.co.sample.kintai.workrule.domain.WorkingTimeSystem;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkRuleSeriesId;
@@ -560,6 +569,257 @@ public class WorkRuleMasterService {
         series.assign(employeeId, seriesId, validFrom);
         // ★ 適用は期限を持たないので、以後のすべての年度に効く
         requireDivisorUnchangedFrom(validFrom);
+    }
+
+    /**
+     * 就業規則を新規に登録する（系列 + 初版。API 設計書 1 の一覧）。
+     *
+     * <p><strong>締め済みの月を拒まない。</strong>
+     * 新しい系列はまだ誰にも適用されていないので、
+     * 確定済みの勤怠を 1 件も動かさない。
+     * 拒むのは<strong>適用</strong>（{@code 就業規則を適用する}）の側であり、
+     * そこには締めの検査がある。
+     * ここで拒むと、過去に遡って規則を整備することが永久にできなくなる。
+     *
+     * <p>同じ理由で<strong>分母の検査も要らない</strong>。
+     * 分母は「その日に適用されている系列」から求めるので（落とし穴 131）、
+     * 適用されていない系列は分母に入らない。
+     */
+    @Transactional
+    public RegisteredWorkRule 就業規則を登録する(Requester requester, String name,
+                                        WorkRuleSpec spec) {
+        requireHumanResources(requester);
+        requireName(name);
+        WorkRuleSeriesId seriesId = new WorkRuleSeriesId(UUID.randomUUID());
+        series.save(WorkRuleSeries.active(seriesId, name.strip()));
+        WorkRule initial = spec.toWorkRule(seriesId, DateRange.startingAt(spec.validFrom()));
+        workRules.save(initial);
+        // ★ 版は読み直して返す。手で 1 と書くと、DB が 0 から始めていたときに
+        //   応答だけが嘘をつき、次の改定が必ず 409 になる
+        long version = series.findById(seriesId).map(WorkRuleSeries::version).orElse(0L);
+        return new RegisteredWorkRule(seriesId, initial.id(), version,
+                capacityWarnings(spec, spec.validFrom()));
+    }
+
+    /**
+     * 就業規則を改定する（API 設計書 2.2）。
+     *
+     * <p><strong>既存の版を書き換えない。現行版を閉じて、新しい版を足す。</strong>
+     * 書き換えると、過去の勤怠が当時とは違う規則で再計算される。
+     *
+     * <p><strong>社員の適用行は一切触らない。</strong>
+     * 適用は系列を指しているので、新しい版は {@code validFrom} 以降で自動的に選ばれる
+     * （落とし穴 13）。
+     *
+     * <p><strong>閉じてから入れる。</strong> 入れるだけにすると期間が重なり、
+     * 排他制約に弾かれて<strong>一度作った系列を二度と改定できなくなる</strong>
+     * （落とし穴 73）。
+     */
+    @Transactional
+    public RegisteredWorkRule 就業規則を改定する(Requester requester, WorkRuleSeriesId seriesId,
+                                        long expectedVersion, WorkRuleSpec spec) {
+        requireHumanResources(requester);
+        WorkRuleSeries target = series.findById(seriesId)
+                .orElseThrow(() -> new WorkRuleSeriesNotFoundException(seriesId));
+        if (!target.isActiveOn(spec.validFrom())) {
+            throw new AbolishedWorkRuleSeriesException(seriesId);
+        }
+        // ★ 締め済みの月を拒む。所定が変われば確定済みの月次清算と矛盾する
+        YearMonth month = YearMonth.from(spec.validFrom());
+        if (monthClosure.isClosedForAnyone(month)) {
+            throw new MonthAlreadyClosedException(month, "就業規則");
+        }
+
+        List<WorkRule> versions = workRules.findVersionsOf(seriesId);
+        requireRevisable(seriesId, versions, spec.validFrom());
+
+        // ★ 版を先に進める。進められなければ誰かが先に改定しているので、
+        //   行を 1 つも書かずに終わる
+        if (!series.bumpVersion(seriesId, expectedVersion)) {
+            throw new org.springframework.dao.OptimisticLockingFailureException(
+                    "就業規則の系列 %s は版 %d ではありません".formatted(seriesId.value(),
+                            expectedVersion));
+        }
+
+        // ★ 閉じるのが先。順序の保証は永続化に閉じ込める（落とし穴 73）
+        List<WorkRule> closed = versions.stream()
+                .filter(current -> current.validPeriod().contains(spec.validFrom()))
+                .map(current -> closedAt(current, spec.validFrom()))
+                .toList();
+        WorkRule added = spec.toWorkRule(seriesId, DateRange.startingAt(spec.validFrom()));
+        workRules.revise(closed, added);
+
+        // ★ 所定が変われば年度の分母が動く。出力済みの年度は守る（落とし穴 133）
+        requireDivisorUnchangedFrom(spec.validFrom());
+        return new RegisteredWorkRule(seriesId, added.id(), expectedVersion + 1,
+                capacityWarnings(spec, spec.validFrom()));
+    }
+
+    /** 現行版を {@code at} で閉じた同じ版。識別子は変えない（同じ行を更新する）。 */
+    private static WorkRule closedAt(WorkRule current, LocalDate at) {
+        return new WorkRule(current.id(), current.seriesId(),
+                new DateRange(current.validPeriod().from(), at),
+                current.workingTimeSystem(), current.statutoryDailyWorkingTime(),
+                current.statutoryWeeklyWorkingTime(), current.nightWindow(),
+                current.premiumRates());
+    }
+
+    /**
+     * 改定できる開始日か。
+     *
+     * <p><strong>指定日以降に別の版があるなら拒む</strong>（409）。
+     * 間に割り込ませると、あとの版の開始日と重なるか、
+     * あとの版を黙って無効にすることになる。
+     */
+    private static void requireRevisable(WorkRuleSeriesId seriesId, List<WorkRule> versions,
+                                         LocalDate validFrom) {
+        for (WorkRule version : versions) {
+            if (!version.validPeriod().from().isBefore(validFrom)) {
+                throw new OverlappingWorkRulePeriodException(seriesId, validFrom);
+            }
+        }
+    }
+
+    /**
+     * 所定総労働時間が法定の総枠を超える月（API 設計書 2.2）。
+     *
+     * <p><strong>拒否しない。</strong> 適法な状態なので登録は許し、人事に知らせる。
+     * 拒むと、実際にそういう規則を運用している会社が登録できなくなる。
+     *
+     * <p>固定時間制では起きない（所定は 1 日ごとに法定内へ収まる）。
+     * 見るのはフレックスだけである。
+     */
+    private List<ScheduleCapacityWarning> capacityWarnings(WorkRuleSpec spec,
+                                                           LocalDate from) {
+        if (!(spec.system() instanceof FlextimeSystem flex)) {
+            return List.of();
+        }
+        YearMonth first = YearMonth.from(from);
+        DateRange span = new DateRange(first.atDay(1), first.plusMonths(12).atDay(1));
+        RegisteredCalendar registered = new RegisteredCalendar(calendar.findByPeriod(span));
+        List<ScheduleCapacityWarning> found = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            YearMonth month = first.plusMonths(i);
+            DateRange whole = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+            int workdays = registered.workdayCountIn(whole);
+            // 暦月そのものを清算期間として見る。ここは会社の規則の話であり、
+            // 特定の社員の在籍期間では切らない
+            SettlementPeriod.of(month, whole)
+                    .flatMap(period ->
+                            period.checkCapacity(flex, workdays, spec.statutoryWeekly()))
+                    .ifPresent(found::add);
+        }
+        return found;
+    }
+
+    private static void requireName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new InvalidCalendarRequestException("就業規則の名称は必須です");
+        }
+    }
+
+    /**
+     * 登録・改定の入力。
+     *
+     * <p><strong>制度は {@code sealed interface} のまま受け取る。</strong>
+     * 平坦な項目で受けると「FLEX なのに始業時刻がある」形を作れてしまい、
+     * DB の CHECK 制約が禁じた状態を API が再現する。
+     */
+    public record WorkRuleSpec(LocalDate validFrom, WorkingTimeSystem system,
+                               Duration statutoryDaily, Duration statutoryWeekly,
+                               NightWindow nightWindow, PremiumRates premiumRates) {
+
+        WorkRule toWorkRule(WorkRuleSeriesId seriesId, DateRange validPeriod) {
+            return new WorkRule(new WorkRuleId(UUID.randomUUID()), seriesId, validPeriod,
+                    system, statutoryDaily, statutoryWeekly, nightWindow, premiumRates);
+        }
+    }
+
+    /**
+     * 登録・改定の結果。
+     *
+     * <p>版は<strong>系列</strong>のもの。次の改定にそのまま渡せる。
+     */
+    public record RegisteredWorkRule(WorkRuleSeriesId seriesId, WorkRuleId workRuleId,
+                                     long version, List<ScheduleCapacityWarning> warnings) {
+    }
+
+    /** その系列が無い。 */
+    public static final class WorkRuleSeriesNotFoundException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        WorkRuleSeriesNotFoundException(WorkRuleSeriesId id) {
+            super("就業規則が見つかりません: " + id.value());
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:resource-not-found";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.NOT_FOUND;
+        }
+
+        @Override
+        public String title() {
+            return "就業規則が見つかりません";
+        }
+    }
+
+    /** 廃止済みの系列は改定できない。 */
+    public static final class AbolishedWorkRuleSeriesException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        AbolishedWorkRuleSeriesException(WorkRuleSeriesId id) {
+            super("廃止済みの就業規則は改定できません: " + id.value());
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:abolished-work-rule-series";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "廃止済みの就業規則です";
+        }
+    }
+
+    /** 指定日以降に既に別の版がある。 */
+    public static final class OverlappingWorkRulePeriodException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        OverlappingWorkRulePeriodException(WorkRuleSeriesId id, LocalDate validFrom) {
+            super("%s 以降に既に別の版があります: %s".formatted(validFrom, id.value()));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:overlapping-period";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "期間が重なります";
+        }
     }
 
     private static void requireHumanResources(Requester requester) {

@@ -343,6 +343,11 @@ class AnnualScheduledHoursServiceTest {
             }
 
             @Override
+            public boolean bumpVersion(WorkRuleSeriesId id, long expectedVersion) {
+                throw new UnsupportedOperationException("分母の計算は改定しない");
+            }
+
+            @Override
             public void save(WorkRuleSeries series) {
                 throw new UnsupportedOperationException();
             }
@@ -390,6 +395,11 @@ class AnnualScheduledHoursServiceTest {
             @Override
             public void save(WorkRule rule) {
                 throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void revise(List<WorkRule> closed, WorkRule added) {
+                throw new UnsupportedOperationException("分母の計算は改定しない");
             }
 
             @Override

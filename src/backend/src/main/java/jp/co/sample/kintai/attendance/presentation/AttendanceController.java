@@ -127,6 +127,37 @@ public class AttendanceController {
     }
 
     /**
+     * 人事の指示で計算し直す（03 API 設計書 3.3）。
+     *
+     * <p><strong>版を必須にする。</strong> {@code daily_attendances} は
+     * UPDATE される表なので、2 人が同時に指示したときの上書きを検出する。
+     *
+     * <p>ロールの検査は {@code application} 層にも置いてある。
+     * この層の判定だけに頼ると、別の入口から呼ばれたときに素通りする。
+     */
+    @org.springframework.web.bind.annotation.PostMapping("/{workDate}/recalculation")
+    public DailyAttendanceResponse recalculate(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @PathVariable UUID employeeId, @PathVariable LocalDate workDate,
+            @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody
+            RecalculationRequest request) {
+        return DailyAttendanceResponse.from(timeClocks.recalculate(principal.toRequester(),
+                new EmployeeId(employeeId), workDate, request.version()));
+    }
+
+    /**
+     * 再計算の要求。
+     *
+     * @param version 画面が表示していた版。<strong>一致しないと再計算しない。</strong>
+     *                0 は「行が無い」ことだけを指すので、
+     *                計算済みの日と一致することはない（落とし穴 57）
+     */
+    public record RecalculationRequest(
+            @jakarta.validation.constraints.NotNull
+            @jakarta.validation.constraints.PositiveOrZero Long version) {
+    }
+
+    /**
      * 日次勤怠が無い。
      *
      * <p>打刻が無い日・未退勤の日は計算されないので、これは<strong>正常に起こりうる。</strong>

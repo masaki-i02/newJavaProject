@@ -24,6 +24,15 @@ public interface DailyAttendanceRepository {
 
     Optional<DailyAttendance> find(EmployeeId employeeId, LocalDate workDate);
 
+    /**
+     * その勤務日の版（03 API 設計書 3.3）。
+     *
+     * <p>行が無ければ 0。<strong>行があれば必ず 1 以上</strong>にする。
+     * 0 を「作られたばかり」にも使うと、
+     * 画面が「行が無い」と思って握った 0 が一致してしまう（落とし穴 57）。
+     */
+    long currentVersion(EmployeeId employeeId, LocalDate workDate);
+
     /** 期間分をまとめて読む。月次の集計で日ごとに引くと N+1 になる。 */
     List<DailyAttendance> findByPeriod(EmployeeId employeeId, DateRange period);
 }

@@ -37,6 +37,11 @@ class WorkRuleSeriesEntity {
         return id;
     }
 
+    /** 楽観ロックの版。改定のたびに 1 つ進む（API 設計書 2.1）。 */
+    long getVersion() {
+        return version;
+    }
+
     String getName() {
         return name;
     }
