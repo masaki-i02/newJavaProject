@@ -102,6 +102,78 @@ class MonthlySettlementCalculatorTest {
     }
 
     @Nested
+    @DisplayName("コアタイム不在")
+    class CoreTimeAbsence {
+
+        /**
+         * <strong>コアタイムに働いていない時間を数える。</strong>
+         *
+         * <p>前提のフレックスはコアタイム 11:00–15:00（4 時間）で、
+         * 日次は 09:00 に出勤する。1 時間だけ働いた日は 09:00–10:00 なので
+         * コアタイムに 1 分も掛からず、不在は 4 時間になる。
+         *
+         * <p><strong>賃金には影響させない。</strong> 実労働も時間外も動かない。
+         */
+        @Test
+        @DisplayName("UT-BR05-10 コアタイムに働いていない時間が記録され、賃金計算には影響しない")
+        void recordsAbsenceWithoutAffectingPay() {
+            var may = period(2026, 5);
+            var days = flexDays(may.month(), 1, Duration.ofHours(1));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
+
+            assertThat(result.coreTimeAbsence())
+                    .as("11:00–15:00 に 1 分も働いていない").isEqualTo(Duration.ofHours(4));
+            assertThat(result.workingTime())
+                    .as("実労働は動かない").isEqualTo(Duration.ofHours(1));
+            assertThat(result.overtimeTime()).as("時間外も動かない").isZero();
+        }
+
+        /** コアタイムを丸ごと含む日は不在 0。 */
+        @Test
+        @DisplayName("UT-BR05-31 コアタイムを含めて働いた日の不在は 0")
+        void noAbsenceWhenCoreTimeIsCovered() {
+            var may = period(2026, 5);
+            var days = flexDays(may.month(), 1, Duration.ofHours(8));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
+
+            assertThat(result.coreTimeAbsence()).isZero();
+        }
+
+        /**
+         * <strong>日ごとに数えて足す。</strong>
+         * 1 か月ぶんをまとめて数えると、日の境目が消える。
+         */
+        @Test
+        @DisplayName("UT-BR05-32 不在は日ごとに数えて足す")
+        void sumsPerDay() {
+            var may = period(2026, 5);
+            var days = flexDays(may.month(), 3, Duration.ofHours(1));
+
+            var result = calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0);
+
+            assertThat(result.coreTimeAbsence()).isEqualTo(Duration.ofHours(12));
+        }
+
+        /**
+         * <strong>固定時間制にコアタイムは無い。</strong>
+         * DB の {@code monthly_settlements_variant_check} も
+         * 固定時間制では 0 であることを要求している。
+         */
+        @Test
+        @DisplayName("UT-BR05-33 固定時間制の不在は常に 0")
+        void fixedTimeHasNoCoreTime() {
+            var may = period(2026, 5);
+            var days = List.of(daily.fixedDay(may.month().atDay(1), Duration.ofHours(1)));
+
+            var result = calculator.calculate(TARO, may, days, fixedRule(), Duration.ZERO, 0);
+
+            assertThat(result.coreTimeAbsence()).isZero();
+        }
+    }
+
+    @Nested
     @DisplayName("法定労働時間の総枠")
     class StatutoryLimit {
 
@@ -319,7 +391,8 @@ class MonthlySettlementCalculatorTest {
                     Duration.ofMinutes(9_600), Duration.ofMinutes(10_628),
                     Duration.ZERO, Duration.ZERO, Duration.ZERO,
                     Duration.ofMinutes(10), Duration.ofMinutes(10),
-                    Duration.ZERO, 0, List.of(), AgreementUsage.of(Duration.ofMinutes(10),
+                    Duration.ZERO, Duration.ZERO, 0, List.of(),
+                    AgreementUsage.of(Duration.ofMinutes(10),
                             Duration.ZERO, Duration.ZERO)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("所定総が法定総枠以下なのに、時間外と不足が同時に");
@@ -567,7 +640,7 @@ class MonthlySettlementCalculatorTest {
                     overtime, Duration.ZERO, overtime,
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     overtime, Duration.ZERO, Duration.ZERO, overtime,
-                    Duration.ZERO, Duration.ZERO, 0, List.of(),
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO, 0, List.of(),
                     AgreementUsage.of(overtime, Duration.ZERO, Duration.ZERO));
         }
 
@@ -941,7 +1014,7 @@ class MonthlySettlementCalculatorTest {
                     Duration.ZERO, Duration.ZERO, Duration.ZERO,
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     Duration.ZERO, Duration.ZERO, Duration.ofHours(6), Duration.ofHours(6),
-                    Duration.ZERO, Duration.ZERO, 0, List.of(),
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO, 0, List.of(),
                     AgreementUsage.of(Duration.ofHours(6), Duration.ZERO, Duration.ZERO)))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("時間外労働が対象労働時間を超えています");
@@ -956,7 +1029,7 @@ class MonthlySettlementCalculatorTest {
                     Duration.ofHours(100), Duration.ZERO, Duration.ofHours(100),
                     Duration.ZERO, Duration.ofMinutes(10_628),
                     daily, weekly, carriedOver, total,
-                    Duration.ZERO, Duration.ZERO, 0, breakdown,
+                    Duration.ZERO, Duration.ZERO, Duration.ZERO, 0, breakdown,
                     AgreementUsage.of(total, Duration.ZERO, Duration.ZERO));
         }
     }
@@ -1104,7 +1177,8 @@ class MonthlySettlementCalculatorTest {
                     valid.statutoryTotalLimit(), valid.dailyOvertimeTime(),
                     valid.weeklyOvertimeTime(), valid.carriedOverOvertimeTime(),
                     valid.overtimeTime(), valid.shortageTime(), valid.nightTime(),
-                    -1, valid.weeklyBreakdown(), valid.agreementUsage()))
+                    valid.coreTimeAbsence(), -1, valid.weeklyBreakdown(),
+                    valid.agreementUsage()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("年休の日数を負にはできません");
         }

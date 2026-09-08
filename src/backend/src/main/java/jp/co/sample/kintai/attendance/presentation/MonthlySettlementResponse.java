@@ -42,6 +42,14 @@ public record MonthlySettlementResponse(
         int overtimeOver60Minutes,
         int shortageMinutes,
         int nightMinutes,
+        /**
+         * コアタイム不在（BR-05）。
+         *
+         * <p><strong>賃金の計算には影響しない。</strong>
+         * 承認者への警告として示すだけである。固定時間制では常に 0
+         * （DB の {@code monthly_settlements_variant_check} も同じことを守る）。
+         */
+        int coreTimeAbsenceMinutes,
         List<WeeklyBreakdownResponse> weeklyBreakdown,
         AgreementResponse agreement) {
 
@@ -66,6 +74,7 @@ public record MonthlySettlementResponse(
                 minutes(settlement.overtimeOver60Time()),
                 minutes(settlement.shortageTime()),
                 minutes(settlement.nightTime()),
+                minutes(settlement.coreTimeAbsence()),
                 fixed ? settlement.weeklyBreakdown().stream()
                         .map(WeeklyBreakdownResponse::from).toList() : null,
                 new AgreementResponse(

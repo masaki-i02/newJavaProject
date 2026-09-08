@@ -94,13 +94,13 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         statutory_total_limit_minutes, daily_overtime_minutes,
                         weekly_overtime_minutes, carried_over_overtime_minutes,
                         overtime_minutes, shortage_minutes, night_minutes,
-                        paid_leave_days,
+                        core_time_absence_minutes, paid_leave_days,
                         annual_agreement_subject_before_minutes,
                         monthly_agreement_limit_minutes, annual_agreement_limit_minutes,
                         exceeds_monthly_agreement_limit, exceeds_annual_agreement_limit,
                         exceeds_combined_single_month_limit, calculated_at, version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?)
+                        ?, ?, ?, ?)
                 """,
                 id, employeeId, targetMonth,
                 settlement.period().period().from(),
@@ -116,6 +116,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 minutes(settlement.carriedOverOvertimeTime()),
                 minutes(settlement.overtimeTime()), minutes(settlement.shortageTime()),
                 minutes(settlement.nightTime()),
+                minutes(settlement.coreTimeAbsence()),
                 settlement.paidLeaveDays(),
                 minutes(usage.annualUsedBefore()),
                 minutes(usage.monthlyLimit()), minutes(usage.annualLimit()),
@@ -150,7 +151,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                    statutory_total_limit_minutes, daily_overtime_minutes,
                    weekly_overtime_minutes, carried_over_overtime_minutes,
                    overtime_minutes, shortage_minutes, night_minutes,
-                   paid_leave_days,
+                   core_time_absence_minutes, paid_leave_days,
                    annual_agreement_subject_before_minutes,
                    monthly_agreement_limit_minutes, annual_agreement_limit_minutes
               FROM monthly_settlements
@@ -175,6 +176,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         rs.getInt("carried_over_overtime_minutes"),
                         rs.getInt("overtime_minutes"), rs.getInt("shortage_minutes"),
                         rs.getInt("night_minutes"),
+                        rs.getInt("core_time_absence_minutes"),
                         rs.getInt("paid_leave_days"),
                         rs.getInt("annual_agreement_subject_before_minutes"),
                         rs.getInt("monthly_agreement_limit_minutes"),
@@ -211,6 +213,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                         rs.getInt("carried_over_overtime_minutes"),
                         rs.getInt("overtime_minutes"), rs.getInt("shortage_minutes"),
                         rs.getInt("night_minutes"),
+                        rs.getInt("core_time_absence_minutes"),
                         rs.getInt("paid_leave_days"),
                         rs.getInt("annual_agreement_subject_before_minutes"),
                         rs.getInt("monthly_agreement_limit_minutes"),
@@ -230,7 +233,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                 of(row.scheduledTotal()), of(row.statutoryLimit()),
                 of(row.dailyOvertime()), of(row.weeklyOvertime()), of(row.carriedOver()),
                 of(row.overtime()), of(row.shortage()), of(row.night()),
-                row.paidLeaveDays(), weeksOf(row.id()),
+                of(row.coreTimeAbsence()), row.paidLeaveDays(), weeksOf(row.id()),
                 new AgreementUsage(of(row.overtime()), of(row.legalHoliday()),
                         of(row.monthlyLimit()), of(row.annualLimit()),
                         of(row.annualBefore())));
@@ -284,7 +287,7 @@ class MonthlySettlementRepositoryAdapter implements MonthlySettlementRepository 
                        String system, int working, int legalHoliday, int target,
                        int scheduledTotal, int statutoryLimit, int dailyOvertime,
                        int weeklyOvertime, int carriedOver, int overtime, int shortage,
-                       int night, int paidLeaveDays, int annualBefore, int monthlyLimit,
-                       int annualLimit) {
+                       int night, int coreTimeAbsence, int paidLeaveDays,
+                       int annualBefore, int monthlyLimit, int annualLimit) {
     }
 }

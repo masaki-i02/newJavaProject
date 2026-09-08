@@ -119,6 +119,13 @@ export interface MonthlySettlement {
   readonly workingMinutes: number;
   readonly overtimeMinutes: number;
   readonly shortageMinutes: number;
+  /**
+   * コアタイム不在（BR-05）。
+   *
+   * ★ **賃金の計算には影響しない。** 承認者への警告として示すだけである。
+   *   固定時間制にはコアタイムという概念が無いので常に 0。
+   */
+  readonly coreTimeAbsenceMinutes: number;
 }
 
 export interface HistoryEntry {

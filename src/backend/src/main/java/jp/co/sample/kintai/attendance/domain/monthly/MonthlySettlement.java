@@ -50,6 +50,13 @@ public record MonthlySettlement(
         Duration overtimeTime,
         Duration shortageTime,
         Duration nightTime,
+        /**
+         * コアタイム不在（BR-05）。
+         *
+         * <p><strong>賃金の計算には影響させない。</strong>
+         * 承認者への警告として示すだけである。固定時間制では常に 0。
+         */
+        Duration coreTimeAbsence,
         int paidLeaveDays,
         List<WeeklyOvertimeCharge> weeklyBreakdown,
         AgreementUsage agreementUsage) {

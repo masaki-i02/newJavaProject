@@ -226,6 +226,14 @@ function WorkingTime({ settlement, days }: {
             {' ／ '}不足 {hoursLabel(settlement.shortageMinutes)}
           </p>
         )}
+      {/* ★ コアタイム不在は就業規則違反であって、労働時間の計算とは別の問題である。
+              賃金には影響しないので、時間の並びとは分けて警告として出す */}
+      {settlement !== null && settlement.coreTimeAbsenceMinutes > 0 && (
+        <div className="warning" role="alert">
+          コアタイムに働いていない時間が {hoursLabel(settlement.coreTimeAbsenceMinutes)}
+          あります（BR-05）。就業規則の問題であり、賃金の計算には影響しません。
+        </div>
+      )}
       {shortBreaks.length > 0 && (
         <div className="warning" role="alert">
           法定休憩に不足している日があります（BR-08）：

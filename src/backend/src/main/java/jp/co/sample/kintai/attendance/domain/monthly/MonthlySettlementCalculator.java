@@ -85,6 +85,13 @@ public final class MonthlySettlementCalculator {
                     flexOvertime(targetWorkingTime, statutoryTotalLimit);
         };
 
+        // ★ コアタイムは固定時間制に無い概念なので、同じ switch で分岐する。
+        //   別の if で分けると、制度を足したときに片方だけ直すことになる（落とし穴 22）
+        Duration coreTimeAbsence = switch (workRule.workingTimeSystem()) {
+            case FixedTimeSystem ignored -> Duration.ZERO;
+            case FlextimeSystem flex -> CoreTimeAbsenceRule.total(inPeriod, flex);
+        };
+
         Duration scheduledTotalTime = scheduledTotalOf(workRule, period, paidLeaveDays);
         Duration shortage = shortageOf(workRule, inPeriod, targetWorkingTime,
                 scheduledTotalTime);
@@ -96,7 +103,7 @@ public final class MonthlySettlementCalculator {
                 overtime.daily(), overtime.weekly(), overtime.carriedOver(),
                 overtime.total(),
                 shortage,
-                nightTime, paidLeaveDays, overtime.weeks(),
+                nightTime, coreTimeAbsence, paidLeaveDays, overtime.weeks(),
                 AgreementUsage.of(overtime.total(), legalHolidayTime, annualUsedBefore));
     }
 
