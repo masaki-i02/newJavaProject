@@ -97,6 +97,12 @@ jobs:
       - name: 設計書の API 一覧と実装の経路を突き合わせる
         working-directory: doc/_tools
         run: python3 check-endpoints.py
+      # ★ 画面はエラーの type で分岐するので、型の一覧も契約である。
+      #   設計書が `department-cycle` / 409 と書き、実装が
+      #   `cyclic-department-hierarchy` / 422 を返していた（落とし穴 108・174）
+      - name: エラーの型を設計書と突き合わせる
+        working-directory: doc/_tools
+        run: python3 check-error-codes.py
       - name: マイグレーションを生成する
         working-directory: doc/_tools
         run: python3 build-migrations.py

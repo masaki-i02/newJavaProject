@@ -48,7 +48,7 @@ final class AttendanceRateCalculator {
     AttendanceRate of(Employee employee, DateRange period, List<DailyAttendance> days,
                       Set<LocalDate> leaveDays) {
         Set<LocalDate> worked = days.stream()
-                .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
+                .filter(DailyAttendance::hasWork)
                 .map(DailyAttendance::workDate)
                 .collect(Collectors.toUnmodifiableSet());
 

@@ -173,7 +173,7 @@ public class MonthlySettlementService {
         }
         return dailyAttendances.findByPeriod(employeeId, period.period()).stream()
                 .filter(day -> leaveDates.contains(day.workDate()))
-                .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
+                .filter(DailyAttendance::hasWork)
                 .map(DailyAttendance::workDate)
                 .sorted()
                 .toList();
@@ -210,8 +210,8 @@ public class MonthlySettlementService {
      */
     @Transactional(readOnly = true)
     public MonthlyDayCounts dayCountsIn(EmployeeId employeeId, SettlementPeriod period) {
-        DateRange monthRange = new DateRange(period.month().atDay(1),
-                period.month().plusMonths(1).atDay(1));
+        // ★ 暦月そのもの（清算期間ではない）。日額の分母は労基法 24 条により暦月で数える
+        DateRange monthRange = DateRange.ofMonth(period.month());
         // ★ 日ごとに findById を投げると 1 社員あたり 31 往復する。まとめて 1 回で読む
         CompanyCalendar registered = new RegisteredCalendar(calendar.findByPeriod(monthRange));
 
@@ -224,7 +224,7 @@ public class MonthlySettlementService {
 
         List<DailyAttendance> worked = dailyAttendances
                 .findByPeriod(employeeId, period.period()).stream()
-                .filter(day -> day.workingTime().compareTo(Duration.ZERO) > 0)
+                .filter(DailyAttendance::hasWork)
                 .toList();
         int attendedDays = worked.size();
         Set<LocalDate> workedDates = worked.stream()

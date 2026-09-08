@@ -287,6 +287,18 @@ public final class Organization {
                     }
                 }
             }
+
+            /**
+             * ★ 代役は順序を持たない。本番のアダプタが守っているのは
+             *   「DB へ届く順序」であって、これはメモリ上では再現できない。
+             *   代役に順序の知識を持たせると、本番のコードを 1 行も検査しない
+             *   テストになる（落とし穴 37）。ここでは事実（閉じて開く）だけを写す。
+             */
+            @Override
+            public void transfer(Assignment next) {
+                close(next.employeeId(), next.period().from());
+                save(next);
+            }
         };
     }
 
@@ -340,6 +352,13 @@ public final class Organization {
                         managerships.set(i, m.closedAt(toExclusive));
                     }
                 }
+            }
+
+            /** ★ 順序は代役では再現できない（所属の transfer と同じ理由）。 */
+            @Override
+            public void appoint(Managership next) {
+                close(next.departmentId(), next.period().from());
+                save(next);
             }
         };
     }

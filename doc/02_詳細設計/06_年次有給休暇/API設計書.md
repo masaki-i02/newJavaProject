@@ -55,6 +55,7 @@
 | `urn:kintai:error:not-a-workday` | 422 | 取得日が所定労働日でない |
 | `urn:kintai:error:leave-date-not-in-service` | 422 | 取得日に在籍していない（入社前・退職後） |
 | `urn:kintai:error:duplicate-leave-request` | 409 | 同じ日に有効な申請が既にある |
+| `urn:kintai:error:deemed-attendance-rejected` | 422 | 人事が申告した「出勤扱いの日数」が受け付けられない（負・理由なし・全労働日を超える）。**`AttendanceRate` の compact constructor に任せると理由の載らない 500 になる**（落とし穴 105）|
 | `urn:kintai:error:month-not-editable` | 409 | 対象月が**承認済み**（締めてはいない） |
 | `urn:kintai:error:month-already-closed` | 409 | 対象月が締め済み |
 | `urn:kintai:error:leave-not-cancelable` | 409 | 取得日の当日以降で取り消そうとした |

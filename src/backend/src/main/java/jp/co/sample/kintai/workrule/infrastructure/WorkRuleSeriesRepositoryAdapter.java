@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.workrule.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -88,7 +90,7 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
                 .map(row -> new WorkRuleAssignment(
                         new EmployeeId(row.getEmployeeId()),
                         new WorkRuleSeriesId(row.getWorkRuleSeriesId()),
-                        WorkRuleMapper.toRange(row.getValidFrom(), row.getValidTo())))
+                        Periods.toRange(row.getValidFrom(), row.getValidTo())))
                 .toList();
     }
 
@@ -105,7 +107,7 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
         return assignments.findAssignmentsIn(period.from(), period.toExclusive()).stream()
                 .map(row -> new WorkRuleSeriesUsage(
                         new WorkRuleSeriesId(row.getWorkRuleSeriesId()),
-                        WorkRuleMapper.toRange(row.getValidFrom(), row.getValidTo())))
+                        Periods.toRange(row.getValidFrom(), row.getValidTo())))
                 .distinct()
                 .toList();
     }
@@ -124,6 +126,6 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
 
     private static WorkRuleSeries toDomain(WorkRuleSeriesEntity entity) {
         return new WorkRuleSeries(new WorkRuleSeriesId(entity.getId()), entity.getName(),
-                WorkRuleMapper.toOptional(entity.getAbolishedOn()), entity.getVersion());
+                Periods.toOptional(entity.getAbolishedOn()), entity.getVersion());
     }
 }

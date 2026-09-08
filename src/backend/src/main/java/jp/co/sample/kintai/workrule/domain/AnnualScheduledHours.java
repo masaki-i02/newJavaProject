@@ -15,7 +15,9 @@ import jp.co.sample.kintai.shared.domain.DateRange;
  * この値は会社カレンダーからしか出せず、<strong>1 社員 × 1 か月の行には入らない</strong>ので、
  * 月次の CSV とは別に年ごとの 1 行として渡す（CLAUDE.md 落とし穴 118）。
  *
- * @param fiscalYear     年度。<strong>4 月 〜 翌 3 月</strong>。36 協定の年度（BR-12）にそろえる
+ * @param fiscalYear     年度。<strong>4 月 〜 翌 3 月。根拠は賃金規程</strong>である
+ *                       （要件 BR-18）。36 協定の年度（BR-12）と一致するのは
+ *                       <strong>結果であって理由ではない</strong>
  * @param period         数えた範囲。「年度」の解釈は会社によって違うので明示する
  * @param scheduledDays  年間の所定労働日数。<strong>年休は差し引かない</strong>（会社の所定である）
  * @param annualTotal    年間の所定労働時間。所定労働日について、その日に有効な版の所定を足したもの
@@ -24,7 +26,18 @@ import jp.co.sample.kintai.shared.domain.DateRange;
 public record AnnualScheduledHours(int fiscalYear, DateRange period, int scheduledDays,
                                    Duration annualTotal, Duration monthlyAverage) {
 
-    /** 年度の開始月。36 協定の年度（BR-12）にそろえる。 */
+    /**
+     * 年度の開始月。<strong>根拠は賃金規程</strong>（要件 BR-18）。
+     *
+     * <p>3.6 が月末締めなので、賃金計算期間（暦月）を 12 個並べた区切りと一致する。
+     * <strong>締め日を変えるなら、この 1 年の区切りも変わる。</strong>
+     *
+     * <p><strong>{@code AgreementUsage.FISCAL_YEAR_START_MONTH} と共通化しないこと。</strong>
+     * あちらの根拠は 36 協定（BR-12）であり、値が同じなのは結果である。
+     * 1 つにまとめると、賃金規程の締め日を変えたときに
+     * <strong>36 協定の限度時間（月 45・年 360）の起算まで黙って動く</strong>。
+     * 36 協定の警告は登録を止めないので、誰も気づかないまま年次上限が誤る。
+     */
     public static final Month FISCAL_YEAR_START = Month.APRIL;
 
     private static final int MONTHS_IN_YEAR = 12;

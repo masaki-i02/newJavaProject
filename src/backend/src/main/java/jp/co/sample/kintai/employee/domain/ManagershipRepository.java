@@ -34,6 +34,15 @@ public interface ManagershipRepository {
     void close(DepartmentId departmentId, LocalDate toExclusive);
 
     /**
+     * 部署長を交代させる。
+     * <strong>現在の部署長を閉じてから新しい部署長を開くまでを 1 操作にする。</strong>
+     *
+     * <p>理由は {@code AssignmentRepository#transfer} と同じ。
+     * {@code managerships_no_overlap} も DEFERRABLE ではない。
+     */
+    void appoint(Managership next);
+
+    /**
      * その社員が務めている部署長の期間を、すべて指定日で閉じる。
      *
      * <p><strong>退職で使う。部署ごとではなく社員ごとに閉じる。</strong>

@@ -190,8 +190,8 @@ public class DepartmentService {
             throw new EmployeeLifecycleService.OverlappingPeriodException(validFrom);
         }
 
-        managerships.close(departmentId, validFrom);
-        managerships.save(Managership.startingAt(departmentId, employeeId, validFrom));
+        // ★ 閉じてから開くまでを 1 操作にする（異動と同じ理由）
+        managerships.appoint(Managership.startingAt(departmentId, employeeId, validFrom));
     }
 
     /**

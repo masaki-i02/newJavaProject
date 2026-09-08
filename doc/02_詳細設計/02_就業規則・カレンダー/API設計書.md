@@ -48,6 +48,8 @@
 | `urn:kintai:error:month-already-closed` | 409 | 締め済みの月に影響する変更 |
 | `urn:kintai:error:business-rule-violation` | 422 | 法定下限・上限違反、適用開始日が月初日でも入社日でもない 等 |
 | `urn:kintai:error:monthly-basis-changed-mid-month` | 422 | 月の途中の改定が、月次清算に効く値（所定労働時間・法定労働時間・労働時間制度）を変えている（2.2） |
+| `urn:kintai:error:invalid-work-rule-request` | 422 | 就業規則の指定が不正（休憩が拘束時間を超える・コアタイムの長さが 0・割増率が読めない 等）。**ドメインが投げる `IllegalArgumentException` をここへ写す。素通りさせると理由の載らない 500 になる**（落とし穴 105）|
+| `urn:kintai:error:abolished-work-rule-series` | 422 | 廃止済みの系列を改定・適用しようとした |
 
 ---
 

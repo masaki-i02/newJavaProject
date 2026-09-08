@@ -350,8 +350,7 @@ public class PaidLeaveRequestService {
      */
     private void requireNotWorked(PaidLeaveRequest request) {
         boolean worked = dailyAttendances.find(request.employeeId(), request.leaveDate())
-                .map(DailyAttendance::workingTime)
-                .filter(time -> time.compareTo(Duration.ZERO) > 0)
+                .filter(DailyAttendance::hasWork)
                 .isPresent();
         if (worked) {
             throw new LeaveDateAlreadyWorkedException(request.leaveDate());

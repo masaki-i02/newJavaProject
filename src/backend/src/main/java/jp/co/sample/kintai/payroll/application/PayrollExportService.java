@@ -230,7 +230,7 @@ public class PayrollExportService {
     }
 
     private DateRange monthRange(YearMonth month) {
-        return new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+        return DateRange.ofMonth(month);
     }
 
     /**

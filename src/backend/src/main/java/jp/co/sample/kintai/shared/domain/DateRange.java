@@ -39,6 +39,20 @@ public record DateRange(LocalDate from, LocalDate toExclusive) {
         }
     }
 
+    /**
+     * 暦月そのもの。半開区間 <code>[月初日, 翌月初日)</code>。
+     *
+     * <p><strong>清算期間ではない。</strong>
+     * 清算期間は「暦月 ∩ 在籍期間」であり、月中入社・月中退職の月では別物になる。
+     * この 2 つを取り違えると欠勤控除が約 1.9 倍になる（落とし穴 132）。
+     * 式が同じだと呼び先の名前でしか見分けられないので、
+     * <strong>暦月でよい場所はこの名前で呼ぶ</strong>。
+     * 清算期間が要る場所は {@code SettlementPeriod} を通す。
+     */
+    public static DateRange ofMonth(java.time.YearMonth month) {
+        return new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+    }
+
     /** 上限のない期間。 */
     public static DateRange startingAt(LocalDate from) {
         return new DateRange(from, UNBOUNDED_END);

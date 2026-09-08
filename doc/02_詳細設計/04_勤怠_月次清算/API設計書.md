@@ -245,6 +245,23 @@
 
 ---
 
+## エラーの型
+
+**画面はエラーの `type` で分岐する**ので、ここが契約である。
+`doc/_tools/check-error-codes.py` が実装と突き合わせ、食い違ったら落とす。
+
+| type | HTTP | いつ |
+| --- | --- | --- |
+| `urn:kintai:error:employee-not-found` | 404 | 対象の社員が存在しない |
+| `urn:kintai:error:not-employed-in-month` | 422 | 対象月に 1 日も在籍していない。**清算期間（暦月 ∩ 在籍期間）が空になる** |
+| `urn:kintai:error:work-rule-not-assigned` | 422 | 清算期間に就業規則が適用されていない日がある |
+| `urn:kintai:error:working-time-system-changed-mid-month` | 422 | 月の途中で労働時間制度が変わっている |
+| `urn:kintai:error:work-rule-revised-mid-month` | 422 | 月の途中の改定が月次清算に効く値を変えている |
+| `urn:kintai:error:daily-attendance-incomplete` | 409 | 打刻があるのに日次勤怠が無い勤務日が残っている |
+| `urn:kintai:error:month-already-closed` | 409 | 締め済みの月の再計算 |
+| `urn:kintai:error:optimistic-lock-failure` | 409 | `version` が一致しない |
+| `urn:kintai:error:invalid-period` | 422 | 照会の期間が上限（366 日）を超える |
+
 ## 4.5 結合テストの観点
 
 | ID | 観点 | 期待 |

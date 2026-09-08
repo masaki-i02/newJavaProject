@@ -366,7 +366,7 @@ public class MonthlyAttendanceService {
         if (attendance.status().state() != AttendanceState.DRAFT) {
             return false;
         }
-        if (!today.isAfter(month.atEndOfMonth())) {
+        if (!isMonthFinished(month, today)) {
             return false;
         }
         boolean self = requester.isSelf(employeeId);
@@ -468,8 +468,25 @@ public class MonthlyAttendanceService {
         requireMonthFinished(month, LocalDate.now(clock));
     }
 
+    /**
+     * 対象月の末日が到来しているか。
+     *
+     * <p><strong>公開する。</strong> 同じ述語を写すと片方だけが古くなる（落とし穴 67）。
+     * 実際、提出の可否（{@code canSubmit}）と一括締めの一覧
+     * （{@code BulkClosureService}）がそれぞれ手で書いていた。
+     * 一括締めの側を直し忘れると、<strong>一覧では「締められます」と出るのに
+     * 実行すると全件 skip</strong> になり、人事は理由に辿り着けない。
+     */
+    public boolean isMonthFinished(YearMonth month) {
+        return isMonthFinished(month, LocalDate.now(clock));
+    }
+
+    private boolean isMonthFinished(YearMonth month, LocalDate today) {
+        return today.isAfter(month.atEndOfMonth());
+    }
+
     private void requireMonthFinished(YearMonth month, LocalDate today) {
-        if (!today.isAfter(month.atEndOfMonth())) {
+        if (!isMonthFinished(month, today)) {
             throw new MonthNotFinishedException(month);
         }
     }

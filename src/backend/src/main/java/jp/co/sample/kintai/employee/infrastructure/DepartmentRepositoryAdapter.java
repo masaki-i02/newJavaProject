@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;

@@ -114,7 +114,7 @@ public class BulkClosureService {
 
     /** 暦月の半開区間。 */
     private static DateRange periodOf(YearMonth month) {
-        return new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+        return DateRange.ofMonth(month);
     }
 
     /**
@@ -145,7 +145,9 @@ public class BulkClosureService {
         // ★ 状態は一括で読む。1 件ずつ引くと社員数ぶんの問い合わせになる
         var states = attendanceService.statesOf(month, visible);
         boolean humanResources = requester.has(Role.HR);
-        boolean finished = java.time.LocalDate.now(clock).isAfter(month.atEndOfMonth());
+        // ★ 述語を写さない。提出の可否と同じ判定を使う（落とし穴 67）。
+        //   写すと、一覧では「締められます」と出るのに実行すると全件 skip になる
+        boolean finished = attendanceService.isMonthFinished(month);
         return visible.stream()
                 .map(id -> statusOf(id, states.get(id), humanResources, finished))
                 .toList();

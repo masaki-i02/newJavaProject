@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.workrule.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Optional;
@@ -32,7 +34,7 @@ final class WorkRuleMapper {
         return new WorkRule(
                 new WorkRuleId(entity.getId()),
                 new WorkRuleSeriesId(entity.getSeriesId()),
-                toRange(entity.getValidFrom(), entity.getValidTo()),
+                Periods.toRange(entity.getValidFrom(), entity.getValidTo()),
                 toSystem(entity),
                 Duration.ofMinutes(entity.getStatutoryDailyMinutes()),
                 Duration.ofMinutes(entity.getStatutoryWeeklyMinutes()),
@@ -44,7 +46,7 @@ final class WorkRuleMapper {
     static void apply(WorkRule rule, WorkRuleEntity entity) {
         entity.setSeriesId(rule.seriesId().value());
         entity.setValidFrom(rule.validPeriod().from());
-        entity.setValidTo(toColumn(rule.validPeriod()));
+        entity.setValidTo(Periods.toColumn(rule.validPeriod()));
         entity.setStatutoryDailyMinutes((int) rule.statutoryDailyWorkingTime().toMinutes());
         entity.setStatutoryWeeklyMinutes((int) rule.statutoryWeeklyWorkingTime().toMinutes());
         entity.setNightStart(rule.nightWindow().start());
@@ -115,17 +117,4 @@ final class WorkRuleMapper {
                         .formatted(entity.getNightStart(), entity.getNightEnd()));
     }
 
-    static LocalDate toColumn(DateRange period) {
-        return period.isUnbounded() ? null : period.toExclusive();
-    }
-
-    static DateRange toRange(LocalDate from, LocalDate toExclusive) {
-        return toExclusive == null
-                ? DateRange.startingAt(from)
-                : new DateRange(from, toExclusive);
-    }
-
-    static Optional<LocalDate> toOptional(LocalDate value) {
-        return Optional.ofNullable(value);
-    }
 }

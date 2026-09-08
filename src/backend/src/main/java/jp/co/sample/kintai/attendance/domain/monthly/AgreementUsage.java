@@ -40,6 +40,14 @@ public record AgreementUsage(Duration overtimeTime, Duration legalHolidayTime,
     public static final Duration COMBINED_SINGLE_MONTH_LIMIT = Duration.ofHours(100);
 
     /** 年度の起算月。対象企業の事業年度に合わせる。 */
+    /**
+     * 年度の開始月。<strong>根拠は 36 協定</strong>（要件 BR-12）。
+     *
+     * <p><strong>{@code AnnualScheduledHours.FISCAL_YEAR_START} と共通化しないこと。</strong>
+     * あちらの根拠は賃金規程（BR-18）であり、値が同じなのは結果である。
+     * 要件定義書がまさに「36 協定の年度と同じになるのは結果であって理由ではない」と
+     * 書いている。1 つにまとめると、片方の根拠が変わったときにもう片方が黙って動く。
+     */
     public static final int FISCAL_YEAR_START_MONTH = 4;
 
     public AgreementUsage {

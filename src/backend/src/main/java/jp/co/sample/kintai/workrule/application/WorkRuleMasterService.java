@@ -723,7 +723,7 @@ public class WorkRuleMasterService {
         List<ScheduleCapacityWarning> found = new ArrayList<>();
         for (int i = 0; i < 12; i++) {
             YearMonth month = first.plusMonths(i);
-            DateRange whole = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+            DateRange whole = DateRange.ofMonth(month);
             if (!registered.missingDates(whole).isEmpty()) {
                 // 未登録の日を所定労働日として数えると、必ず総枠を超える
                 continue;

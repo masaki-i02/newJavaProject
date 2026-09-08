@@ -108,8 +108,10 @@ public class EmployeeLifecycleService {
         //   制約違反は利用者に説明できない（落とし穴 66）
         requireNoLaterAssignment(id, validFrom);
 
-        assignments.close(id, validFrom);
-        assignments.save(Assignment.startingAt(id, departmentId, validFrom));
+        // ★ 閉じてから開くまでを 1 操作にする。2 回に分けると、順序の保証が
+        //   永続化の実装詳細（save が先頭で投げる問い合わせの自動フラッシュ）に
+        //   依存する。就業規則の改定と同じ形（落とし穴 73・157）
+        assignments.transfer(Assignment.startingAt(id, departmentId, validFrom));
     }
 
     /**

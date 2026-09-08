@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -53,6 +55,27 @@ class ManagershipRepositoryAdapter implements ManagershipRepository {
      * <p>1 部署に同時に 2 人の長はいないので、開いている行は高々 1 件である
      * （DB の {@code managerships_no_overlap}）。2 件あるのは制約が壊れた証拠。
      */
+    /**
+     * 部署長を交代させる。<strong>閉じてから開くまでを 1 つの操作にする。</strong>
+     *
+     * <p>理由は {@code AssignmentRepositoryAdapter#transfer} と同じ。
+     * 閉じる側を先に {@code saveAndFlush} しないと、DB には
+     * 「入れてから閉じた」順で届いて {@code managerships_no_overlap} に弾かれる。
+     */
+    @Override
+    public void appoint(Managership next) {
+        for (ManagershipEntity entity : jpa.findOpen(next.departmentId().value())) {
+            entity.setValidTo(next.period().from());
+            jpa.saveAndFlush(entity);
+        }
+        ManagershipEntity added = new ManagershipEntity(UUID.randomUUID());
+        added.setDepartmentId(next.departmentId().value());
+        added.setEmployeeId(next.employeeId().value());
+        added.setValidFrom(next.period().from());
+        added.setValidTo(Periods.toColumn(next.period()));
+        jpa.saveAndFlush(added);
+    }
+
     @Override
     public void close(DepartmentId departmentId, LocalDate toExclusive) {
         List<ManagershipEntity> open = jpa.findOpen(departmentId.value());

@@ -71,6 +71,8 @@
 | `urn:kintai:error:month-not-editable` | 409 | 承認済みまたは締め済みで変更できない |
 | `urn:kintai:error:not-approver` | 403 | BR-11 の承認者ではない。**一般の権限不足（`forbidden`）と分ける。** 承認者は組織と基準日から導かれるので、「ロールが足りない」のではなく「その月のその社員の承認者ではない」である。誰に頼めばよいかを聞く先が変わる |
 | `urn:kintai:error:pending-correction-exists` | 409 | 同じ勤務日に未処理の訂正申請がある |
+| `urn:kintai:error:invalid-correction-item` | 422 | 訂正項目の指定が不正（`REVOKE` に `targetEventId` が無い 等）。**DB の `correction_items_variant_check` でも弾かれるが、制約違反は利用者に説明できない**（落とし穴 66・174）|
+| `urn:kintai:error:self-correction-decision` | 403 | 自分の訂正申請を自分で決裁した。**アプリケーション層の順序（自己 → 承認者）では `ApproverPolicy` が先に本人を外すので通常は現れない。集約が経路外のために持つ**（落とし穴 58）|
 
 **状態遷移を「サブリソースの生成」として表現する。**
 `PATCH /monthly-attendances/{month}` で `status` を直接書き換える形にすると、

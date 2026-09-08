@@ -59,7 +59,7 @@ public final class RepositoryBackedOrganizationChart implements OrganizationChar
      */
     @Override
     public Optional<LocalDate> assignmentStartWithin(EmployeeId employeeId, YearMonth month) {
-        DateRange target = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+        DateRange target = DateRange.ofMonth(month);
         return assignments.findHistory(employeeId).stream()
                 .map(assignment -> assignment.period().from())
                 .filter(target::contains)

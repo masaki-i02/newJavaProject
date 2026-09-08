@@ -193,4 +193,24 @@ public record DailyAttendance(EmployeeId employeeId, LocalDate workDate, DayType
                 Duration.ZERO, Duration.ZERO, Duration.ZERO,
                 Duration.ZERO, Duration.ZERO, Duration.ZERO, Duration.ZERO);
     }
+
+    /**
+     * その日に実労働があったか。
+     *
+     * <p><strong>この述語は 4 か所（BR-14 の出勤日・BR-16 の「すでに働いた日の年休」・
+     * BR-18 の出勤日数・提出時の警告）が同じ意味で使う。</strong>
+     * 定義を持つのはこの型なので、ここに置く（落とし穴 67）。
+     *
+     * <p>比較の向きを変える／{@code targetWorkingTime()} に変える、といった修正を
+     * 呼び出し側に散らすと、たとえば「働いた日の年休を承認しない」だけが緩んで
+     * 「働いた日に年休がある月の警告」が出ないままになる。
+     * 締め後は人事でも取り消せないので、その食い違いは取り返しがつかない。
+     *
+     * <p><strong>「どの日の集合に当てるか」は寄せない。</strong>
+     * BR-14 は年休の日を出勤に数え（39 条 10 項）、BR-18 は年休を別の列で渡す。
+     * 集合まで共通化すると、出勤率か欠勤控除のどちらかが必ず狂う。
+     */
+    public boolean hasWork() {
+        return workingTime.compareTo(Duration.ZERO) > 0;
+    }
 }

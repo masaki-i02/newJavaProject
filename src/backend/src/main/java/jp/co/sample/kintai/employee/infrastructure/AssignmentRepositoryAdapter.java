@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -59,6 +61,41 @@ class AssignmentRepositoryAdapter implements AssignmentRepository {
         entity.setValidFrom(assignment.period().from());
         entity.setValidTo(Periods.toColumn(assignment.period()));
         jpa.save(entity);
+    }
+
+    /**
+     * 異動させる。<strong>閉じてから開くまでを 1 つの操作にする。</strong>
+     *
+     * <p>閉じる側を先に {@code saveAndFlush} する。JPA は 1 回のフラッシュで
+     * INSERT を UPDATE より先に流すので、まとめて流すと DB には
+     * 「入れてから閉じた」順で届き、期間が重なって
+     * {@code assignments_no_overlap} に弾かれる（落とし穴 157）。
+     *
+     * <p>この順序は<strong>永続化の都合</strong>なので、application 層に置かない。
+     */
+    @Override
+    public void transfer(Assignment next) {
+        List<AssignmentEntity> open = openOf(next.employeeId());
+        for (AssignmentEntity entity : open) {
+            entity.setValidTo(next.period().from());
+            jpa.saveAndFlush(entity);
+        }
+        AssignmentEntity added = new AssignmentEntity(UUID.randomUUID());
+        added.setEmployeeId(next.employeeId().value());
+        added.setDepartmentId(next.departmentId().value());
+        added.setValidFrom(next.period().from());
+        added.setValidTo(Periods.toColumn(next.period()));
+        jpa.saveAndFlush(added);
+    }
+
+    private List<AssignmentEntity> openOf(EmployeeId employeeId) {
+        List<AssignmentEntity> open = jpa.findOpen(employeeId.value());
+        if (open.size() > 1) {
+            throw new IllegalStateException(
+                    "開いている所属が %d 件あります（兼務は扱わない）: %s"
+                            .formatted(open.size(), employeeId));
+        }
+        return open;
     }
 
     /**

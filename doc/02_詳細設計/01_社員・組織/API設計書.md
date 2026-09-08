@@ -59,11 +59,13 @@
 | `urn:kintai:error:duplicate-email` | 409 | メールアドレスが在籍者と重複 |
 | `urn:kintai:error:duplicate-department-code` | 409 | 部署コードが現存部署と重複 |
 | `urn:kintai:error:overlapping-period` | 409 | 所属・部署長の期間が重複 |
-| `urn:kintai:error:department-cycle` | 409 | 部署階層に循環が生じる |
+| `urn:kintai:error:cyclic-department-hierarchy` | 422 | 部署階層に循環が生じる（自分自身または配下を親にした）|
 | `urn:kintai:error:optimistic-lock-failure` | 409 | 他の利用者が先に更新した |
 | `urn:kintai:error:business-rule-violation` | 422 | 形式は正しいが業務上受け付けられない |
 | `urn:kintai:error:forbidden` | 403 | ロールまたは閲覧範囲の不足 |
-| `urn:kintai:error:authentication-failed` | 401 | 社員番号かパスワードが違う。**どちらが違うかは区別しない** |
+| `urn:kintai:error:authentication-failed` | 401 | 社員番号かパスワードが違う。**どちらが違うかは区別しない。社員番号の形式違反もこれになる**（422 にすると理由を区別することになり、送った値も応答へ返る）|
+| `urn:kintai:error:weak-password` | 422 | パスワードが規則を満たさない（設定・変更のとき）。**ログインでは使わない** |
+| `urn:kintai:error:current-password-mismatch` | 422 | 現在のパスワードが違う（本人による変更のとき）|
 
 **`conflict` のような粗い型にまとめない。**
 フロントエンドが「どの項目を直せばよいか」を判断できなくなるため

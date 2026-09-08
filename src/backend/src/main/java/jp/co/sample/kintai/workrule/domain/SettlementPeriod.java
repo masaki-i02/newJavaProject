@@ -38,7 +38,7 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
     }
 
     private static DateRange calendarMonthOf(YearMonth month) {
-        return new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+        return DateRange.ofMonth(month);
     }
 
     /** 清算期間の暦日数。 */

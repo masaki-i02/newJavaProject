@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.workrule.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,7 +114,7 @@ class WorkRuleRepositoryAdapter implements WorkRuleRepository {
                 .map(row -> new WorkRuleAssignment(
                         new EmployeeId(row.getEmployeeId()),
                         new WorkRuleSeriesId(row.getWorkRuleSeriesId()),
-                        WorkRuleMapper.toRange(row.getValidFrom(), row.getValidTo())))
+                        Periods.toRange(row.getValidFrom(), row.getValidTo())))
                 .toList();
     }
 

@@ -38,6 +38,19 @@ public interface AssignmentRepository {
     void close(EmployeeId employeeId, LocalDate toExclusive);
 
     /**
+     * 異動させる。<strong>現在の所属を閉じてから新しい所属を開くまでを 1 操作にする。</strong>
+     *
+     * <p>{@code close} と {@code save} を続けて呼ぶと、
+     * <strong>順序の保証が永続化の実装詳細に依存する</strong>。
+     * JPA は 1 回のフラッシュで INSERT を UPDATE より先に流すので、
+     * 期間が重なって {@code assignments_no_overlap}（DEFERRABLE ではない）に弾かれる。
+     * いま動いているのは {@code save} が先頭で問い合わせを投げ、その自動フラッシュで
+     * UPDATE が先に流れているからで、{@code save} を素直な upsert に変えただけで壊れる。
+     * しかも制約違反は利用者に説明できない（落とし穴 66・73・157）。
+     */
+    void transfer(Assignment next);
+
+    /**
      * 指定日で閉じた期間を開き直す。<strong>退職の取消でだけ使う。</strong>
      *
      * <p>閉じた日を指定して戻すので、

@@ -130,6 +130,7 @@
 | --- | --- | --- |
 | `urn:kintai:error:invalid-time-clock-sequence` | 422 | 打刻の順序が状態機械に反する（二重の出勤など）。**打刻を足しても直らないので訂正申請へ案内する** |
 | `urn:kintai:error:month-already-closed` | 409 | 締め済みの月への打刻 |
+| `urn:kintai:error:month-not-open` | 409 | 提出済み・締め済みの月への打刻。**締め済みと分ける**（提出済みは差し戻せば直せるので、利用者への案内が違う）|
 
 **拒否するのはこの 2 つだけである。**
 

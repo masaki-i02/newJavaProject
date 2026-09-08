@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.employee.infrastructure;
 
+import jp.co.sample.kintai.shared.infrastructure.Periods;
+
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
