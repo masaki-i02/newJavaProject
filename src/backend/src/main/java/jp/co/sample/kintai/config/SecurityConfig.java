@@ -2,6 +2,7 @@ package jp.co.sample.kintai.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -81,6 +82,15 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health",
                                 "/actuator/health/liveness",
                                 "/actuator/health/readiness").permitAll()
+                        // ★ 画面（SPA）の静的資産を未認証の GET だけ開ける。
+                        //   ログイン画面そのものがここに載っているので、塞ぐと
+                        //   「本文の無い 403」が返り、誰もログインできない。
+                        //   資産は像のビルドで jar へ同梱する（src/backend/Dockerfile）。
+                        //   開けるのは vite が出力する 2 つの経路だけで、
+                        //   /** をまとめて開けない（それをすると、あとから増えた
+                        //   サーバ側の経路が黙って未認証で開く）
+                        .requestMatchers(HttpMethod.GET, "/", "/index.html", "/assets/**")
+                        .permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().denyAll())
                 // ★ 未認証は 401。既定のままだとログイン画面へ 302 になり、

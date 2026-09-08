@@ -1,20 +1,47 @@
-# 勤怠管理システムのバックエンド。
+# 勤怠管理システム（画面 + バックエンド）。
 #
 # マルチステージにする。ビルドに要る JDK・Gradle・依存キャッシュを実行時の像に
 # 残すと、300MB 以上の余分と、攻撃面（コンパイラとシェルの道具一式）が付いてくる。
+#
+# ★ ビルドの文脈はリポジトリの根である（docker-compose.prod.yml の context: .）。
+#   画面とバックエンドの両方を読むため。COPY の起点が src/backend ではないことに注意。
+#
+# ★ 画面を同じ像に同梱し、同じオリジンから配信する。
+#   別の像（nginx）に分けると CORS を開けることになり、SameSite・credentials・
+#   プリフライトの三重苦と、「開発では通るが本番では通らない」経路ができる
+#   （src/frontend/vite.config.ts が開発でも同一オリジンにしているのと同じ理由）。
+#   運用対象を増やさないという ADR 0009 の判断とも揃う。
 
-# ---------- ビルド ----------
+# ---------- 画面のビルド ----------
+FROM node:22-alpine AS frontend
+WORKDIR /frontend
+
+# ★ 依存の解決を先に済ませる。画面のソースだけを変えたときに、この層が再利用される
+COPY src/frontend/package.json src/frontend/package-lock.json ./
+RUN npm ci
+
+COPY src/frontend/tsconfig.json src/frontend/vite.config.ts src/frontend/index.html ./
+COPY src/frontend/src ./src
+# ★ tsc -b を通してから vite build する（package.json の build）。
+#   型検査を外すと、手書きの API の型（落とし穴 143）が壊れたまま像に入る
+RUN npm run build
+
+# ---------- バックエンドのビルド ----------
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /build
 
 # ★ 依存の解決を先に済ませる。ソースだけを変えたときに、この層が再利用される。
 #   gradlew と wrapper のプロパティを先に入れるのはそのため
-COPY gradlew gradlew.bat ./
-COPY gradle ./gradle
+COPY src/backend/gradlew src/backend/gradlew.bat ./
+COPY src/backend/gradle ./gradle
 RUN chmod +x gradlew && ./gradlew --version --no-daemon
 
-COPY settings.gradle.kts build.gradle.kts gradle.properties ./
-COPY src ./src
+COPY src/backend/settings.gradle.kts src/backend/build.gradle.kts src/backend/gradle.properties ./
+COPY src/backend/src ./src
+
+# ★ 画面の出力を jar へ同梱する。Spring Boot は classpath:/static/ を配信し、
+#   / には index.html を返す。SecurityConfig が GET だけを未認証で開けている
+COPY --from=frontend /frontend/dist ./src/main/resources/static
 
 # ★ テストは走らせない。統合テストは実物の PostgreSQL を要求する（H2 は使わない。
 #   落とし穴 6）ので、ビルドの中では成立しない。テストは CI かローカルで通す

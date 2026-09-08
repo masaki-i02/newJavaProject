@@ -66,3 +66,7 @@ Thumbs.db
 # ===== Spring Initializr の生成物 =====
 # 使わないため追跡しない
 HELP.md
+
+# ===== 画面の出力を jar へ同梱する（像のビルドが作る）=====
+# 手元で本番相当を確かめるときにもここへ置くので、コミットしない
+src/backend/src/main/resources/static/

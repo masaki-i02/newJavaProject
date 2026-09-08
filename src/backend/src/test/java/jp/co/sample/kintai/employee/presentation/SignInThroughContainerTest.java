@@ -91,6 +91,106 @@ class SignInThroughContainerTest {
     }
 
     /**
+     * <strong>ログイン画面そのものが未認証で配信される。</strong>
+     *
+     * <p>画面は像のビルドで {@code classpath:/static/} へ同梱される
+     * （{@code src/backend/Dockerfile}）。ところが {@code anyRequest().denyAll()} は
+     * {@code /} も {@code /assets/**} も塞ぐので、開けておかないと
+     * <strong>ログイン画面が本文の無い 403 になり、誰も入り口へ辿り着けない</strong>
+     * （落とし穴 139：設定を書いただけの口は、開いているように見えるだけである）。
+     *
+     * <p>テストでは {@code src/test/resources/static/} の代役を配信する。
+     * test の資源は {@code bootJar} に入らないので、本番の像には混ざらない。
+     */
+    @Test
+    @DisplayName("IT-OPS-13 未認証でログイン画面が配信される")
+    void servesTheSignInPageWithoutAuthentication() throws Exception {
+        var response = get("/");
+
+        assertThat(response.statusCode())
+                .as("403 なら SecurityConfig が画面を塞いでいる")
+                .isEqualTo(200);
+        assertThat(response.body()).contains("KINTAI_STATIC_PROBE");
+    }
+
+    /** 画面が読み込む JavaScript も同じ入り口から届く。 */
+    @Test
+    @DisplayName("IT-OPS-14 未認証で画面の資産（assets）が配信される")
+    void servesTheAssetsWithoutAuthentication() throws Exception {
+        var response = get("/assets/probe.js");
+
+        assertThat(response.statusCode())
+                .as("HTML だけ開けても、資産が 403 なら白い画面になる")
+                .isEqualTo(200);
+        assertThat(response.body()).contains("KINTAI_ASSET_PROBE");
+    }
+
+    /**
+     * <strong>開けたのは画面の 2 経路だけである。</strong>
+     *
+     * <p>{@code /**} をまとめて開けると、あとから増えたサーバ側の経路が
+     * 黙って未認証で開く。<strong>開けた経路は「無ければ 404」</strong>になるので、
+     * 401 が返ることが、まだ {@code denyAll} に落ちている証拠になる
+     * （未認証の拒否は {@code HttpStatusEntryPoint} が 401 に写す）。
+     */
+    @Test
+    @DisplayName("IT-OPS-15 画面の 2 経路の外は、開いていない")
+    void doesNotOpenEverythingElse() throws Exception {
+        assertThat(get("/application.yaml").statusCode())
+                .as("404 なら permitAll の範囲が広すぎる（開いた経路は無ければ 404）")
+                .isEqualTo(401);
+        // ★ 認証と CSRF トークンを持たせてから POST する。
+        //   持たせないと CSRF が先に 403 で拒み、GET 限定が効いているかを
+        //   一切検査しないテストになる（落とし穴 137）。
+        //   トークンを持たせると、静的資源のハンドラは POST に 405 を返すので、
+        //   403（認可が拒んだ）と 405（ハンドラまで届いた）で区別がつく
+        assertThat(postAsSignedInUser("/index.html").statusCode())
+                .as("405 なら GET 限定が効いていない（ハンドラまで届いている）")
+                .isEqualTo(403);
+        assertThat(get("/actuator/env").statusCode())
+                .as("設定値の一覧は未認証でも認証済みでも出さない")
+                .isEqualTo(401);
+    }
+
+    /** ログインして得たセッションと CSRF トークンを載せて POST する。 */
+    private java.net.http.HttpResponse<String> postAsSignedInUser(String path)
+            throws Exception {
+        var signedIn = signIn(PASSWORD);
+        var cookies = signedIn.headers().allValues("set-cookie").stream()
+                .map(cookie -> cookie.split(";", 2)[0])
+                .toList();
+        String token = cookies.stream()
+                .filter(cookie -> cookie.startsWith("XSRF-TOKEN="))
+                .map(cookie -> cookie.substring("XSRF-TOKEN=".length()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "ログインで CSRF トークンが配られていない: " + cookies));
+
+        return send(java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create(
+                        "http://localhost:%d%s".formatted(port, path)))
+                .header("Cookie", String.join("; ", cookies))
+                .header("X-XSRF-TOKEN", token)
+                .POST(java.net.http.HttpRequest.BodyPublishers.noBody()).build());
+    }
+
+    private java.net.http.HttpResponse<String> get(String path) throws Exception {
+        return send(java.net.http.HttpRequest
+                .newBuilder(java.net.URI.create(
+                        "http://localhost:%d%s".formatted(port, path)))
+                .GET().build());
+    }
+
+    private java.net.http.HttpResponse<String> send(java.net.http.HttpRequest request)
+            throws Exception {
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            return client.send(request,
+                    java.net.http.HttpResponse.BodyHandlers.ofString(
+                            java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    /**
      * <strong>クッキーを 1 つも持たない要求でログインできる。</strong>
      *
      * <p>セッション固定攻撃の対策（{@code changeSessionId}）は、

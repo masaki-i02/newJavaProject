@@ -32,7 +32,10 @@
 | `docker compose -f docker-compose.prod.yml up` の通し | **未検証。** 同上 |
 | バックアップ → 破棄 → リストアの実測 | **未検証。** コンテナを起動できないため |
 | **CI（`.github/workflows/verify.yml`）の実行** | **未検証。** この環境から GitHub Actions を実行できない。**各段の中身は手元で同じコマンドを流して確かめてある**（`./gradlew test` / `npm run typecheck` / `npm test` / 生成器 3 本 + 差分無し）が、ランナーの上で走ったところは見ていない。最初の 1 回は結果を見て直すこと |
+| 画面の配信（**像のビルド経由**）| **未検証。** 同上（像を作れない）|
+| 画面の配信（**jar から**）| **検証済み。** 像のビルドがするのと同じ手順を手元で踏んだ — `npm run build` の出力を `src/main/resources/static/` へ置いて `bootJar` し、その jar を起動して `GET /` と `/assets/*` が 200、`/api/**` が 401、それ以外が 401 であることを確かめた。**さらに実ブラウザの通し 12 件（IT-SCN-32〜43）を、vite ではなくこの jar のオリジン（`KINTAI_E2E_BASE_URL=http://localhost:8080`）に対して通した** |
 | 死活監視の口 | **検証済み**（`ActuatorAccessTest` の IT-OPS-01〜04）|
+| 画面が未認証で届くこと | **検証済み**（`SignInThroughContainerTest` の IT-OPS-13〜15）|
 | 本番プロファイルが既定値へ落ちないこと | **検証済み**（`ProdProfileTest` の IT-OPS-05〜07）|
 
 **未検証のものは、初回構築のときに 1 回通して、結果をこの表へ書き戻すこと。**

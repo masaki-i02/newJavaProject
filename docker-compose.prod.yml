@@ -46,7 +46,10 @@ services:
 
   app:
     build:
-      context: ./src/backend
+      # ★ 文脈はリポジトリの根。画面（src/frontend）も同じ像に入れるため、
+      #   src/backend より上を読めないと COPY できない
+      context: .
+      dockerfile: src/backend/Dockerfile
     container_name: kintai-app
     environment:
       SPRING_PROFILES_ACTIVE: prod

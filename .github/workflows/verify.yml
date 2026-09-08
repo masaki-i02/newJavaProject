@@ -69,6 +69,11 @@ jobs:
       - name: test
         working-directory: src/frontend
         run: npm test
+      # ★ ビルドも通す。型検査と単体テストが通っても vite build は落ちうるし、
+      #   落ちれば像に画面が入らない（ログイン画面が配信されなくなる）
+      - name: build
+        working-directory: src/frontend
+        run: npm run build
 
   docs:
     name: 設計書と実装の突き合わせ
