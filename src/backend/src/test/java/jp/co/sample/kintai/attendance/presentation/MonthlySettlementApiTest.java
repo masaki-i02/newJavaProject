@@ -445,6 +445,27 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:month-not-open"));
         }
 
+        /**
+         * <strong>まだ起きていない労働は記録できない。</strong>
+         *
+         * <p>歯止めが無いと、本人が 2031 年の打刻を作れる。
+         * その行は {@code time_clock_events_default}（異常の受け皿）へ落ち、
+         * <strong>行があると翌年のパーティションを ATTACH できなくなる</strong>
+         * （doc/08_運用/年次作業.md）。
+         * 利用者が「異常の受け皿」に行を作れる状態にしない。
+         */
+        @Test
+        @DisplayName("IT-API-48 未来の時刻では打刻できない")
+        void cannotPunchInTheFuture() throws Exception {
+            mockMvc.perform(post("/api/employees/{id}/time-clocks", taro.value())
+                            .with(as(taro, "E0001", Role.EMPLOYEE))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"type\":\"CLOCK_IN\","
+                                    + "\"occurredAt\":\"2031-05-01T09:00:00\"}"))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:future-punch"));
+        }
+
         @Test
         @DisplayName("IT-API-31 締めていない月には打刻できる")
         void canPunchInOpenMonth() throws Exception {

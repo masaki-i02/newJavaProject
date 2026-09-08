@@ -390,6 +390,33 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:resource-not-found"));
         }
 
+        /**
+         * <strong>版を持たない日へ適用しない。</strong>
+         *
+         * <p>適用だけがあって版が無い日は「規則が引けない日」になる。
+         * その社員はその月を提出できず（`work-rule-not-assigned`）、
+         * しかも `unassigned` の一覧は<strong>適用の有無しか見ない</strong>ので
+         * 正常に見える。気づくのは月末に提出しようとしたときである。
+         */
+        @Test
+        @DisplayName("IT-WR-45 その日に有効な版が無い系列は適用できない")
+        void assignBeforeFirstVersion() throws Exception {
+            var 系列 = new WorkRuleSeriesId(UUID.randomUUID());
+            series.save(WorkRuleSeries.active(系列, "10 月から"));
+            workRules.save(WorkRules.versionOf(系列, LocalDate.of(2026, 10, 1),
+                    WorkRules.fixed(), Duration.ofHours(8), NightWindow.STANDARD));
+
+            mockMvc.perform(post("/api/employees/{id}/work-rule-assignments",
+                            taro.value()).with(asHr())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"seriesId":"%s","validFrom":"2026-04-01"}
+                                    """.formatted(系列.value())))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:no-effective-work-rule-version"));
+        }
+
         @Test
         @DisplayName("IT-WR-39 規則の無い在籍者を返す")
         void unassigned() throws Exception {

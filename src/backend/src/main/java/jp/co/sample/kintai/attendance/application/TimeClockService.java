@@ -97,7 +97,17 @@ public class TimeClockService {
         if (!requester.isSelf(employeeId)) {
             throw new AccessDeniedException();
         }
-        LocalDateTime at = occurredAt.orElseGet(() -> LocalDateTime.now(clock));
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime at = occurredAt.orElse(now);
+        // ★ 未来の打刻を受け付けない。打刻は「働いた」という事実の記録であり、
+        //   まだ起きていない労働は記録できない。
+        //   歯止めが無いと 2031 年の打刻を本人が作れてしまい、
+        //   time_clock_events_default（異常の受け皿）に行が入る。
+        //   そこに行があると翌年のパーティションを ATTACH できなくなる
+        //   （doc/08_運用/年次作業.md）
+        if (at.isAfter(now)) {
+            throw new FuturePunchException(at, now);
+        }
         LocalDate workDate = resolveWorkDate(employeeId, type, at);
 
         // ★ 判定に使う月は勤務日が属する月である。
@@ -369,6 +379,32 @@ public class TimeClockService {
         @Override
         public String title() {
             return "その月には打刻できません";
+        }
+    }
+
+    /** 未来の時刻の打刻。 */
+    public static final class FuturePunchException extends DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        FuturePunchException(LocalDateTime at, LocalDateTime now) {
+            super("未来の時刻では打刻できません: 指定 %s / 現在 %s".formatted(at, now));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:future-punch";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "未来の時刻では打刻できません";
         }
     }
 }

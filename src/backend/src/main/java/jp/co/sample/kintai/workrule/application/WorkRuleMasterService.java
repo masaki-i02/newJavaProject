@@ -566,6 +566,17 @@ public class WorkRuleMasterService {
         if (monthClosure.isClosed(employeeId, month)) {
             throw new MonthAlreadyClosedException(month, "就業規則の適用");
         }
+        // ★ その日に有効な版を持たない系列へは適用しない。
+        //   適用だけがあって版が無い日は「規則が引けない日」になり、
+        //   その社員はその月を提出できない（work-rule-not-assigned）。
+        //   しかも `unassigned` の一覧は適用の有無しか見ないので正常に見える。
+        //   気づくのは月末に提出しようとしたときである
+        boolean hasVersion = workRules.findVersionsOf(seriesId).stream()
+                .anyMatch(version -> version.validPeriod().contains(validFrom));
+        if (!hasVersion) {
+            throw new NoEffectiveVersionException(seriesId, validFrom);
+        }
+
         series.assign(employeeId, seriesId, validFrom);
         // ★ 適用は期限を持たないので、以後のすべての年度に効く
         requireDivisorUnchangedFrom(validFrom);
@@ -1176,6 +1187,33 @@ public class WorkRuleMasterService {
         @Override
         public String title() {
             return "締め済みの月に影響する変更はできません";
+        }
+    }
+
+    /** その日に有効な版を持たない系列を適用しようとした。 */
+    public static final class NoEffectiveVersionException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        NoEffectiveVersionException(WorkRuleSeriesId seriesId, LocalDate validFrom) {
+            super("その日に有効な版がありません: 系列 %s / 適用開始日 %s"
+                    .formatted(seriesId.value(), validFrom));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:no-effective-work-rule-version";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "その日に有効な版がありません";
         }
     }
 }

@@ -576,6 +576,7 @@ if (!monthClosureQuery.acceptsChanges(employeeId, month)) { ... }
 | `IT-WR-35` | 存在しない系列の改定 | 404 |
 | `IT-WR-42` | **月中の改定で所定労働時間を変える** | 422 `monthly-basis-changed-mid-month` |
 | `IT-WR-43` | **所定を変えない月中の改定**（深夜帯だけ） | 201。一律に拒まない |
+| `IT-WR-45` | **その日に有効な版が無い系列の適用** | 422 `no-effective-work-rule-version`。隙間を作らせない |
 | `IT-WR-36` | 一覧 | 版の履歴を含めない |
 | `IT-WR-37` | 指定日に有効な版 | その日を含む版が返る |
 | `IT-WR-38` | **版が始まる前の日付** | 404 `work-rule-version-not-effective`。**系列が無い場合とは別の型** |
