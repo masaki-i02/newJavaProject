@@ -177,13 +177,6 @@ public final class Organization {
             }
 
             @Override
-            public List<Employee> findAll(LocalDate asOf, boolean includeRetired) {
-                return employees.values().stream()
-                        .filter(e -> includeRetired || e.isActiveOn(asOf))
-                        .toList();
-            }
-
-            @Override
             public void save(Employee employee) {
                 employees.put(employee.id(), employee);
             }

@@ -23,6 +23,7 @@ import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
 import jp.co.sample.kintai.employee.domain.OrganizationChart;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.IntegrationTestBase;
@@ -118,12 +119,18 @@ class EmployeeRepositoryAdapterTest extends IntegrationTestBase {
             var retiredOn = LocalDate.of(2026, 9, 20);
             employees.save(employees.findById(id).orElseThrow().retire(retiredOn));
 
-            assertThat(employees.findAll(retiredOn, false)).extracting(Employee::id)
-                    .as("退職日当日").contains(id);
-            assertThat(employees.findAll(retiredOn.plusDays(1), false))
+            // ★ 実際に使われている問いに当てる。使われていない問いで境界を確かめても、
+            //   守られているという見かけが増えるだけである（落とし穴 87・126）
+            assertThat(employees.findEmployedDuring(
+                    new DateRange(retiredOn, retiredOn.plusDays(1))))
+                    .extracting(Employee::id).as("退職日当日").contains(id);
+            assertThat(employees.findEmployedDuring(
+                    new DateRange(retiredOn.plusDays(1), retiredOn.plusDays(2))))
                     .as("退職日翌日").isEmpty();
-            assertThat(employees.findAll(retiredOn.plusDays(1), true))
-                    .as("退職者を含めれば引ける").hasSize(1);
+            assertThat(employees.findForDirectory(retiredOn.plusDays(1), true))
+                    .as("名簿は退職者を含めれば引ける").hasSize(1);
+            assertThat(employees.findForDirectory(retiredOn.plusDays(1), false))
+                    .as("名簿から退職者を外せば引けない").isEmpty();
         }
 
         @Test

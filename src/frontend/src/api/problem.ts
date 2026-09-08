@@ -17,21 +17,31 @@
  *   **ここがコンパイルエラーになる**ようにする。
  */
 
-/** 画面が個別に案内する必要のあるエラー。 */
-export const KNOWN_PROBLEMS = [
+/**
+ * **見せ方が既定と違う** `type`。
+ *
+ * ★ ここは「画面が案内できるエラーの一覧」ではない。
+ *   一覧にすると、サーバがエラーを 1 つ足すたびに画面が
+ *   「エラーが発生しました」へ落とし、**理由がいちばん要る場面で理由が消える。**
+ *   実際 `invalid-work-rule-request`（就業規則の指定が不正）や
+ *   `calendar-exceeds-statutory-year`（年間の所定が法定の総枠を超える）は、
+ *   人事がその場で直せる誤りなのに、一覧に足し忘れると何も伝わらなかった。
+ *
+ * ★ 既定はバナー（サーバの `title` と `detail` をそのまま出す）である。
+ *   ドメイン例外の文言は、業務の言葉で利用者に向けて書かれている。
+ */
+export const SPECIAL_PROBLEMS = [
   'urn:kintai:error:validation-failed',
   'urn:kintai:error:authentication-failed',
-  'urn:kintai:error:forbidden',
-  'urn:kintai:error:not-approver',
   'urn:kintai:error:optimistic-lock-failure',
-  'urn:kintai:error:month-already-closed',
-  'urn:kintai:error:month-not-editable',
-  'urn:kintai:error:month-not-finished',
-  'urn:kintai:error:invalid-time-clock-sequence',
-  'urn:kintai:error:self-approval',
+  'urn:kintai:error:internal-error',
+  'urn:kintai:error:constraint-violation',
 ] as const;
 
-export type KnownProblemType = (typeof KNOWN_PROBLEMS)[number];
+export type SpecialProblemType = (typeof SPECIAL_PROBLEMS)[number];
+
+/** 業務エラーの名前空間。ここに属さない `type` は素性が分からない。 */
+const DOMAIN_PREFIX = 'urn:kintai:error:';
 
 /** 入力項目に紐づくエラー（400 の `errors`）。 */
 export interface FieldError {
@@ -47,7 +57,7 @@ export interface Problem {
   readonly errors?: readonly FieldError[];
 }
 
-/** 画面での見せ方。**4 つしかない。** */
+/** 画面での見せ方。**5 つしかない。** */
 export type Presentation =
   | { readonly kind: 'field'; readonly errors: readonly FieldError[] }
   | { readonly kind: 'banner'; readonly title: string; readonly detail?: string }
@@ -58,15 +68,20 @@ export type Presentation =
 /**
  * `type` で見せ方を決める。
  *
- * ★ `default` を書かない。
- *   代わりに、既知の `type` を網羅したあとで `never` へ代入する。
- *   `KNOWN_PROBLEMS` に足したのにここへ足さないと、コンパイルが落ちる。
+ * ★ `status` で分岐しない。409 には「他の利用者が先に更新した」と
+ *   「対象月がまだ終わっていない」が両方あり、案内がまったく違う。
+ *
+ * ★ `default` を書かない。既知の `type` を網羅したあとで `never` へ代入するので、
+ *   `SPECIAL_PROBLEMS` に足してここへ足さないとコンパイルが落ちる。
  */
 export function present(problem: Problem): Presentation {
-  if (!isKnown(problem.type)) {
-    // 未知の `type` は 5xx と同じ扱いにする。`detail` は捨てる
-    //（内部の構造が載っている可能性があるため）
-    return { kind: 'unknown', message: 'エラーが発生しました。時間をおいて再度お試しください。' };
+  if (!isSpecial(problem.type)) {
+    // ★ 業務エラーはサーバの文言をそのまま出す。握りつぶさない。
+    //   名前空間の外（`about:blank`・プロキシが返した応答・CSRF の 403）は
+    //   誰が書いた文言か分からないので出さない
+    return problem.type.startsWith(DOMAIN_PREFIX)
+      ? bannerOf(problem)
+      : { kind: 'unknown', message: 'エラーが発生しました。時間をおいて再度お試しください。' };
   }
   switch (problem.type) {
     case 'urn:kintai:error:validation-failed':
@@ -82,15 +97,13 @@ export function present(problem: Problem): Presentation {
         message: '他の利用者が先に更新しました。読み直してからもう一度お試しください。',
       };
 
-    case 'urn:kintai:error:forbidden':
-    case 'urn:kintai:error:not-approver':
-    case 'urn:kintai:error:self-approval':
-    case 'urn:kintai:error:month-already-closed':
-    case 'urn:kintai:error:month-not-editable':
-    case 'urn:kintai:error:month-not-finished':
-    case 'urn:kintai:error:invalid-time-clock-sequence':
-      // 業務エラーはサーバの文言をそのまま出す。握りつぶさない
-      return bannerOf(problem);
+    case 'urn:kintai:error:internal-error':
+    case 'urn:kintai:error:constraint-violation':
+      // ★ この 2 つだけは `detail` を出さない。
+      //   実装の不備と DB の制約違反を受け取るハンドラであり、
+      //   制約名やテーブル名という**内部の構造**が載りうる唯一の経路である。
+      //   サーバは載せない方針だが、画面の側でも落としておく
+      return { kind: 'unknown', message: 'エラーが発生しました。時間をおいて再度お試しください。' };
 
     default:
       return exhausted(problem.type);
@@ -103,8 +116,8 @@ function bannerOf(problem: Problem): Presentation {
     : { kind: 'banner', title: problem.title, detail: problem.detail };
 }
 
-function isKnown(type: string): type is KnownProblemType {
-  return (KNOWN_PROBLEMS as readonly string[]).includes(type);
+function isSpecial(type: string): type is SpecialProblemType {
+  return (SPECIAL_PROBLEMS as readonly string[]).includes(type);
 }
 
 /**

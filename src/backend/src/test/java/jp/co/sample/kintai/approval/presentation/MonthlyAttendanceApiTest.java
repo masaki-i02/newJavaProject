@@ -903,5 +903,142 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.skipped[?(@.employeeId=='%s')]"
                             .formatted(retired.value())).exists());
         }
+
+        /**
+         * <strong>対象月に在籍していない社員は対象に入らない。</strong>
+         *
+         * <p>基準日 1 点で「退職者を含める」と訊くと、実装は基準日を無視して
+         * <strong>全社員を返す</strong>。締め自体は「提出されていません」として
+         * 無害に {@code skipped} へ落ちるが、結果が 2 年前の退職者で埋まって
+         * <strong>本当に対処すべき数名が埋もれる</strong>。
+         * {@code skipped} は人事が次の行動を決めるために読むものである（落とし穴 60）。
+         */
+        @Test
+        @DisplayName("IT-APV-89 対象月より前に退職した社員は一括締めの対象に入らない")
+        void excludesEmployeesRetiredBeforeMonth() throws Exception {
+            var gone = hire("E0005", "去年 退職",
+                    Optional.of(LocalDate.of(2026, 2, 28)), Role.EMPLOYEE);
+            submitAndApprove();
+
+            closeAll(hr, "E0900", "{\"month\":\"2026-04\"}", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.skipped[?(@.employeeId=='%s')]"
+                            .formatted(gone.value())).doesNotExist());
+        }
+    }
+
+    /**
+     * 締める前の一覧（SC-08）。
+     *
+     * <p><strong>名簿を軸に列挙する。</strong> 月次勤怠の行は提出時に初めて作られるので、
+     * 行を読んで返すと最も知りたい「未提出」が 1 人も出ない（落とし穴 120）。
+     */
+    @Nested
+    @DisplayName("締める前の一覧")
+    class ClosureStatuses {
+
+        private ResultActions list(EmployeeId actor, String number, String month,
+                                   Role... roles) throws Exception {
+            return mockMvc.perform(get("/api/monthly-attendances")
+                    .param("month", month).with(as(actor, number, roles)));
+        }
+
+        /**
+         * <strong>提出していない社員も並ぶ。</strong>
+         * 承認待ちの一覧（提出済みの行）からは原理的に出せない。
+         */
+        @Test
+        @DisplayName("IT-APV-90 未提出の社員も理由つきで一覧に並ぶ")
+        void includesUnsubmitted() throws Exception {
+            list(hr, "E0900", "2026-04", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].status"
+                            .formatted(yamada.value())).value("DRAFT"))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].canClose"
+                            .formatted(yamada.value())).value(false))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].reason"
+                            .formatted(yamada.value())).value("提出されていません"));
+        }
+
+        /**
+         * <strong>締められる行には理由を入れない。</strong>
+         * 空文字を入れると「理由が無い」と「理由が空」が同じ値になる。
+         */
+        @Test
+        @DisplayName("IT-APV-91 承認済みの社員は締められると返り、理由の項目が無い")
+        void approvedIsClosable() throws Exception {
+            submitAndApprove();
+
+            list(hr, "E0900", "2026-04", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].status"
+                            .formatted(yamada.value())).value("APPROVED"))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].canClose"
+                            .formatted(yamada.value())).value(true))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].reason"
+                            .formatted(yamada.value())).doesNotExist());
+        }
+
+        /**
+         * <strong>版を返さない</strong>（決定表「一覧に版を載せるか」）。
+         * 締めは版を取らない {@code bulk-closure} で行う。
+         * 一覧に載せると、行が無い月の版 0 が画面へ渡って落とし穴 57 の経路が開く。
+         */
+        @Test
+        @DisplayName("IT-APV-92 一覧は版を返さない")
+        void doesNotExposeVersion() throws Exception {
+            submitAndApprove();
+
+            list(hr, "E0900", "2026-04", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].version").doesNotExist());
+        }
+
+        /**
+         * <strong>ロールで一律に拒まない。</strong>
+         * 閲覧範囲で絞れば、承認者が呼んでも配下だけが返る。
+         * 締められるかどうかは {@code canClose} が言う。
+         */
+        @Test
+        @DisplayName("IT-APV-93 承認者が呼ぶと配下だけが返り、締められないと返る")
+        void approverSeesOnlySubordinates() throws Exception {
+            submitAndApprove();
+
+            list(manager, "E0100", "2026-04", Role.EMPLOYEE, Role.APPROVER)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].canClose"
+                            .formatted(yamada.value())).value(false))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].reason"
+                            .formatted(yamada.value()))
+                            .value("締められるのは人事だけです"))
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')]"
+                            .formatted(hr.value())).doesNotExist());
+        }
+
+        /**
+         * <strong>対象月に在籍していない社員は並ばない。</strong>
+         * 並ぶと、毎月すべての退職者が「未提出」として表示され、
+         * 本当に対処すべき数名が埋もれる。
+         */
+        @Test
+        @DisplayName("IT-APV-94 対象月より前に退職した社員は一覧に並ばない")
+        void excludesEmployeesRetiredBeforeMonth() throws Exception {
+            var gone = hire("E0005", "去年 退職",
+                    Optional.of(LocalDate.of(2026, 2, 28)), Role.EMPLOYEE);
+
+            list(hr, "E0900", "2026-04", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')]"
+                            .formatted(gone.value())).doesNotExist());
+        }
+
+        /** {@code month} を送らないのは<strong>要求の誤り</strong>なので 400。 */
+        @Test
+        @DisplayName("IT-APV-95 month を送らないと 400 になる")
+        void requiresMonth() throws Exception {
+            mockMvc.perform(get("/api/monthly-attendances")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isBadRequest());
+        }
     }
 }

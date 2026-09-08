@@ -42,20 +42,6 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
     }
 
     @Override
-    public List<Employee> findAll(LocalDate asOf, boolean includeRetired) {
-        List<EmployeeEntity> rows = includeRetired
-                ? jpa.findAllByOrderByEmployeeNumber()
-                : jpa.findActiveOn(asOf);
-        return rows.stream().map(EmployeeRepositoryAdapter::toDomain).toList();
-    }
-
-    /**
-     * 版を突き合わせてから保存する。
-     *
-     * <p>読んでから比べる形にしている。{@code @Version} による自動検出は
-     * 「読み込んだ版」と比べるので、<strong>利用者が画面で見ていた版とは比べてくれない。</strong>
-     */
-    @Override
     public List<Employee> findForDirectory(LocalDate asOf, boolean includeRetired) {
         List<EmployeeEntity> rows = includeRetired
                 ? jpa.findAllByOrderByEmployeeNumber()
@@ -79,6 +65,12 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
                 .map(EmployeeRepositoryAdapter::toDomain).toList();
     }
 
+    /**
+     * 版を突き合わせてから保存する。
+     *
+     * <p>読んでから比べる形にしている。{@code @Version} による自動検出は
+     * 「読み込んだ版」と比べるので、<strong>利用者が画面で見ていた版とは比べてくれない。</strong>
+     */
     @Override
     public void save(Employee employee, long expectedVersion) {
         long actual = currentVersion(employee.id());

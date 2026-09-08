@@ -168,3 +168,199 @@ export interface MonthlyAttendance {
   readonly history?: readonly HistoryEntry[];
   readonly warnings?: readonly Warning[];
 }
+
+// ---------------------------------------------------------------------------
+// 就業規則と会社カレンダー（SC-10 / SC-11）
+// ---------------------------------------------------------------------------
+
+/** 労働時間制度。DB の `work_rules` が排他の CHECK 制約で守っている区別。 */
+export type WorkingTimeSystemType = 'FIXED' | 'FLEX';
+
+/** 深夜帯。法が認めるのは 2 つだけなので、時刻ではなく名前で分岐する。 */
+export type NightWindowName = 'STANDARD' | 'DESIGNATED_AREA';
+
+/** 暦日区分。 */
+export type DayType = 'WORKDAY' | 'LEGAL_HOLIDAY' | 'NON_LEGAL_HOLIDAY';
+
+/** 曜日。サーバは `java.time.DayOfWeek` の名前で受ける。 */
+export type DayOfWeekName =
+  | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY'
+  | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+
+export interface NightWindowView {
+  readonly name: NightWindowName;
+  /** `22:00:00` の形。 */
+  readonly start: string;
+  readonly end: string;
+}
+
+/**
+ * 割増率。
+ *
+ * ★ 文字列で受ける。JSON の数値にすると浮動小数点になり、
+ *   `0.250` と `0.25` が別の値になる（CLAUDE.md 落とし穴 34 が画面に現れた形）。
+ *   画面は表示するだけなので、数値へ直さない。
+ */
+export interface PremiumRatesView {
+  readonly overtimeBeyondStatutory: string;
+  readonly night: string;
+  readonly legalHoliday: string;
+}
+
+export interface FixedTimeView {
+  readonly scheduledStart: string;
+  readonly scheduledEnd: string;
+  readonly scheduledBreakMinutes: number;
+  readonly scheduledWorkingMinutes: number;
+}
+
+export interface FlextimeView {
+  readonly flexibleStart: string;
+  readonly flexibleEnd: string;
+  readonly coreStart: string;
+  readonly coreEnd: string;
+  readonly standardDailyMinutes: number;
+}
+
+/**
+ * 就業規則の版（02 API 設計書 2.1）。
+ *
+ * ★ `fixedTime` と `flextime` は排他である。使わないほうのキーは応答に出ない。
+ *   両方を必須で書くと、画面が「FLEX なのに始業時刻がある」形を作れてしまう。
+ *
+ * ★ 期間の上限は `validToExclusive`。現行版では省かれる（＝上限が無い）。
+ *   閉区間の最終日として見せるときは `previousDayOf` を通す（落とし穴 10・112）。
+ */
+interface WorkRuleRevisionBase {
+  readonly workRuleId: string;
+  readonly validFrom: WallClockDate;
+  readonly validToExclusive?: WallClockDate;
+  readonly statutoryDailyMinutes: number;
+  readonly statutoryWeeklyMinutes: number;
+  readonly nightWindow: NightWindowView;
+  readonly premiumRates: PremiumRatesView;
+}
+
+export type WorkRuleRevision = WorkRuleRevisionBase & (
+  | { readonly workingTimeSystem: 'FIXED'; readonly fixedTime: FixedTimeView }
+  | { readonly workingTimeSystem: 'FLEX'; readonly flextime: FlextimeView }
+);
+
+/**
+ * 就業規則の系列。
+ *
+ * ★ 参照するのは系列であって版ではない（ADR 0003 / 落とし穴 13）。
+ *   一覧では `revisions` が返らない（全系列の全版を返すと重い）ので、
+ *   省略可能にしてある。
+ *
+ * ★ `version` は系列の楽観ロックの版で、**0 から始まる**（02 API 設計書 2.0）。
+ *   月次勤怠の版が 1 から始まるのとは別の理由に基づく。
+ */
+export interface WorkRuleSeries {
+  readonly seriesId: string;
+  readonly name: string;
+  readonly abolishedOn?: WallClockDate;
+  readonly version: number;
+  /**
+   * ★ 省略ではなく `null` が来る。`WorkRuleResponse.revisions` に
+   *   `@JsonInclude` が付いていないためである。`?:` と書くと
+   *   型の上では `null` が存在しないことになり、`?? []` を書かないまま
+   *   `revisions.map` を呼ぶ画面がコンパイルを通ってしまう（`Approver` と同型）。
+   */
+  readonly revisions: readonly WorkRuleRevision[] | null;
+}
+
+/**
+ * 所定総労働時間が法定の総枠を超える月の知らせ。
+ *
+ * ★ 拒否ではない。フレックスでは適法に起こりうる。
+ *   握りつぶすと人事が気づけないので、成功メッセージと並べて必ず出す。
+ */
+export interface ScheduleWarning {
+  readonly code: string;
+  readonly message: string;
+  readonly month: YearMonth;
+  readonly scheduledTotalMinutes: number;
+  readonly statutoryTotalLimitMinutes: number;
+}
+
+/** 登録・改定の応答。読み直したあとの版が入っている（落とし穴 158）。 */
+export interface WorkRuleRegistration {
+  readonly seriesId: string;
+  readonly workRuleId: string;
+  readonly version: number;
+  readonly warnings?: readonly ScheduleWarning[];
+}
+
+/** 会社カレンダーの 1 日。未登録の日も `WORKDAY` として返る。 */
+export interface CalendarDay {
+  readonly date: WallClockDate;
+  readonly dayType: DayType;
+}
+
+export interface CalendarView {
+  readonly from: WallClockDate;
+  readonly toExclusive: WallClockDate;
+  readonly days: readonly CalendarDay[];
+  readonly workdayCount: number;
+}
+
+/** 一括登録の知らせ（「連続 7 日に法定休日が無い」）。 */
+export interface CalendarWarning {
+  readonly code: string;
+  readonly message: string;
+  readonly period: { readonly from: WallClockDate; readonly toExclusive: WallClockDate };
+}
+
+export interface CalendarBulkResult {
+  readonly registeredCount: number;
+  readonly byDayType: Readonly<Partial<Record<DayType, number>>>;
+  readonly warnings?: readonly CalendarWarning[];
+}
+
+/**
+ * 就業規則が引けない在籍者（02 API 設計書 2.4）。
+ *
+ * ★ 社員番号も氏名も返らない。`employee` が所有する概念なので混ぜない。
+ *   この一覧が空でないと、その社員の勤怠は計算できない。
+ */
+export interface UnassignedWorkRules {
+  readonly date: WallClockDate;
+  readonly employeeIds: readonly string[];
+}
+
+/**
+ * 締める前の 1 行（SC-08）。
+ *
+ * ★ **版を持たない。** 締めは版を取らない `bulk-closure` で行う。
+ *   一覧に版を載せると、行が無い月の版 0 が画面へ渡り、
+ *   落とし穴 57 が防いだ経路が一覧側から開く。
+ *
+ * ★ `DRAFT` を「打刻が 1 件も無い」と読まない。
+ *   行は提出時に初めて作られるので、行が無いことは「下書き」を意味するだけである
+ *   （落とし穴 120）。
+ *
+ * ★ `canClose` はサーバが決める。`status === 'APPROVED'` と書くと、
+ *   人事であることと対象月が終わっていることが画面から落ちる。
+ */
+export interface ClosureStatus {
+  readonly employeeId: string;
+  readonly month: YearMonth;
+  readonly status: AttendanceState;
+  readonly canClose: boolean;
+  /** 締められないときだけ入る。 */
+  readonly reason?: string;
+}
+
+/** 一括締めで締められなかった社員。 */
+export interface SkippedClosure {
+  readonly employeeId: string;
+  readonly status: AttendanceState;
+  readonly reason: string;
+}
+
+export interface BulkClosureResult {
+  readonly month: YearMonth;
+  readonly closed: number;
+  readonly skipped: readonly SkippedClosure[];
+}

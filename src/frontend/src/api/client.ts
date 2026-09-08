@@ -35,6 +35,18 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('POST', path, body);
 }
 
+/**
+ * 冪等な更新（暦日区分の設定）。
+ *
+ * ★ `POST` で代用しない。同じ日を 2 回設定しても結果が同じ操作なので、
+ *   経路も動詞もサーバの定義（`PUT /api/calendars/{date}`）にそろえる。
+ *   ずらすと、設計書と実装の突き合わせ（`check-endpoints.py`）を通ったまま
+ *   画面だけが 405 を受ける。
+ */
+export async function put<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>('PUT', path, body);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {

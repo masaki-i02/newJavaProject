@@ -80,6 +80,26 @@ class MonthlyAttendanceController {
                 .toList();
     }
 
+    /**
+     * 締める前に見る一覧（SC-08）。
+     *
+     * <p><strong>名簿を軸に列挙する。</strong> 月次勤怠の行は提出時に初めて作られるので、
+     * 行を読んで返すと<strong>最も知りたい「未提出」が 1 人も出ない</strong>（落とし穴 120）。
+     *
+     * <p><strong>版を返さない</strong>（決定表「一覧に版を載せるか」）。
+     * 締めは版を取らない {@code bulk-closure} で行う。
+     *
+     * <p>ロールで一律に拒まない。閲覧範囲で絞れば承認者が呼んでも配下だけが返る。
+     * 締められるかどうかは {@code canClose} が言う。
+     */
+    @GetMapping("/monthly-attendances")
+    List<ClosureStatusResponse> closureStatuses(
+            @AuthenticationPrincipal AuthenticatedEmployee principal,
+            @RequestParam YearMonth month) {
+        return bulkClosure.closureStatuses(principal.toRequester(), month).stream()
+                .map(status -> ClosureStatusResponse.from(status, month)).toList();
+    }
+
     /** 誰に承認してもらうか（BR-11）。<strong>遡った経路も返す。</strong> */
     @GetMapping("/employees/{employeeId}/monthly-attendances/{month}/approver")
     ApproverResponse approver(@AuthenticationPrincipal AuthenticatedEmployee principal,
@@ -189,6 +209,30 @@ class MonthlyAttendanceController {
         static BulkClosureResponse from(BulkClosureResult result) {
             return new BulkClosureResponse(result.month().toString(), result.closed(),
                     result.skipped().stream().map(SkippedResponse::from).toList());
+        }
+    }
+
+    /**
+     * 締める前の 1 行（SC-08）。
+     *
+     * <p><strong>{@code reason} は締められないときだけ入る。</strong>
+     * 空文字を入れると「理由が無い」と「理由が空」が同じ値になる。
+     *
+     * <p><strong>{@code DRAFT} を「打刻が 1 件も無い」と読ませない。</strong>
+     * 行が無いことが意味するのは下書きだけである（落とし穴 120）。
+     */
+    record ClosureStatusResponse(String employeeId, String month, String status,
+                                 boolean canClose,
+                                 @com.fasterxml.jackson.annotation.JsonInclude(
+                                         com.fasterxml.jackson.annotation.JsonInclude
+                                                 .Include.NON_NULL)
+                                 String reason) {
+
+        static ClosureStatusResponse from(BulkClosureService.ClosureStatus status,
+                                          YearMonth month) {
+            return new ClosureStatusResponse(status.employeeId().value().toString(),
+                    month.toString(), status.state().name(),
+                    status.canClose(), status.reason());
         }
     }
 

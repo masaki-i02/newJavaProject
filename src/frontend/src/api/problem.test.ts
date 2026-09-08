@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { KNOWN_PROBLEMS, present, type Problem } from './problem';
+import { SPECIAL_PROBLEMS, present, type Problem } from './problem';
 
 /**
  * Problem Details の見せ方（UT-FE-07〜12）。
@@ -53,29 +53,71 @@ describe('Problem Details', () => {
   });
 
   /**
-   * ★ 未知の `type` の `detail` を捨てる。
-   *   内部の構造（制約名・テーブル名）が載っている可能性がある。
-   *   サーバは実装の不備の応答にメッセージを載せない方針だが、
-   *   画面の側でも同じ扱いにしておく。
+   * ★ 実装の不備と DB の制約違反だけは `detail` を捨てる。
+   *   制約名やテーブル名という**内部の構造**が載りうる唯一の経路である。
+   *   サーバは載せない方針だが、画面の側でも落としておく。
    */
-  it('UT-FE-11 未知の type は詳細を出さない', () => {
-    const presentation = present(problem('urn:kintai:error:brand-new-error', {
-      status: 500,
-      detail: 'null value in column "employee_id" violates not-null constraint',
-    }));
+  it('UT-FE-11 実装の不備と制約違反は詳細を出さない', () => {
+    for (const type of ['urn:kintai:error:internal-error',
+      'urn:kintai:error:constraint-violation']) {
+      const presentation = present(problem(type, {
+        status: 500,
+        detail: 'null value in column "employee_id" violates not-null constraint',
+      }));
 
-    expect(presentation.kind).toBe('unknown');
-    expect(JSON.stringify(presentation)).not.toContain('employee_id');
+      expect(presentation.kind, type).toBe('unknown');
+      expect(JSON.stringify(presentation), type).not.toContain('employee_id');
+    }
   });
 
   /**
-   * ★ 既知の `type` をすべて処理していることを確かめる。
-   *   網羅性検査はコンパイル時に効くが、`KNOWN_PROBLEMS` に足して
+   * ★ 見せ方が既定と違う `type` をすべて処理していることを確かめる。
+   *   網羅性検査はコンパイル時に効くが、`SPECIAL_PROBLEMS` に足して
    *   `switch` にも足したのに **間違った分岐へ入れた** 場合は落ちない。
    */
-  it('UT-FE-12 既知の type はすべて unknown 以外に落ちる', () => {
-    for (const type of KNOWN_PROBLEMS) {
-      expect(present(problem(type)).kind, type).not.toBe('unknown');
+  it('UT-FE-12 見せ方が既定と違う type はすべて意図した見せ方になる', () => {
+    const expected: Record<string, string> = {
+      'urn:kintai:error:validation-failed': 'field',
+      'urn:kintai:error:authentication-failed': 'signIn',
+      'urn:kintai:error:optimistic-lock-failure': 'reload',
+      'urn:kintai:error:internal-error': 'unknown',
+      'urn:kintai:error:constraint-violation': 'unknown',
+    };
+    for (const type of SPECIAL_PROBLEMS) {
+      expect(present(problem(type)).kind, type).toBe(expected[type]);
     }
+  });
+
+  /**
+   * ★ **一覧に無い業務エラーもバナーで理由を出す。**
+   *   ここが「エラーが発生しました」に落ちると、人事がその場で直せる誤り
+   *   （就業規則の指定・年間の所定が法定の総枠を超える）で理由が消える。
+   *   サーバがエラーを足すたびに画面を直さないと伝わらない状態を作らない。
+   */
+  it('UT-FE-13 一覧に無い業務エラーもサーバの文言をそのまま出す', () => {
+    expect(present(problem('urn:kintai:error:calendar-exceeds-statutory-year', {
+      status: 422,
+      title: '年間の所定労働時間が法定の総枠を超えます',
+      detail: '2026 年度は 2,100 時間で、総枠 2,085 時間 42 分を超えます',
+    }))).toEqual({
+      kind: 'banner',
+      title: '年間の所定労働時間が法定の総枠を超えます',
+      detail: '2026 年度は 2,100 時間で、総枠 2,085 時間 42 分を超えます',
+    });
+  });
+
+  /**
+   * ★ 名前空間の外は出さない。
+   *   CSRF の検証失敗（403）やプロキシの応答は、誰が書いた文言か分からない。
+   */
+  it('UT-FE-14 業務エラーの名前空間の外は文言を出さない', () => {
+    const presentation = present(problem('about:blank', {
+      status: 403,
+      title: 'Forbidden',
+      detail: '/actuator/env is denied by anyRequest().denyAll()',
+    }));
+
+    expect(presentation.kind).toBe('unknown');
+    expect(JSON.stringify(presentation)).not.toContain('actuator');
   });
 });

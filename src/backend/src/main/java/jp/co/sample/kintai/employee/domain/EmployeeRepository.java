@@ -17,17 +17,9 @@ public interface EmployeeRepository {
     Optional<Employee> findByNumber(EmployeeNumber number);
 
     /**
-     * 指定日時点の社員一覧。
-     *
-     * @param includeRetired 退職者を含めるか。過去分の勤怠を扱うときは含める必要がある
-     */
-    List<Employee> findAll(LocalDate asOf, boolean includeRetired);
-
-    /**
      * 名簿に載せる社員（API設計書 3.2）。
      *
-     * <p>{@link #findAll(LocalDate, boolean)} とは<strong>別の問い</strong>である。
-     * あちらは「その日に在籍していたか」を訊いており、未来日入社の社員は含まれない。
+     * <p><strong>「その日に在籍していたか」を訊く問いではない。</strong>
      * 名簿では<strong>未来日入社の社員も必ず返す。</strong>
      * 登録直後の社員が一覧に現れないと、管理者が登録の成否を確認できない。
      *
@@ -38,9 +30,9 @@ public interface EmployeeRepository {
     /**
      * 在籍期間が指定期間と<strong>重なる</strong>社員（BR-18）。
      *
-     * <p>{@link #findAll(LocalDate, boolean)} とは<strong>別の問い</strong>である。
-     * あちらは基準日 1 点なので、月中入社か月中退職のどちらかが必ず落ちる。
-     * 給与連携は「その月に 1 日でも在籍した社員」を数え上げるので、除くと
+     * <p><strong>基準日 1 点で訊いてはならない。</strong>
+     * 1 点だと月中入社か月中退職のどちらかが必ず落ちる。
+     * 給与連携も一括締めも「その月に 1 日でも在籍した社員」を数え上げるので、除くと
      * <strong>退職者の最終月の給与が出ない</strong>（CLAUDE.md 落とし穴 63・75）。
      *
      * <p>社員番号順、同じ番号なら入社日順。
