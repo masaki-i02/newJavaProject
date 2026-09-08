@@ -217,8 +217,13 @@ class TimeClockSequenceTest {
                     new TimeClockEvent.BreakStart(at("12:00")),
                     new TimeClockEvent.ClockOut(at("18:00"))));
 
-            assertThat(sequence.events()).extracting(Object::getClass)
-                    .containsExactly(TimeClockEvent.ClockIn.class,
+            // ★ extracting(Object::getClass) にしない。
+            //   要素の型が Class<capture of ? extends Object> に推論され、
+            //   containsExactly(Class<ClockIn>, …) を受け付けない処理系がある
+            //   （javac は通すが Eclipse の ecj は通さない）。
+            //   hasExactlyElementsOfTypes は Class<?>... を取るので推論が絡まない
+            assertThat(sequence.events())
+                    .hasExactlyElementsOfTypes(TimeClockEvent.ClockIn.class,
                             TimeClockEvent.BreakStart.class,
                             TimeClockEvent.BreakEnd.class,
                             TimeClockEvent.ClockOut.class);

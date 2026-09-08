@@ -22,6 +22,13 @@ repositories {
 // 設計書の DDL を検証したのと同じ構成で動かしたいので 1.x に固定する。
 val testcontainersVersion = "1.21.3"
 val archUnitVersion = "1.4.1"
+val ecjVersion = "3.40.0"
+
+/**
+ * Eclipse のコンパイラを解決するためだけの構成。
+ * アプリケーションの classpath には載せない。
+ */
+val ecj: Configuration = configurations.create("ecj")
 
 dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -51,6 +58,9 @@ dependencies {
 	testImplementation("com.tngtech.archunit:archunit-junit5:$archUnitVersion")
 
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+	// ★ Eclipse のコンパイラ（ecj）。コンパイルには使わず、検査にだけ使う（ecjCheck）
+	ecj("org.eclipse.jdt:ecj:$ecjVersion")
 }
 
 tasks.withType<JavaCompile> {
@@ -75,4 +85,33 @@ tasks.withType<Test> {
 		events("failed")
 		exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.SHORT
 	}
+}
+
+/**
+ * <strong>Eclipse のコンパイラ（ecj）でも通ることを確かめる。</strong>
+ *
+ * javac と ecj は型推論の実装が違うので、<strong>javac が通すコードを ecj が拒む</strong>
+ * ことがある。実際 {@code extracting(Object::getClass).containsExactly(A.class, …)} は
+ * javac では通り、Eclipse では「capture#23 に適用できません」で赤くなっていた。
+ * 開発を Eclipse で行う以上、javac だけを見ているとこの種の食い違いに気づけない
+ * （CLAUDE.md 落とし穴 181）。
+ *
+ * ★ クラスファイルは書き出さない（-d none）。ここでやりたいのは検査だけである。
+ */
+tasks.register<JavaExec>("ecjCheck") {
+	group = "verification"
+	description = "Eclipse のコンパイラでも main / test がコンパイルできることを確かめる"
+	dependsOn(tasks.named("compileTestJava"))
+
+	classpath = ecj
+	mainClass = "org.eclipse.jdt.internal.compiler.batch.Main"
+
+	val sourceDirs = sourceSets["main"].java.srcDirs + sourceSets["test"].java.srcDirs
+	val compileClasspath = sourceSets["test"].compileClasspath
+
+	argumentProviders.add(CommandLineArgumentProvider {
+		listOf("-21", "-encoding", "UTF-8", "-proc:none", "-nowarn", "-d", "none",
+				"-classpath", compileClasspath.asPath)
+			.plus(sourceDirs.filter { it.exists() }.map { it.absolutePath })
+	})
 }

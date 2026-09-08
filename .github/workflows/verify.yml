@@ -26,7 +26,7 @@ env:
 
 jobs:
   backend:
-    name: バックエンド（テスト 1000 件超・実物の PostgreSQL）
+    name: バックエンド（javac と ecj の 2 つのコンパイラ・テスト 1000 件超・実物の PostgreSQL）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,12 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      # ★ Eclipse のコンパイラでも通ることを確かめる。
+      #   javac と ecj は型推論の実装が違うので、javac が通すコードを ecj が拒むことがある。
+      #   開発を Eclipse で行う以上、javac だけを見ていると IDE だけが赤くなる（落とし穴 181）
+      - name: ecj（Eclipse のコンパイラ）でも通ることを確かめる
+        working-directory: src/backend
+        run: ./gradlew ecjCheck --no-daemon
       # ★ H2 を使わない（落とし穴 6）。Testcontainers が postgres:16-alpine を起動する。
       #   ubuntu-latest には Docker があるので、追加の service は要らない
       - name: test
