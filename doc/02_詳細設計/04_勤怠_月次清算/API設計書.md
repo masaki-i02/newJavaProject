@@ -51,17 +51,30 @@
     "exceedsMonthly": false,
     "annualUsedBeforeMinutes": 1830,
     "annualLimitMinutes": 21600,
-    "exceedsAnnual": false
+    "exceedsAnnual": false,
+    "combinedMinutes": 472,
+    "exceedsCombinedSingleMonth": false
   },
-  "calculatedAt": "2026-06-03T18:22:11"
+  "overtimeOver60Minutes": 0,
+  "carriedOverOvertimeMinutes": 0
 }
 ```
+
+> **`combinedMinutes` と `exceedsCombinedSingleMonth` を分けて持つ。**
+> 限度時間（`subjectMinutes`）の対象は**時間外労働だけ**で、
+> 休日労働を含めるのは 36 条 6 項 2 号という**別の規制**である（落とし穴 52）。
+> 1 つのフラグに畳むと、どちらに触れたのかが読めなくなる。
+
+> **`calculatedAt` は返さない。** いつ計算したかは業務上の判断に使わず、
+> 返すと画面が「古いかもしれない」という判断を持つことになる。
+> 値が古いかどうかは、訂正や年休の承認が再計算を起こすので問題にならない。
 
 | 決定 | 理由 |
 | --- | --- |
 | `period` を返す | 清算期間は暦月とは限らない。月中入社・月中退職の月は在籍期間との交差になる。画面が「5/1 〜 5/31」と出せない月がある |
 | `annualUsedBeforeMinutes` という名前にする | 中身は **当月より前**の年度累計であり、当月を含まない。`annualUsedMinutes` では当月を含むように読める |
 | `version` を返す | 再計算リクエストで必須になるため、取得する経路が要る（[共通仕様 1.4](../01_社員・組織/API設計書.md)） |
+| `calculatedAt` は返さない | いつ計算したかは業務上の判断に使わない。返すと画面が「古いかもしれない」という判断を持つことになる |
 
 固定時間制の場合は、これに加えて週の内訳を返す。
 
@@ -74,10 +87,17 @@
   "overtimeMinutes": 1020,
   "weeklyBreakdown": [
     { "weekStart": "2026-04-05", "weekEnd": "2026-04-11",
-      "statutoryInsideMinutes": 2520, "overtimeMinutes": 120 }
+      "statutoryInsideMinutes": 2520,
+      "weekOvertimeMinutes": 120, "chargedMinutes": 120 }
   ]
 }
 ```
+
+> **週の時間外は `weekOvertimeMinutes` という名前にする。**
+> 同じ応答のトップレベルに月の `overtimeMinutes` があるので、
+> 週の内訳でも `overtimeMinutes` と呼ぶと、**どちらの月の値なのか**が読めなくなる。
+> `chargedMinutes` は、その週のうち**この月に計上した**ぶんである
+> （週が月をまたぐと、発生した暦日で振り分ける。落とし穴 54）。
 
 | 決定 | 理由 |
 | --- | --- |

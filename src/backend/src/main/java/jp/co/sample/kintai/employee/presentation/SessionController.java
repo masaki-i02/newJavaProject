@@ -1,5 +1,6 @@
 package jp.co.sample.kintai.employee.presentation;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jp.co.sample.kintai.employee.application.EmployeeDirectoryService;
+import jp.co.sample.kintai.employee.application.EmployeeDirectoryService.EmployeeWithDepartment;
 import jp.co.sample.kintai.employee.application.SignInService;
 import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.PasswordAttempt;
@@ -39,11 +42,13 @@ import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 class SessionController {
 
     private final SignInService signIn;
+    private final EmployeeDirectoryService directory;
     private final SecurityContextRepository securityContextRepository;
 
-    SessionController(SignInService signIn,
+    SessionController(SignInService signIn, EmployeeDirectoryService directory,
                       SecurityContextRepository securityContextRepository) {
         this.signIn = signIn;
+        this.directory = directory;
         this.securityContextRepository = securityContextRepository;
     }
 
@@ -79,7 +84,11 @@ class SessionController {
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
 
-        return ResponseEntity.ok(MeResponse.of(principal));
+        // ★ ログインの応答も `GET /api/me` と同じ形にする。
+        //   形が違うと、画面はログイン直後だけ所属を持たない状態になる
+        return ResponseEntity.ok(MeResponse.of(principal,
+                directory.find(principal.toRequester(), principal.employeeId(),
+                        java.util.Optional.empty())));
     }
 
     @DeleteMapping("/sessions")
@@ -92,9 +101,21 @@ class SessionController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * ログイン中の社員（API 設計書 3.1）。
+     *
+     * <p><strong>所属を含める。</strong> 一般社員は社員の一覧を見られないので、
+     * <strong>自分の所属を知る経路がここにしか無い</strong>（API 設計書 2.1）。
+     * 返さないと、設計書が案内している経路が実際には答えを持たないことになる
+     * （落とし穴 138）。
+     *
+     * <p><strong>労働時間制度は含めない。</strong> 含めると
+     * {@code employee → workrule} という図に無い依存が生まれる。
+     */
     @GetMapping("/me")
     MeResponse me(@AuthenticationPrincipal AuthenticatedEmployee principal) {
-        return MeResponse.of(principal);
+        return MeResponse.of(principal, directory.find(principal.toRequester(),
+                principal.employeeId(), java.util.Optional.empty()));
     }
 
     /**
@@ -108,13 +129,42 @@ class SessionController {
     record SignInRequest(@NotBlank String employeeNumber, @NotBlank String password) {
     }
 
-    /** ログイン中の社員（API 設計書 3.1）。 */
-    record MeResponse(String id, String employeeNumber, String name, List<String> roles) {
+    /**
+     * ログイン中の社員（API 設計書 3.1）。
+     *
+     * <p>{@code department} は<strong>項目ごと残す</strong>（{@code null} を出す）。
+     * 省くと「所属が無い」ことを応答から読み取れなくなる（落とし穴 76）。
+     * 未来日入社の社員は、基準日の時点でまだどこにも所属していない。
+     */
+    record MeResponse(String id, String employeeNumber, String name, String email,
+                      LocalDate hiredOn, List<String> roles,
+                      DepartmentResponse department) {
 
-        static MeResponse of(AuthenticatedEmployee principal) {
-            return new MeResponse(principal.employeeId().value().toString(),
-                    principal.employeeNumber(), principal.name(),
-                    principal.roles().stream().map(Enum::name).sorted().toList());
+        /**
+         * <strong>ロールは認証した利用者から取る。</strong>
+         *
+         * <p>{@code APPROVER} は<strong>認証時に部署長の事実から導出する</strong>ので、
+         * 社員の行には入っていない。保存されているロールから作ると、
+         * <strong>部署長が承認のメニューを失う。</strong>
+         * 実ブラウザの通し（IT-SCN-34）が捕まえた。
+         */
+        static MeResponse of(AuthenticatedEmployee principal, EmployeeWithDepartment row) {
+            var employee = row.employee();
+            return new MeResponse(employee.id().value().toString(),
+                    employee.number().value(), employee.name(),
+                    employee.email().value(), employee.hiredOn(),
+                    principal.roles().stream().map(Enum::name).sorted().toList(),
+                    row.department().map(DepartmentResponse::from).orElse(null));
+        }
+
+        /** 所属。<strong>未来日入社の社員では {@code null} になる。</strong> */
+        record DepartmentResponse(String id, String code, String name) {
+
+            static DepartmentResponse from(
+                    jp.co.sample.kintai.employee.domain.Department d) {
+                return new DepartmentResponse(d.id().value().toString(),
+                        d.code().value(), d.name());
+            }
         }
     }
 }

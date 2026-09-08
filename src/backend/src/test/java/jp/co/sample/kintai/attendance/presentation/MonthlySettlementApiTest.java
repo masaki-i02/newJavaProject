@@ -427,6 +427,33 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                             .formatted(taro.value())).doesNotExist());
         }
 
+        /**
+         * <strong>版を取得する経路が要る。</strong>
+         *
+         * <p>再計算は版を必須にしているのに、それを返す {@code GET} が無かった。
+         * 送るべき値を知る手段が無いまま必須にしても、守られているのは
+         * 「誰も呼べない」ことだけである（05 API設計書 1.1・落とし穴 159）。
+         *
+         * <p>一覧には載せない。再計算するのは開いた 1 日だけである。
+         */
+        @Test
+        @DisplayName("IT-API-42 日次の 1 件は版を返し、一覧は返さない")
+        void dailyExposesVersionOnlyOnDetail() throws Exception {
+            LocalDate workDate = LocalDate.of(2026, 5, 1);
+            regularDay(workDate);
+
+            mockMvc.perform(get("/api/employees/{id}/attendances/{date}",
+                            taro.value(), workDate).with(as(taro, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.version").value(1));
+
+            mockMvc.perform(get("/api/employees/{id}/attendances", taro.value())
+                            .param("from", "2026-05-01").param("toExclusive", "2026-05-02")
+                            .with(as(taro, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.days[0].version").doesNotExist());
+        }
+
         /** 日次の再計算。版が一致すれば通り、版が上がる。 */
         @Test
         @DisplayName("IT-API-39 人事は日次を計算し直せ、版が 1 つ上がる")

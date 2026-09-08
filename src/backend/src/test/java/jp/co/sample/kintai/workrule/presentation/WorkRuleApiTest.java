@@ -415,7 +415,30 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
             mockMvc.perform(get("/api/calendars").with(asTaro())
                             .param("from", "2026-05-01").param("toExclusive", "2026-05-04"))
                     .andExpect(jsonPath("$.days[2].dayType").value("LEGAL_HOLIDAY"))
+                    // ★ 名称も返る。書き込みだけ受け付けて読み出せない状態にしない。
+                    //   このテストは以前から憲法記念日を登録していたのに、
+                    //   名称を読んでいなかったので気づけなかった（落とし穴 112）
+                    .andExpect(jsonPath("$.days[2].name").value("憲法記念日"))
                     .andExpect(jsonPath("$.workdayCount").value(2));
+        }
+
+        /**
+         * <strong>名称の無い日は項目ごと省く。</strong>
+         * 空文字を入れると「名前が無い」と「名前が空」が同じ値になる（落とし穴 76）。
+         */
+        @Test
+        @DisplayName("IT-CAL-16 名称の無い日は name の項目そのものが無い")
+        void omitsMissingName() throws Exception {
+            mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .put("/api/calendars/{date}", "2026-05-02").with(asHr())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"dayType\": \"NON_LEGAL_HOLIDAY\"}"))
+                    .andExpect(status().isNoContent());
+
+            mockMvc.perform(get("/api/calendars").with(asTaro())
+                            .param("from", "2026-05-01").param("toExclusive", "2026-05-03"))
+                    .andExpect(jsonPath("$.days[1].dayType").value("NON_LEGAL_HOLIDAY"))
+                    .andExpect(jsonPath("$.days[1].name").doesNotExist());
         }
 
         /** 期間の逆転を 500 にしない（落とし穴 105）。 */

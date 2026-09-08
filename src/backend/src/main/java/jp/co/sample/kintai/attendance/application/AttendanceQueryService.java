@@ -47,6 +47,20 @@ public class AttendanceQueryService {
         this.visibility = visibility;
     }
 
+    /**
+     * 楽観ロックの版。
+     *
+     * <p><strong>取得する経路が無いと、利用者は版を送れない</strong>
+     * （05 API設計書 1.1）。再計算はこれを必須にしている。
+     * 行が無い日は 0 を返す（落とし穴 57）。
+     */
+    @Transactional(readOnly = true)
+    public long currentVersion(Requester requester, EmployeeId employeeId,
+                               LocalDate workDate) {
+        requireVisible(requester, employeeId, workDate);
+        return dailyAttendances.currentVersion(employeeId, workDate);
+    }
+
     public Optional<DailyAttendance> find(Requester requester, EmployeeId employeeId,
                                           LocalDate workDate) {
         // ★ 基準日はその勤務日。今日の組織で過去の勤怠の可否を決めない。

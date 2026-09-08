@@ -1,6 +1,8 @@
 package jp.co.sample.kintai.attendance.presentation;
 
 import java.time.LocalDate;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -36,6 +38,19 @@ public record DailyAttendanceResponse(
         int nightMinutes,
         int legalHolidayMinutes,
         boolean breakRequirementSatisfied,
+        /**
+         * 楽観ロックの版。<strong>1 件を返すときだけ入れる。</strong>
+         *
+         * <p>再計算（{@code POST .../recalculation}）は版を必須にしているのに、
+         * <strong>版を取得する経路が無かった。</strong>
+         * 送るべき値を知る手段が無いまま必須にしても、守られているのは
+         * 「誰も呼べない」ことだけである（05 API設計書 1.1）。
+         *
+         * <p>一覧には入れない（決定表「一覧に版を載せるか」）。
+         * 再計算するのは開いた 1 日だけである。
+         */
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        Long version,
         List<SliceResponse> slices) {
 
     /**
@@ -50,7 +65,13 @@ public record DailyAttendanceResponse(
                                 List<String> premiums) {
     }
 
+    /** 一覧の行。<strong>版は入れない。</strong> */
     public static DailyAttendanceResponse from(DailyAttendance attendance) {
+        return from(attendance, null);
+    }
+
+    /** 1 件。<strong>版を入れる</strong>（再計算がこれを必須にしている）。 */
+    public static DailyAttendanceResponse from(DailyAttendance attendance, Long version) {
         return new DailyAttendanceResponse(
                 attendance.workDate(),
                 attendance.dayType().name(),
@@ -64,6 +85,7 @@ public record DailyAttendanceResponse(
                 minutes(attendance.legalHolidayTime()),
                 new BreakTimeRequirement(attendance.workingTime(), attendance.breakTime())
                         .isSatisfied(),
+                version,
                 attendance.slices().stream().map(DailyAttendanceResponse::toSlice).toList());
     }
 

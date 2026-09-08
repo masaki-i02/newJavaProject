@@ -338,13 +338,18 @@ type WorkRuleRevision =
   "from": "2026-05-01",
   "toExclusive": "2026-06-01",
   "days": [
-    { "date": "2026-05-01", "dayType": "WORKDAY", "name": null },
+    { "date": "2026-05-01", "dayType": "WORKDAY" },
     { "date": "2026-05-02", "dayType": "NON_LEGAL_HOLIDAY", "name": "所定休日" },
     { "date": "2026-05-03", "dayType": "LEGAL_HOLIDAY", "name": "憲法記念日" }
   ],
   "workdayCount": 21
 }
 ```
+
+> **名称の無い日は `name` の項目ごと省く。**
+> `null` を置くと「名前が無い」と「名前が空」が同じ値になる（落とし穴 76）。
+> 名称は書き込み（`PUT /api/calendars/{date}` と一括登録）が受け取るので、
+> **読み出せないと、人事が登録した祝日名がどこにも出ない。**
 
 **期間は半開区間で受ける。** 内部の `DateRange` と同じ流儀にそろえ、
 境界で 1 日ずれる不具合を作らない。
@@ -526,3 +531,4 @@ if (!monthClosureQuery.acceptsChanges(employeeId, month)) { ... }
 | `IT-CAL-13` | **未登録の日** | `WORKDAY` として配列に含まれる。「配列に無い日は所定労働日」を持たせない |
 | `IT-CAL-14` | 登録した暦日区分 | 反映され、`workdayCount` から外れる |
 | `IT-CAL-15` | 期間の逆転 | 422 `invalid-period`（500 にしない）|
+| `IT-CAL-16` | **名称の無い日** | `name` の項目そのものが無い。空文字だと「名前が無い」と「名前が空」が同じ値になる |

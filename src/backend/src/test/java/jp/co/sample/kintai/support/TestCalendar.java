@@ -27,6 +27,9 @@ import jp.co.sample.kintai.workrule.domain.DayType;
 public final class TestCalendar implements CompanyCalendarRepository {
 
     private final Map<LocalDate, DayType> registered = new HashMap<>();
+    // ★ 名称も保つ。保たないと「書き込みだけ受け付けて読み出せない」状態を
+    //   代役が再現してしまい、往復のテストが通ってしまう（落とし穴 37）
+    private final Map<LocalDate, String> names = new HashMap<>();
 
     public static TestCalendar allWorkdays() {
         return new TestCalendar();
@@ -82,8 +85,25 @@ public final class TestCalendar implements CompanyCalendarRepository {
         return Map.copyOf(found);
     }
 
+    /** 名称。<strong>名称の無い日はキーごと現れない。</strong> */
+    @Override
+    public Map<LocalDate, String> findNamesByPeriod(DateRange period) {
+        Map<LocalDate, String> found = new HashMap<>();
+        names.forEach((date, name) -> {
+            if (period.contains(date)) {
+                found.put(date, name);
+            }
+        });
+        return Map.copyOf(found);
+    }
+
     @Override
     public void save(LocalDate date, DayType dayType, String name) {
         registered.put(date, dayType);
+        if (name == null || name.isBlank()) {
+            names.remove(date);
+        } else {
+            names.put(date, name);
+        }
     }
 }

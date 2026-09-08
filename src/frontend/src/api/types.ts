@@ -42,7 +42,17 @@ export interface SignedIn {
   readonly id: string;
   readonly employeeNumber: string;
   readonly name: string;
+  readonly email: string;
+  readonly hiredOn: WallClockDate;
   readonly roles: readonly Role[];
+  /**
+   * 所属。
+   *
+   * ★ **省略ではなく `null` が来る。** 一般社員は社員の一覧を見られないので、
+   *   自分の所属を知る経路がここにしか無い。
+   *   未来日入社の社員は、基準日の時点でまだどこにも所属していない。
+   */
+  readonly department: EmployeeDepartment | null;
 }
 
 export interface Punch {

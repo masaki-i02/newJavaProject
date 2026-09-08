@@ -94,12 +94,17 @@ class WorkRuleMasterController {
         static CalendarResponse of(WorkRuleQueryService.CalendarView view) {
             return new CalendarResponse(view.period().from(), view.period().toExclusive(),
                     view.days().stream()
-                            .map(day -> new Day(day.date(), day.dayType().name()))
+                            .map(day -> new Day(day.date(), day.dayType().name(),
+                                    day.name()))
                             .toList(),
                     view.workdayCount());
         }
 
-        record Day(LocalDate date, String dayType) {
+        /** 名称の無い日は項目ごと省く（落とし穴 76）。 */
+        record Day(LocalDate date, String dayType,
+                   @com.fasterxml.jackson.annotation.JsonInclude(
+                           com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                   String name) {
         }
     }
 

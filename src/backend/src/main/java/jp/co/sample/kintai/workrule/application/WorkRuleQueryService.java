@@ -145,8 +145,11 @@ public class WorkRuleQueryService {
         }
         DateRange period = requireValidPeriod(from, toExclusive);
         RegisteredCalendar registered = new RegisteredCalendar(calendar.findByPeriod(period));
+        // ★ 名称は別に引く。計算は使わないので、まとめて読ませない
+        var names = calendar.findNamesByPeriod(period);
         List<CalendarDay> days = period.dates()
-                .map(date -> new CalendarDay(date, registered.dayTypeOf(date)))
+                .map(date -> new CalendarDay(date, registered.dayTypeOf(date),
+                        names.get(date)))
                 .toList();
         return new CalendarView(period, days, registered.workdayCountIn(period));
     }
@@ -188,7 +191,12 @@ public class WorkRuleQueryService {
     }
 
     /** カレンダーの 1 日。 */
-    public record CalendarDay(LocalDate date, DayType dayType) {
+    /**
+     * 会社カレンダーの 1 日。
+     *
+     * @param name 祝日名など。<strong>無い日は {@code null}</strong>
+     */
+    public record CalendarDay(LocalDate date, DayType dayType, String name) {
     }
 
     /** 期間のカレンダー。 */

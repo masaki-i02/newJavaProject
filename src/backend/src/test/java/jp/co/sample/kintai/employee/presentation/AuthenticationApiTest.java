@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -54,6 +55,12 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
     private EmployeeCredentialRepository credentials;
     @Autowired
     private PasswordHasher hasher;
+    @Autowired
+    private jp.co.sample.kintai.employee.domain.DepartmentRepository departments;
+    @Autowired
+    private jp.co.sample.kintai.employee.domain.AssignmentRepository assignments;
+    @Autowired
+    private jp.co.sample.kintai.employee.domain.ManagershipRepository managerships;
 
     private EmployeeId taro;
 
@@ -164,6 +171,93 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
             mockMvc.perform(get("/api/me").session(session))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.employeeNumber").value("E0001"));
+        }
+
+        /**
+         * <strong>自分の所属を知る経路はここにしか無い。</strong>
+         *
+         * <p>一般社員は社員の一覧を見られない（API設計書 2.1）ので、
+         * {@code /api/me} が所属を返さないと、設計書が案内している経路が
+         * <strong>実際には答えを持たない</strong>ことになる（落とし穴 138）。
+         *
+         * <p>ログインの応答も同じ形にする。形が違うと、画面はログイン直後だけ
+         * 所属を持たない状態になる。
+         */
+        @Test
+        @DisplayName("IT-AUTH-20 /api/me と ログインの応答は所属と入社日を返す")
+        void meCarriesDepartment() throws Exception {
+            var sales = new jp.co.sample.kintai.employee.domain.DepartmentId(UUID.randomUUID());
+            departments.save(jp.co.sample.kintai.employee.domain.Department.root(sales,
+                    new jp.co.sample.kintai.employee.domain.DepartmentCode("SALES"), "営業部"));
+            assignments.save(jp.co.sample.kintai.employee.domain.Assignment
+                    .startingAt(taro, sales, HIRED));
+
+            var session = new MockHttpSession();
+            mockMvc.perform(post("/api/sessions").session(session)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(signInBody("E0001", PASSWORD)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.department.name").value("営業部"));
+
+            mockMvc.perform(get("/api/me").session(session))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.email").value("e0001@example.com"))
+                    .andExpect(jsonPath("$.hiredOn").value(HIRED.toString()))
+                    .andExpect(jsonPath("$.department.code").value("SALES"))
+                    .andExpect(jsonPath("$.department.name").value("営業部"));
+        }
+
+        /**
+         * <strong>ロールは認証した利用者から取る。</strong>
+         *
+         * <p>{@code APPROVER} は認証時に部署長の事実から導出するので、
+         * 社員の行には入っていない。保存されているロールから作ると、
+         * <strong>部署長が承認のメニューを失う。</strong>
+         */
+        @Test
+        @DisplayName("IT-AUTH-22 部署長の /api/me には導出された APPROVER が入る")
+        void meCarriesDerivedApprover() throws Exception {
+            var sales = new jp.co.sample.kintai.employee.domain.DepartmentId(UUID.randomUUID());
+            departments.save(jp.co.sample.kintai.employee.domain.Department.root(sales,
+                    new jp.co.sample.kintai.employee.domain.DepartmentCode("SALES"), "営業部"));
+            assignments.save(jp.co.sample.kintai.employee.domain.Assignment
+                    .startingAt(taro, sales, HIRED));
+            managerships.save(jp.co.sample.kintai.employee.domain.Managership
+                    .startingAt(sales, taro, HIRED));
+
+            var session = new MockHttpSession();
+            mockMvc.perform(post("/api/sessions").session(session)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(signInBody("E0001", PASSWORD)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.roles").value(
+                            org.hamcrest.Matchers.hasItem("APPROVER")));
+
+            mockMvc.perform(get("/api/me").session(session))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.roles").value(
+                            org.hamcrest.Matchers.hasItem("APPROVER")));
+        }
+
+        /**
+         * <strong>所属が無いことを応答から読み取れるようにする。</strong>
+         * 項目ごと省くと、未来日入社の社員で「所属が無い」と
+         * 「この応答では返さない」を区別できない（落とし穴 76）。
+         */
+        @Test
+        @DisplayName("IT-AUTH-21 所属が無ければ department は null で返る")
+        void meWithoutDepartment() throws Exception {
+            var session = new MockHttpSession();
+            mockMvc.perform(post("/api/sessions").session(session)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(signInBody("E0001", PASSWORD)))
+                    .andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/me").session(session))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.department").doesNotExist())
+                    .andExpect(content().string(org.hamcrest.Matchers
+                            .containsString("\"department\":null")));
         }
 
         @Test

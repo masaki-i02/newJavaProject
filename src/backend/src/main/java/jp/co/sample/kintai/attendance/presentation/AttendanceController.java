@@ -116,13 +116,21 @@ public class AttendanceController {
                 timeClocks.current(principal.toRequester(), new EmployeeId(employeeId)));
     }
 
-    /** 指定日の日次勤怠（内訳つき）。 */
+    /**
+     * 指定日の日次勤怠（内訳つき）。
+     *
+     * <p><strong>版を返す。</strong> 再計算（3.3）が版を必須にしているので、
+     * 取得する経路が無いと利用者は送れない（05 API設計書 1.1）。
+     */
     @GetMapping("/{workDate}")
     public DailyAttendanceResponse get(
             @AuthenticationPrincipal AuthenticatedEmployee principal,
             @PathVariable UUID employeeId, @PathVariable LocalDate workDate) {
-        return attendances.find(principal.toRequester(), new EmployeeId(employeeId), workDate)
-                .map(DailyAttendanceResponse::from)
+        var requester = principal.toRequester();
+        var id = new EmployeeId(employeeId);
+        return attendances.find(requester, id, workDate)
+                .map(attendance -> DailyAttendanceResponse.from(attendance,
+                        attendances.currentVersion(requester, id, workDate)))
                 .orElseThrow(() -> new AttendanceNotFoundException(workDate));
     }
 
@@ -141,8 +149,13 @@ public class AttendanceController {
             @PathVariable UUID employeeId, @PathVariable LocalDate workDate,
             @jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody
             RecalculationRequest request) {
-        return DailyAttendanceResponse.from(timeClocks.recalculate(principal.toRequester(),
-                new EmployeeId(employeeId), workDate, request.version()));
+        var requester = principal.toRequester();
+        var id = new EmployeeId(employeeId);
+        var recalculated = timeClocks.recalculate(requester, id, workDate,
+                request.version());
+        // ★ 遷移したあとの版を返す。返さないと、続けて操作する画面が必ず 1 回 409 を踏む
+        return DailyAttendanceResponse.from(recalculated,
+                attendances.currentVersion(requester, id, workDate));
     }
 
     /**

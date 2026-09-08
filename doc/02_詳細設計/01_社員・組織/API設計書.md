@@ -304,20 +304,21 @@ RFC 9110 は `DELETE` の本文に意味を定めておらず、
 
 ```json
 {
-  "month": "2026-04",
-  "basisDate": "2026-04-01",
-  "approver": {
-    "kind": "INDIVIDUAL",
-    "id": "0195b000-0000-7000-8000-000000000002",
-    "name": "佐藤 花子",
-    "department": { "code": "S1", "name": "第一営業部" }
-  },
+  "kind": "INDIVIDUAL",
+  "employeeId": "0195b000-0000-7000-8000-000000000002",
   "path": [
-    { "code": "S1A", "name": "第一営業課", "reason": "NO_MANAGER" },
-    { "code": "S1",  "name": "第一営業部", "reason": "NONE" }
+    { "departmentId": "0195c000-0000-7000-8000-000000000003",
+      "departmentName": "第一営業課", "reason": "NO_MANAGER" },
+    { "departmentId": "0195c000-0000-7000-8000-000000000002",
+      "departmentName": "第一営業部", "reason": "NONE" }
   ]
 }
 ```
+
+> **氏名を返さない。** 承認者の氏名は `employee` が所有する概念なので、
+> 画面が `employeeId` から引く（設計規約チェックリスト 3）。
+> `month` と `basisDate` も返さない。どちらも利用者が送った経路から決まる値で、
+> 返しても新しい事実が増えない。
 
 `kind` は承認者の種類、`path` の各要素の `reason` は
 **その部署でなぜ承認者が決まらなかったか**を示す。

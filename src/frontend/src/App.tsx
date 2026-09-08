@@ -46,7 +46,16 @@ export function App() {
     <>
       <header>
         <h1>勤怠管理システム</h1>
-        <span>{user.name}（{user.employeeNumber}）</span>
+        {/* ★ 所属を出す。一般社員が自分の所属を知る経路はここにしか無い。
+              所属が無いことも空欄で濁さない（未来日入社では正常である）*/}
+        <span>
+          {user.name}（{user.employeeNumber}）
+          {/* ★ `?.` で読む。型は `null` を約束しているが、
+                サーバが項目ごと落としたときに**画面全体が落ちる**のは割に合わない。
+                undefined を読むと `.name` で TypeError になり、React が
+                木ごと外すので、ログイン後の画面が丸ごと出なくなる */}
+          　{user.department?.name ?? '所属なし'}
+        </span>
         <nav>
           <button onClick={() => setScreen('punch')}
                   aria-current={screen === 'punch' ? 'page' : undefined}>打刻</button>

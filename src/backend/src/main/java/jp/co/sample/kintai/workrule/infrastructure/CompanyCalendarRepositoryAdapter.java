@@ -44,6 +44,21 @@ class CompanyCalendarRepositoryAdapter implements CompanyCalendarRepository {
     }
 
     @Override
+    public Map<LocalDate, String> findNamesByPeriod(DateRange period) {
+        Map<LocalDate, String> names = new LinkedHashMap<>();
+        calendars.findByCalendarDateGreaterThanEqualAndCalendarDateLessThan(
+                        period.from(), period.toExclusive())
+                .forEach(entity -> {
+                    // ★ 名称の無い日はキーごと入れない。空文字を入れると
+                    //   「名前が無い」と「名前が空」が同じ値になる
+                    if (entity.getName() != null && !entity.getName().isBlank()) {
+                        names.put(entity.getCalendarDate(), entity.getName());
+                    }
+                });
+        return Map.copyOf(names);
+    }
+
+    @Override
     public void save(LocalDate date, DayType dayType, String name) {
         CompanyCalendarEntity entity = calendars.findById(date)
                 .orElseGet(() -> new CompanyCalendarEntity(date));
