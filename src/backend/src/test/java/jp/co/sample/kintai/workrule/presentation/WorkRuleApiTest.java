@@ -180,18 +180,35 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
          * ドメインは {@code IllegalArgumentException} を投げるので、
          * 素通しすると理由の載らない 500 になる（落とし穴 105）。
          */
+        /**
+         * <strong>法定労働時間は入力ではない。</strong>
+         * 送られても無視し、常に法定の 8 時間・40 時間で登録する。
+         *
+         * <p>受け取ると 40 時間未満の規則を作れてしまい、
+         * その社員の月次清算は DDL の 2400 直書きに弾かれて
+         * 永久に保存できなくなる（IT-API-46・落とし穴 126）。
+         */
         @Test
-        @DisplayName("IT-WR-30 法定労働時間が 0 だと 400")
-        void zeroStatutory() throws Exception {
-            register("""
-                    {"name": "ゼロ", "validFrom": "2026-04-01",
-                     "statutoryDailyMinutes": 0,
+        @DisplayName("IT-WR-44 法定労働時間を送っても無視され、法定の値で登録される")
+        void statutoryWorkingTimeIsNotAnInput() throws Exception {
+            String body = register("""
+                    {"name": "短い週", "validFrom": "2026-10-01",
+                     "statutoryDailyMinutes": 400,
+                     "statutoryWeeklyMinutes": 2340,
                      "system": {"fixedTime": {"scheduledStart": "09:00",
                                               "scheduledEnd": "18:00",
                                               "scheduledBreakMinutes": 60}}}
                     """)
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isCreated())
+                    .andReturn().getResponse().getContentAsString();
+
+            String seriesId = new tools.jackson.databind.ObjectMapper()
+                    .readTree(body).get("seriesId").asString();
+            mockMvc.perform(get("/api/work-rules/{id}", seriesId).with(asHr()))
+                    .andExpect(jsonPath("$.revisions[0].statutoryWeeklyMinutes").value(2400))
+                    .andExpect(jsonPath("$.revisions[0].statutoryDailyMinutes").value(480));
         }
+
     }
 
     @Nested

@@ -469,6 +469,10 @@ export interface AgreementAlert {
   readonly annualUsedBeforeMinutes: number;
   readonly annualLimitMinutes: number;
   readonly exceedsAnnual: boolean;
+  /** 時間外 + 法定休日。**限度時間の対象（時間外だけ）とは別物である。** */
+  readonly combinedMinutes: number;
+  /** 単月 100 時間未満（36 条 6 項 2 号）に触れたか。**「以上」で違反。** */
+  readonly exceedsCombinedSingleMonth: boolean;
 }
 
 export interface AgreementAlerts {
@@ -477,6 +481,8 @@ export interface AgreementAlerts {
   readonly summary: {
     readonly monthlyExceeded: number;
     readonly annualExceeded: number;
+    /** 3 つは重なりうるので、足しても行数にならない。 */
+    readonly combinedExceeded: number;
   };
 }
 

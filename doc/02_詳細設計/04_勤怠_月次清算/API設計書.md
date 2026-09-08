@@ -203,7 +203,12 @@
 | クエリパラメータ | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
 | `month` | `YYYY-MM` | ○ | 対象月 |
-| `type` | `MONTHLY` / `ANNUAL` / `ALL` | — | 既定は `ALL` |
+| `type` | `MONTHLY` / `ANNUAL` / `COMBINED_SINGLE_MONTH` / `ALL` | — | 既定は `ALL` |
+
+**`ALL` は 3 つを並べ直さず `AgreementUsage.hasWarning()` を呼ぶ。**
+写すと、規制を足したときに片方だけが古くなる（落とし穴 67）。
+実際 6 項 2 号はドメインにありながらここに無く、
+**時間外 40 時間 + 法定休日 60 時間の社員が一覧に 1 行も出なかった**（IT-API-47）。
 
 ```json
 {
@@ -216,12 +221,20 @@
       "exceedsMonthly": true,
       "annualUsedBeforeMinutes": 20400,
       "annualLimitMinutes": 21600,
-      "exceedsAnnual": false
+      "exceedsAnnual": false,
+      "combinedMinutes": 6000,
+      "exceedsCombinedSingleMonth": true
     }
   ],
-  "summary": { "monthlyExceeded": 3, "annualExceeded": 1 }
+  "summary": { "monthlyExceeded": 3, "annualExceeded": 1, "combinedExceeded": 2 }
 }
 ```
+
+**`combinedMinutes` は時間外 + 法定休日**であり、`subjectMinutes`（時間外だけ）とは
+<strong>別の規制の値である</strong>（落とし穴 52）。同じ行に並べるのは、
+限度時間と絶対的上限のどちらに触れたのかを取り違えさせないためである。
+
+**`summary` の 3 つは重なりうる。** 足しても `alerts` の行数にはならない。
 
 **社員番号・氏名・部署を返さない。** それらは `employee` コンテキストが所有する概念であり、
 `attendance` の応答に混ぜると、こちらが持っていない情報の提供者になってしまう
@@ -254,6 +267,8 @@
 | IT-API-43 | **月の途中で所定が変わっている月の清算** | 拒む（[ドメインモデル 2.0.1](ドメインモデル設計書.md)）。API からは作れないので、永続化を直接叩いて作る |
 | IT-API-44 | **月の途中で深夜帯だけが変わった月の清算** | 通る。月次には効かない |
 | IT-API-45 | **清算期間の途中に規則の無い日がある月の清算** | 拒む。末日の版だけを引くと素通りする |
+| IT-API-46 | **週法定が 40 時間未満の規則の月次清算** | 保存できない。DDL が 2400 を直書きしているので、API から作らせない（[DB設計書 7 章 #1](DB設計書.md)）|
+| IT-API-47 | **限度時間は超えていないが単月 100 時間に触れた社員** | 一覧に現れる。限度時間だけを見ると 1 行も出ない（36 条 6 項 2 号）|
 
 ---
 

@@ -285,6 +285,37 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
     }
 
     @Nested
+    @DisplayName("週の法定労働時間")
+    class StatutoryWeekly {
+
+        /**
+         * <strong>DDL は週法定を 40 時間と決め打ちしている。</strong>
+         * `monthly_settlements_statutory_limit_check` も
+         * `weekly_overtimes_calculation_check` も 2400 を式に直書きしているので、
+         * 40 時間未満の規則で計算した値はどちらとも一致せず、
+         * <strong>理由の載らない 500</strong> になる。
+         */
+        @Test
+        @DisplayName("IT-API-46 週法定が 40 時間未満の規則では月次清算を保存できない")
+        void weeklyStatutoryBelowFortyHours() {
+            var 系列 = new WorkRuleSeriesId(UUID.randomUUID());
+            series.save(WorkRuleSeries.active(系列, "短い週"));
+            workRules.save(new WorkRule(
+                    new jp.co.sample.kintai.workrule.domain.WorkRuleId(UUID.randomUUID()),
+                    系列, DateRange.startingAt(HIRED), WorkRules.fixed(),
+                    Duration.ofHours(8), Duration.ofMinutes(2340),
+                    NightWindow.STANDARD,
+                    jp.co.sample.kintai.workrule.domain.PremiumRates.STATUTORY));
+            var 別人 = hire("E0002", "短週 次郎", Role.EMPLOYEE);
+            series.assign(別人, 系列, HIRED);
+
+            assertThatThrownBy(() -> settlements.settle(別人, MAY))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException
+                            .class);
+        }
+    }
+
+    @Nested
     @DisplayName("再計算")
     class Recalculate {
 
@@ -472,6 +503,54 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                     // ★ 社員番号・氏名は返さない。employee が所有する概念である
                     .andExpect(jsonPath("$.alerts[0].employeeNumber").doesNotExist())
                     .andExpect(jsonPath("$.alerts[0].name").doesNotExist());
+        }
+
+        /**
+         * <strong>36 条 6 項 2 号は限度時間とは別の規制である</strong>（落とし穴 52）。
+         *
+         * <p>対象は時間外労働 <strong>+ 法定休日労働</strong>で、
+         * 特別条項でも超えられない<strong>絶対的な上限</strong>である。
+         * 限度時間（時間外だけ・45 時間）を超えていなくても触れうるので、
+         * 限度時間だけを見る一覧からは<strong>1 行も出なかった。</strong>
+         *
+         * <p>日曜に働き続けた社員がこの形になる。
+         * 法定休日労働は限度時間の対象外なので、月の時間外は小さいままである。
+         */
+        @Test
+        @DisplayName("IT-API-47 限度時間を超えていなくても単月 100 時間に触れれば現れる")
+        void combinedSingleMonthLimit() throws Exception {
+            // 5 月の日曜（法定休日）に 04:00–24:00（休憩 1 時間）= 19 時間ずつ
+            for (LocalDate d = MAY.atDay(1); d.isBefore(MAY.plusMonths(1).atDay(1));
+                    d = d.plusDays(1)) {
+                if (d.getDayOfWeek() != java.time.DayOfWeek.SUNDAY) {
+                    continue;
+                }
+                punch(d, new TimeClockEvent.ClockIn(d.atTime(4, 0)));
+                punch(d, new TimeClockEvent.BreakStart(d.atTime(12, 0)));
+                punch(d, new TimeClockEvent.BreakEnd(d.atTime(13, 0)));
+                punch(d, new TimeClockEvent.ClockOut(d.plusDays(1).atStartOfDay()));
+                calculate(d);
+            }
+            // 平日を 3 日だけ 9:00–20:00（休憩 1 時間）= 実労働 10 時間・時間外 2 時間
+            for (LocalDate d : List.of(LocalDate.of(2026, 5, 4), LocalDate.of(2026, 5, 5),
+                    LocalDate.of(2026, 5, 6))) {
+                punch(d, new TimeClockEvent.ClockIn(d.atTime(9, 0)));
+                punch(d, new TimeClockEvent.BreakStart(d.atTime(12, 0)));
+                punch(d, new TimeClockEvent.BreakEnd(d.atTime(13, 0)));
+                punch(d, new TimeClockEvent.ClockOut(d.atTime(20, 0)));
+                calculate(d);
+            }
+            settlements.settle(taro, MAY);
+
+            mockMvc.perform(get("/api/settlements/agreement-alerts")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .param("month", "2026-05"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.alerts.length()").value(1))
+                    .andExpect(jsonPath("$.alerts[0].exceedsMonthly").value(false))
+                    .andExpect(jsonPath("$.alerts[0].exceedsCombinedSingleMonth").value(true))
+                    .andExpect(jsonPath("$.summary.combinedExceeded").value(1))
+                    .andExpect(jsonPath("$.summary.monthlyExceeded").value(0));
         }
 
         /**

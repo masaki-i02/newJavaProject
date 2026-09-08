@@ -26,6 +26,7 @@ import jp.co.sample.kintai.shared.domain.TimeOfDayRange;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 import jp.co.sample.kintai.workrule.application.WorkRuleMasterService;
 import jp.co.sample.kintai.workrule.application.WorkRuleMasterService.RegisteredWorkRule;
+import jp.co.sample.kintai.workrule.domain.WorkRule;
 import jp.co.sample.kintai.workrule.application.WorkRuleMasterService.WorkRuleSpec;
 import jp.co.sample.kintai.workrule.application.WorkRuleQueryService;
 import jp.co.sample.kintai.workrule.domain.FixedTimeSystem;
@@ -120,14 +121,11 @@ class WorkRuleController {
     record RegistrationBody(@NotBlank String name,
                             @NotNull LocalDate validFrom,
                             @Valid @NotNull SystemBody system,
-                            @Positive Long statutoryDailyMinutes,
-                            @Positive Long statutoryWeeklyMinutes,
                             NightWindow nightWindow,
                             @Valid PremiumRatesBody premiumRates) {
 
         WorkRuleSpec toSpec() {
-            return SystemBody.spec(validFrom, system, statutoryDailyMinutes,
-                    statutoryWeeklyMinutes, nightWindow, premiumRates);
+            return SystemBody.spec(validFrom, system, nightWindow, premiumRates);
         }
     }
 
@@ -135,14 +133,11 @@ class WorkRuleController {
     record RevisionBody(@NotNull Long version,
                         @NotNull LocalDate validFrom,
                         @Valid @NotNull SystemBody system,
-                        @Positive Long statutoryDailyMinutes,
-                        @Positive Long statutoryWeeklyMinutes,
                         NightWindow nightWindow,
                         @Valid PremiumRatesBody premiumRates) {
 
         WorkRuleSpec toSpec() {
-            return SystemBody.spec(validFrom, system, statutoryDailyMinutes,
-                    statutoryWeeklyMinutes, nightWindow, premiumRates);
+            return SystemBody.spec(validFrom, system, nightWindow, premiumRates);
         }
     }
 
@@ -164,18 +159,32 @@ class WorkRuleController {
             return fixedTime != null ? fixedTime.toDomain() : flextime.toDomain();
         }
 
+        /**
+         * <strong>法定労働時間は入力として受け取らない。</strong>
+         *
+         * <p>1 日 8 時間・1 週 40 時間は<strong>法が決める定数</strong>であり
+         * （労基法 32 条）、会社が設定するものではない。
+         * 会社が定めるのは<strong>所定</strong>労働時間のほうで、
+         * それは {@code system} が持っている。
+         *
+         * <p>受け取ると、40 時間未満を指定した規則を作れてしまう。
+         * ドメインは「40 時間以下」しか課さないので通り、
+         * ところが {@code monthly_settlements_statutory_limit_check} と
+         * {@code weekly_overtimes_calculation_check} は式に 2400 を直書きしている。
+         * <strong>その社員の月次清算は永久に保存できず、理由の載らない 500 になる</strong>
+         * （IT-API-46）。<strong>検査されていない入力は、
+         * 設定できるという見かけだけを増やす</strong>（落とし穴 126）。
+         *
+         * <p>ドメインの {@code WorkRule} は引数として受け取り続ける。
+         * 計算が規則の値を読んでいるのか同じ定数を偶然使っているのかを、
+         * テストが区別できなくなるからである（落とし穴 55）。
+         */
         static WorkRuleSpec spec(LocalDate validFrom, SystemBody system,
-                                 Long statutoryDailyMinutes, Long statutoryWeeklyMinutes,
                                  NightWindow nightWindow, PremiumRatesBody rates) {
             return new WorkRuleSpec(validFrom, system.toDomain(),
-                    minutes(statutoryDailyMinutes, 480),
-                    minutes(statutoryWeeklyMinutes, 2400),
+                    WorkRule.STATUTORY_DAILY, WorkRule.STATUTORY_WEEKLY,
                     nightWindow == null ? NightWindow.STANDARD : nightWindow,
                     rates == null ? PremiumRates.STATUTORY : rates.toDomain());
-        }
-
-        private static Duration minutes(Long value, long fallback) {
-            return Duration.ofMinutes(value == null ? fallback : value);
         }
     }
 

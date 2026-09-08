@@ -57,15 +57,14 @@ export function AgreementAlertsScreen({ month }: { month: YearMonth }) {
                 {' ／ '}
                 年 360 時間の超過 {alerts.summary.annualExceeded} 名
                 {' ／ '}
-                <strong>対象は時間外労働のみ。</strong>法定休日労働は含みません
+                単月 100 時間 {alerts.summary.combinedExceeded} 名
               </p>
               {/* ★ この一覧が拾う範囲だけを書く。広く書くと、出ていないことを
-                    「適法である」と読ませる。実際に拾うのは AlertType の
-                    MONTHLY と ANNUAL だけである */}
+                    「適法である」と読ませる */}
               <p className="muted">
-                この一覧が拾うのは<strong>月 45 時間と年 360 時間の限度時間</strong>
-                （36 条 3 項・4 項）だけです。
-                <strong>単月 100 時間未満（6 項 2 号）は月次清算の画面</strong>に、
+                この一覧が拾うのは<strong>月 45 時間・年 360 時間の限度時間</strong>
+                （36 条 3 項・4 項）と、<strong>単月 100 時間未満</strong>
+                （6 項 2 号）です。
                 <strong>2〜6 か月平均 80 時間以内（6 項 3 号）はどこにも</strong>
                 出ません（要件 1.8 で対象外としています）。
                 ここに出ていないことは、適法であることを意味しません。
@@ -83,6 +82,10 @@ export function AgreementAlertsScreen({ month }: { month: YearMonth }) {
                         <th className="num">年の累計（当月より前）</th>
                         <th className="num">年の上限</th>
                         <th>年の超過</th>
+                        {/* ★ 時間外 + 法定休日。限度時間の「時間外」と並べて
+                              取り違えられないよう、列名で区別する */}
+                        <th className="num">時間外＋法定休日</th>
+                        <th>単月 100 時間</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -98,6 +101,8 @@ export function AgreementAlertsScreen({ month }: { month: YearMonth }) {
                           </td>
                           <td className="num">{hoursLabel(alert.annualLimitMinutes)}</td>
                           <td>{alert.exceedsAnnual ? '超過' : ''}</td>
+                          <td className="num">{hoursLabel(alert.combinedMinutes)}</td>
+                          <td>{alert.exceedsCombinedSingleMonth ? '到達' : ''}</td>
                         </tr>
                       ))}
                     </tbody>

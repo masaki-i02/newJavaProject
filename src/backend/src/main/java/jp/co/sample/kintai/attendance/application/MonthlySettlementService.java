@@ -371,11 +371,31 @@ public class MonthlySettlementService {
                 return usage.exceedsAnnual();
             }
         },
-        /** どちらかを超えた。既定。 */
+        /**
+         * 単月 100 時間未満（36 条 6 項 2 号）に触れた。
+         *
+         * <p><strong>限度時間とは別の規制である</strong>（落とし穴 52）。
+         * 対象は時間外労働 <strong>+ 法定休日労働</strong>で、
+         * 特別条項でも超えられない<strong>絶対的な上限</strong>である。
+         */
+        COMBINED_SINGLE_MONTH {
+            @Override
+            boolean matches(AgreementUsage usage) {
+                return usage.exceedsCombinedSingleMonth();
+            }
+        },
+        /**
+         * いずれかに触れた。既定。
+         *
+         * <p><strong>3 つを並べ直さない。</strong> `AgreementUsage.hasWarning()` を呼ぶ。
+         * 写すと、規制を足したときに片方だけが古くなる（落とし穴 67）。
+         * 実際、6 項 2 号はドメインにあるのにここに無く、
+         * <strong>時間外 40 時間 + 法定休日 60 時間の社員が一覧に 1 行も出なかった。</strong>
+         */
         ALL {
             @Override
             boolean matches(AgreementUsage usage) {
-                return usage.exceedsMonthly() || usage.exceedsAnnual();
+                return usage.hasWarning();
             }
         };
 

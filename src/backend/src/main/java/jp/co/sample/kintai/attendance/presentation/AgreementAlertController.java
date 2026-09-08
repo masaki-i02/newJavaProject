@@ -51,7 +51,10 @@ public class AgreementAlertController {
                     alerts.stream().map(Alert::of).toList(),
                     new Summary(
                             (int) alerts.stream().filter(a -> a.usage().exceedsMonthly()).count(),
-                            (int) alerts.stream().filter(a -> a.usage().exceedsAnnual()).count()));
+                            (int) alerts.stream().filter(a -> a.usage().exceedsAnnual()).count(),
+                            (int) alerts.stream()
+                                    .filter(a -> a.usage().exceedsCombinedSingleMonth())
+                                    .count()));
         }
     }
 
@@ -64,7 +67,8 @@ public class AgreementAlertController {
      */
     public record Alert(String employeeId, long subjectMinutes, long monthlyLimitMinutes,
                         boolean exceedsMonthly, long annualUsedBeforeMinutes,
-                        long annualLimitMinutes, boolean exceedsAnnual) {
+                        long annualLimitMinutes, boolean exceedsAnnual,
+                        long combinedMinutes, boolean exceedsCombinedSingleMonth) {
 
         static Alert of(AgreementAlert alert) {
             var usage = alert.usage();
@@ -72,11 +76,19 @@ public class AgreementAlertController {
                     usage.subjectTime().toMinutes(),
                     usage.monthlyLimit().toMinutes(), usage.exceedsMonthly(),
                     usage.annualUsedBefore().toMinutes(),
-                    usage.annualLimit().toMinutes(), usage.exceedsAnnual());
+                    usage.annualLimit().toMinutes(), usage.exceedsAnnual(),
+                    // ★ 時間外 + 法定休日。限度時間の対象（時間外だけ）とは別物なので、
+                    //   同じ行に並べて取り違えられないようにする
+                    usage.combinedTime().toMinutes(), usage.exceedsCombinedSingleMonth());
         }
     }
 
-    /** 件数。画面が「何人いるか」を一目で出せるようにする。 */
-    public record Summary(int monthlyExceeded, int annualExceeded) {
+    /**
+     * 件数。画面が「何人いるか」を一目で出せるようにする。
+     *
+     * <p>3 つは<strong>重なりうる</strong>（同じ社員が限度時間と 6 項 2 号の両方に
+     * 触れることがある）ので、合計しても一覧の行数にはならない。
+     */
+    public record Summary(int monthlyExceeded, int annualExceeded, int combinedExceeded) {
     }
 }
