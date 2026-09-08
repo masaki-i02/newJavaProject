@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import jp.co.sample.kintai.attendance.application.MonthlySettlementService;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
@@ -77,10 +78,14 @@ public class MonthlySettlementController {
      * 再計算の要求。
      *
      * @param version 画面が表示していた版。<strong>これが一致しないと再計算しない。</strong>
+     *                <strong>{@code Long} にして {@code @NotNull} を付ける。</strong>
+     *                {@code long} だと省略されたときに 0 が入り、
+     *                行がまだ無い月（永続化は 0 を返す）では突き合わせが偶然通る。
+     *                {@code MonthlyAttendanceController.VersionRequest} と同じ形にそろえる
      *                その間に別の経路で値が変わっていたら、
      *                人事が見ていない結果を上書きすることになる
      */
-    record RecalculationRequest(@PositiveOrZero long version) {
+    record RecalculationRequest(@NotNull @PositiveOrZero Long version) {
     }
 
     /**

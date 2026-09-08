@@ -135,7 +135,10 @@ public class MonthlyAttendanceService {
     @Transactional
     public MonthlyAttendance approve(Requester requester, EmployeeId employeeId,
                                      YearMonth month, long expectedVersion) {
-        MonthlyAttendance current = load(employeeId, month);
+        // ★ 集約を読むより先に「誰の依頼か」を見る。
+        //   あとに置くと、行が無ければ 404・あれば 403 になり、
+        //   承認者でない者が「その社員がその月を提出したか」を判別できる
+        //   （CLAUDE.md「依頼者の検査の順序」）
         // ★ 自己承認を承認者の判定より先に見る（BR-11 の 4）。
         //   ApproverPolicy は本人を承認者から外すので、あとに置くと not-approver が返り、
         //   自己承認という事実が利用者に伝わらない。集約の検査は
@@ -144,6 +147,7 @@ public class MonthlyAttendanceService {
             throw new MonthlyAttendance.SelfApprovalException(employeeId, month);
         }
         requireApprover(requester, employeeId, month);
+        MonthlyAttendance current = load(employeeId, month);
         MonthlyAttendance next = current.approve(requester.employeeId(),
                 LocalDateTime.now(clock));
         return apply(current, next, ApprovalEventKind.APPROVE, requester.employeeId(),
@@ -155,14 +159,14 @@ public class MonthlyAttendanceService {
     public MonthlyAttendance reject(Requester requester, EmployeeId employeeId,
                                     YearMonth month, String reason,
                                     long expectedVersion) {
-        MonthlyAttendance current = load(employeeId, month);
-        // ★ 承認と同じ順序で並べる（自己 → 承認者 → 業務）。
+        // ★ 承認と同じ順序で並べる（自己 → 承認者 → 業務）。集約を読むのはそのあと。
         //   後ろに置くと ApproverPolicy が本人を承認者から外して not-approver が返り、
         //   自己決裁という事実が伝わらない
         if (requester.isSelf(employeeId)) {
             throw new MonthlyAttendance.SelfApprovalException(employeeId, month);
         }
         requireApprover(requester, employeeId, month);
+        MonthlyAttendance current = load(employeeId, month);
         return apply(current, current.reject(requester.employeeId()),
                 ApprovalEventKind.REJECT,
                 requester.employeeId(), Optional.ofNullable(reason),

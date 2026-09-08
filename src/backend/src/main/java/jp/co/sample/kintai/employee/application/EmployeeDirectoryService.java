@@ -128,10 +128,13 @@ public class EmployeeDirectoryService {
     public EmployeeWithDepartment find(Requester requester, EmployeeId id,
                                        Optional<LocalDate> date) {
         LocalDate asOf = date.orElseGet(() -> LocalDate.now(clock));
-        Employee employee = load(id);
+        // ★ 読むより先に見てよいかを確かめる。逆にすると、存在しない ID は 404・
+        //   存在すれば 403 になり、閲覧範囲の外の社員が実在するかを判別できる
+        //   （CLAUDE.md「依頼者の検査の順序」）
         if (!visibility.canView(requester, id, asOf)) {
             throw new AccessDeniedException();
         }
+        Employee employee = load(id);
         return new EmployeeWithDepartment(employee, chart.departmentOf(id, asOf));
     }
 

@@ -241,6 +241,10 @@ public class PaidLeaveRequestService {
             throw new AccessDeniedException();
         }
         PaidLeaveRequest request = requestOf(id);
+        // ★ 取消も決裁である。承認・却下と同じく本人を弾く。
+        //   理由つきで REVOKE として 5 年残る証跡なので、決裁者と対象社員が
+        //   同一だと「誰も見ていない取消が人事の取消として記録される」（落とし穴 171）
+        requireNotSelf(requester, request);
         requireMonthEditable(request.employeeId(), YearMonth.from(request.leaveDate()));
 
         LocalDateTime at = LocalDateTime.now(clock);

@@ -193,11 +193,12 @@ class WorkRuleController {
                          @NotNull Long scheduledBreakMinutes) {
 
         FixedTimeSystem toDomain() {
-            if (scheduledBreakMinutes < 0) {
-                throw new InvalidWorkRuleRequestException("休憩時間は 0 分以上です");
-            }
-            return new FixedTimeSystem(scheduledStart, scheduledEnd,
-                    Duration.ofMinutes(scheduledBreakMinutes));
+            // ★ 条件をここに書き写さない。ドメインが持つ規則（休憩が拘束時間を超えない・
+            //   所定が 0 を超える）を 2 か所に持つと、片方だけが古くなる（落とし穴 67）。
+            //   ここでやるのは「実装の不備」から「利用者が直せる誤り」への写しだけである。
+            //   包まないと、休憩 600 分のような画面から送れる値が理由の載らない 500 になる
+            return rejectAsInvalidRequest(() -> new FixedTimeSystem(
+                    scheduledStart, scheduledEnd, Duration.ofMinutes(scheduledBreakMinutes)));
         }
     }
 
@@ -207,10 +208,12 @@ class WorkRuleController {
                         @NotNull @Positive Long standardDailyMinutes) {
 
         FlextimeSystem toDomain() {
-            return new FlextimeSystem(
+            // ★ 同上。コア時刻の開始と終了を同じ値にすると TimeOfDayRange が拒むが、
+            //   画面のプルダウンは同じ値を選べる（落とし穴 105）
+            return rejectAsInvalidRequest(() -> new FlextimeSystem(
                     new TimeOfDayRange(flexibleStart, flexibleEnd),
                     new TimeOfDayRange(coreStart, coreEnd),
-                    Duration.ofMinutes(standardDailyMinutes));
+                    Duration.ofMinutes(standardDailyMinutes)));
         }
     }
 
@@ -219,8 +222,11 @@ class WorkRuleController {
                             @NotBlank String night, @NotBlank String legalHoliday) {
 
         PremiumRates toDomain() {
-            return new PremiumRates(decimal(overtimeBeyondStatutory, "時間外"),
-                    decimal(night, "深夜"), decimal(legalHoliday, "法定休日"));
+            // ★ 数値として読めるかはここで見るが、桁数と法定下限はドメインが持つ。
+            //   包まないと "0.2555" のような値が理由の載らない 500 になる
+            return rejectAsInvalidRequest(
+                    () -> new PremiumRates(decimal(overtimeBeyondStatutory, "時間外"),
+                            decimal(night, "深夜"), decimal(legalHoliday, "法定休日")));
         }
 
         private static BigDecimal decimal(String value, String label) {
@@ -263,6 +269,25 @@ class WorkRuleController {
                                     warning.limit().toMinutes()),
                     warning.month().toString(),
                     warning.scheduled().toMinutes(), warning.limit().toMinutes());
+        }
+    }
+
+    /**
+     * ドメインが投げる {@code IllegalArgumentException} を 422 へ写す。
+     *
+     * <p><strong>条件を presentation に書き写さない。</strong>
+     * 規則の定義を持つのはドメインであり、写すと片方だけが古くなる（落とし穴 67）。
+     * ここでやるのは型の付け替えだけで、<strong>利用者が送った値が悪いことを、
+     * 利用者が直せる形で返す</strong>ためにある（落とし穴 105）。
+     *
+     * <p>null は {@code @NotNull} が先に 400 で弾くので、ここへ来るのは
+     * 「形式は整っているが業務上ありえない組み合わせ」だけである。
+     */
+    private static <T> T rejectAsInvalidRequest(java.util.function.Supplier<T> construct) {
+        try {
+            return construct.get();
+        } catch (IllegalArgumentException e) {
+            throw new InvalidWorkRuleRequestException(e.getMessage());
         }
     }
 

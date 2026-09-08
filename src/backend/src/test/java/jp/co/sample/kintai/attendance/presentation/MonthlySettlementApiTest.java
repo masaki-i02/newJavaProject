@@ -330,6 +330,33 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                             .content("{\"version\":%d}".formatted(version)));
         }
 
+        /**
+         * <strong>版を省いた要求を通さない。</strong>
+         *
+         * <p>{@code long} で受けると省略時に 0 が入る。永続化は行が無い月に 0 を返すので、
+         * <strong>まだ行が無い月では突き合わせが偶然通る</strong>
+         * （{@code MonthlyAttendanceController.VersionRequest} の javadoc が
+         * まさにこの形を警告している）。落とし穴 57 と同型。
+         */
+        @Test
+        @DisplayName("IT-API-49 版を省いた再計算は 400（0 として通さない）")
+        void recalculationRequiresVersion() throws Exception {
+            regularDay(LocalDate.of(2026, 5, 4));
+
+            mockMvc.perform(
+                    post("/api/employees/{id}/settlements/{month}/recalculation",
+                            taro.value(), "2026-05")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
+                    // ★ 400 であることだけを見ない。本文の読み取り失敗でも 400 になるので、
+                    //   「version が無い」と名指しされていることまで確かめる（落とし穴 108）
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:validation-failed"))
+                    .andExpect(jsonPath("$.errors[0].field").value("version"));
+        }
+
         @Test
         @DisplayName("IT-API-24 人事は再計算でき、版が 1 つ上がる")
         void hrRecalculates() throws Exception {

@@ -545,6 +545,41 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isNotFound());
         }
 
+        /**
+         * <strong>承認者でない者には、月の状態を漏らさない。</strong>
+         *
+         * <p>集約を読むのを認可より先にすると、行が無ければ 404・あれば 403 になり、
+         * <strong>その社員がその月を提出済みかどうかを判別できる</strong>。
+         * 一般社員は他人の勤怠を見られないので、状態そのものが漏れてはいけない
+         * （CLAUDE.md「依頼者の検査の順序」）。
+         *
+         * <p>提出前（行が無い）と提出後（行がある）で<strong>同じ応答</strong>になることを
+         * 確かめる。片方だけを見ると、この観点は検査できない。
+         */
+        @Test
+        @DisplayName("IT-APV-102 承認者でない社員には、提出前も提出後も 403 が返る")
+        void nonApproverCannotTellWhetherTheMonthWasSubmitted() throws Exception {
+            var stranger = new EmployeeId(UUID.randomUUID());
+
+            String beforeSubmission = transition("approval", stranger, "E0777", null,
+                    0L, Role.EMPLOYEE)
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"))
+                    .andReturn().getResponse().getContentAsString();
+
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk());
+
+            String afterSubmission = transition("approval", stranger, "E0777", null,
+                    0L, Role.EMPLOYEE)
+                    .andExpect(status().isForbidden())
+                    .andReturn().getResponse().getContentAsString();
+
+            assertThat(beforeSubmission)
+                    .as("提出したかどうかが応答の違いから読み取れてはならない")
+                    .isEqualTo(afterSubmission);
+        }
+
         @Test
         @DisplayName("IT-APV-35 二重提出は 409")
         void doubleSubmission() throws Exception {

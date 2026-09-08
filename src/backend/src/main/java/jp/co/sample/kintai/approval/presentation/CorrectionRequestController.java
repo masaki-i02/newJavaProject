@@ -179,7 +179,10 @@ class CorrectionRequestController {
          */
         private static void require(boolean condition, String message) {
             if (!condition) {
-                throw new IllegalArgumentException(message);
+                // ★ IllegalArgumentException のまま投げない。実装の不備を拾うハンドラが
+                //   捕まえて理由の載らない 500 になる（落とし穴 105）。
+                //   送った値が悪いことは利用者にしか直せない
+                throw new InvalidCorrectionItemException(message);
             }
         }
     }
@@ -252,5 +255,38 @@ class CorrectionRequestController {
     /** 承認の結果。月次勤怠が下書きに戻ったことを含める。 */
     record CorrectionApprovalResponse(CorrectionRequestResponse request,
                                       String monthlyAttendanceStatus) {
+    }
+
+    /**
+     * 訂正項目の指定が不正。<strong>実装の不備ではないので 422 で返す。</strong>
+     *
+     * <p>操作ごとに必要な項目が変わる検証（{@code @NotNull} では表せない）が
+     * ここにある。DB の {@code correction_items_variant_check} と同じ不変条件だが、
+     * <strong>制約違反は利用者に説明できない</strong>ので申請の時点で返す（落とし穴 66・174）。
+     */
+    static final class InvalidCorrectionItemException
+            extends jp.co.sample.kintai.shared.domain.DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        InvalidCorrectionItemException(String message) {
+            super(message);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:invalid-correction-item";
+        }
+
+        @Override
+        public jp.co.sample.kintai.shared.domain.DomainErrorKind kind() {
+            return jp.co.sample.kintai.shared.domain.DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "訂正項目の指定が不正です";
+        }
     }
 }

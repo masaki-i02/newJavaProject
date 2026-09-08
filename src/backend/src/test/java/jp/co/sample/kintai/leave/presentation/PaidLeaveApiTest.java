@@ -813,6 +813,30 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.remainingDays").value(10));
         }
 
+        /**
+         * <strong>取消も決裁である。人事の社員が自分の年休を自分で取り消せない。</strong>
+         *
+         * <p>申請・承認・却下・取下げの 4 経路は本人を弾いているのに、
+         * 取消だけが弾いていなかった。取消は理由つきで {@code REVOKE} として
+         * 5 年残る証跡（要件 7）なので、決裁者と対象社員が同一だと
+         * <strong>誰も見ていない取消が「人事が取り消した」記録になる</strong>
+         * （落とし穴 171 と同じ形）。
+         */
+        @Test
+        @DisplayName("IT-LV-137 人事の社員でも自分の年休は取り消せない")
+        void humanResourcesCannotRevokeTheirOwn() throws Exception {
+            String id = submitAndGetId(IN_OCTOBER);
+            approve(manager, id, 1L).andExpect(status().isOk());
+
+            mockMvc.perform(post("/api/paid-leave-requests/{id}/revocation", id)
+                            .with(as(yamada, "E0001", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"comment\":\"自分で取り消す\",\"version\":2}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:self-approval"));
+        }
+
         /** 実績が確定した日を本人が動かせてはいけない。 */
         @Test
         @DisplayName("IT-LV-83 人事以外は取り消せない")

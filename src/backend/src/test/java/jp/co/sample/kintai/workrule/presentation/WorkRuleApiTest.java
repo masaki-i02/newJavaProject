@@ -211,6 +211,45 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.warnings").doesNotExist());
         }
 
+        /**
+         * <strong>画面から送れる値が 500 にならない。</strong>
+         *
+         * <p>休憩が拘束時間を超えると {@code FixedTimeSystem} の compact constructor が
+         * {@code IllegalArgumentException} を投げる。包まないと実装の不備を拾うハンドラが
+         * 捕まえて<strong>理由の載らない 500</strong> になり、人事には
+         * 「エラーが発生しました」しか出ない（落とし穴 105）。
+         * 画面の休憩は上限の無い数値入力なので、この値は実際に送れる。
+         */
+        @Test
+        @DisplayName("IT-WR-47 休憩が拘束時間を超える登録は 422（500 にしない）")
+        void breakLongerThanSpanIsRejectedWithReason() throws Exception {
+            register("""
+                    {"name": "休憩過大", "validFrom": "2026-04-01",
+                     "system": {"fixedTime": {"scheduledStart": "09:00",
+                                              "scheduledEnd": "18:00",
+                                              "scheduledBreakMinutes": 600}}}
+                    """)
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:invalid-work-rule-request"))
+                    .andExpect(jsonPath("$.detail").exists());
+        }
+
+        /** コアタイムの開始と終了は画面のプルダウンで同じ値を選べる。 */
+        @Test
+        @DisplayName("IT-WR-48 コアタイムの開始と終了が同じ登録は 422（500 にしない）")
+        void zeroLengthCoreTimeIsRejectedWithReason() throws Exception {
+            register("""
+                    {"name": "コア 0 分", "validFrom": "2026-04-01",
+                     "system": {"flextime": {"flexibleStart": "07:00", "flexibleEnd": "22:00",
+                                             "coreStart": "11:00", "coreEnd": "11:00",
+                                             "standardDailyMinutes": 480}}}
+                    """)
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:invalid-work-rule-request"));
+        }
+
         @Test
         @DisplayName("IT-WR-44 法定労働時間を送っても無視され、法定の値で登録される")
         void statutoryWorkingTimeIsNotAnInput() throws Exception {

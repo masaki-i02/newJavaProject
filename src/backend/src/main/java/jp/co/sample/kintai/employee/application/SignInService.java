@@ -79,10 +79,31 @@ public class SignInService {
      * 認証する。
      *
      * @return 認証された利用者と、<strong>そのとき有効なロール</strong>
+     * @param rawEmployeeNumber 画面が送った社員番号。<strong>形式の検証もここで行う。</strong>
+     *                          呼び出し側で {@link EmployeeNumber} を組み立てると、
+     *                          形式違反だけが別の応答になり、区別しないという約束が崩れる
      * @throws AuthenticationFailedException 社員番号かパスワードが違う場合。区別しない
      */
     @Transactional(readOnly = true)
-    public SignedIn signIn(EmployeeNumber employeeNumber, PasswordAttempt password) {
+    public SignedIn signIn(String rawEmployeeNumber, PasswordAttempt password) {
+        // ★ 社員番号の形式違反も「認証の失敗」として扱う。
+        //   presentation で EmployeeNumber を組み立てると、形式違反だけが 422 になり、
+        //   ①失敗の理由を区別してしまう（総当たりで在籍者の一覧を作れる）
+        //   ②送った値が応答へそのまま返る（反射型 XSS の材料）
+        //   ③この経路が認証の記録に 1 行も残らない（ロックアウトが無い以上、
+        //     記録が総当たりに気づく唯一の手段である・要件 BR-13）
+        //   の 3 つが同時に起きる。
+        //   ★ 記録に値そのものは書かない。形式違反の値は利用者が自由に作れるので、
+        //     そのままログへ流すと改行を混ぜて偽の行を作れる。長さだけで検知には足りる
+        EmployeeNumber employeeNumber;
+        try {
+            employeeNumber = new EmployeeNumber(rawEmployeeNumber);
+        } catch (RuntimeException e) {
+            hasher.wasteTime();
+            AUDIT.warn("ログイン失敗 reason=MALFORMED_EMPLOYEE_NUMBER length={}",
+                    rawEmployeeNumber == null ? -1 : rawEmployeeNumber.length());
+            throw new AuthenticationFailedException();
+        }
         LocalDate today = LocalDate.now(clock);
         // ★ 社員番号が一意なのは在籍者のあいだだけである（落とし穴 121）。
         //   退職者の番号を再割り当てすると同じ番号の行が 2 つになるので、

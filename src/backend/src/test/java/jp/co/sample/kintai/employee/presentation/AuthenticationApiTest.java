@@ -182,6 +182,31 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
                             .value("urn:kintai:error:authentication-failed"));
         }
 
+        /**
+         * <strong>社員番号の形式違反も、他の失敗と同じ 401 になる。</strong>
+         *
+         * <p>presentation で {@code EmployeeNumber} を組み立てると
+         * {@code BusinessRuleViolationException}（422）が飛び、3 つ同時に壊れる。
+         * ①失敗の理由を区別してしまう（総当たりで在籍者の一覧を作れる）
+         * ②送った値がメッセージに載って応答へ返る（反射型 XSS の材料）
+         * ③この経路が認証の記録に 1 行も残らない（要件 BR-13）
+         */
+        @Test
+        @DisplayName("IT-AUTH-24 社員番号の形式違反も 401 で、送った値を返さない")
+        void malformedEmployeeNumberIsAlsoUnauthorized() throws Exception {
+            var body = mockMvc.perform(post("/api/sessions")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(signInBody("E-0001!", PASSWORD)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:authentication-failed"))
+                    .andReturn().getResponse().getContentAsString();
+
+            assertThat(body)
+                    .as("送った値を応答に載せない（反射型 XSS の材料になる）")
+                    .doesNotContain("E-0001!");
+        }
+
         /** ログイン後はセッションで認証が続く。 */
         @Test
         @DisplayName("IT-AUTH-05 ログインしたセッションで /api/me を取得できる")

@@ -24,7 +24,6 @@ import jakarta.validation.constraints.NotBlank;
 import jp.co.sample.kintai.employee.application.EmployeeDirectoryService;
 import jp.co.sample.kintai.employee.application.EmployeeDirectoryService.EmployeeWithDepartment;
 import jp.co.sample.kintai.employee.application.SignInService;
-import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.PasswordAttempt;
 import jp.co.sample.kintai.shared.presentation.AuthenticatedEmployee;
 
@@ -56,9 +55,10 @@ class SessionController {
     ResponseEntity<MeResponse> create(@Valid @RequestBody SignInRequest request,
                                       HttpServletRequest httpRequest,
                                       HttpServletResponse httpResponse) {
+        // ★ 社員番号を組み立てずに渡す。形式の検証も「認証の失敗」として
+        //   SignInService が扱う（区別しない・値を返さない・記録に残す）
         SignInService.SignedIn signedIn = signIn.signIn(
-                new EmployeeNumber(request.employeeNumber()),
-                new PasswordAttempt(request.password()));
+                request.employeeNumber(), new PasswordAttempt(request.password()));
 
         var principal = new AuthenticatedEmployee(signedIn.employee().id(),
                 signedIn.employee().number().value(), signedIn.employee().name(),

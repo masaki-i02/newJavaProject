@@ -203,6 +203,28 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                         .value("urn:kintai:error:punch-far-from-work-date"));
     }
 
+    /**
+     * <strong>操作ごとに必要な項目が欠けても 500 にしない。</strong>
+     *
+     * <p>{@code @NotNull} では表せない検証（操作によって必要な項目が変わる）を
+     * {@code IllegalArgumentException} で投げていたので、実装の不備を拾うハンドラが
+     * 捕まえて<strong>理由の載らない 500</strong> になっていた（落とし穴 105）。
+     * DB の {@code correction_items_variant_check} でも弾かれるが、
+     * 制約違反は利用者に説明できない（落とし穴 66・174）。
+     */
+    @Test
+    @DisplayName("IT-APV-101 targetEventId の無い REVOKE は 422（500 にしない）")
+    void revokeWithoutTargetIsRejectedWithReason() throws Exception {
+        requestCorrection(yamada, "E0001", """
+                {"workDate":"2026-04-06","reason":"対象を指定し忘れた",
+                 "items":[{"action":"REVOKE"}]}
+                """, Role.EMPLOYEE)
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.type")
+                        .value("urn:kintai:error:invalid-correction-item"))
+                .andExpect(jsonPath("$.detail").exists());
+    }
+
     private String createRequest() throws Exception {
         var response = requestCorrection(yamada, "E0001", replaceClockOutBody(),
                 Role.EMPLOYEE).andExpect(status().isCreated()).andReturn();

@@ -117,12 +117,20 @@ public record CorrectionRequest(CorrectionRequestId id, EmployeeId employeeId,
                 Optional.ofNullable(comment));
     }
 
-    /** 取り下げる（本人）。 */
+    /**
+     * 取り下げる（本人）。
+     *
+     * <p><strong>「誰の依頼か」を状態より先に見る。</strong>
+     * 逆にすると、他人の申請 ID を持つ利用者に
+     * <strong>「すでに承認済みです」と状態が漏れる</strong>（取下げの可否ではなく、
+     * その申請がどこまで進んだかが分かる）。承認・却下は承認者の判定が別にあるが、
+     * 取下げは本人以外に見せる理由がまったく無い。
+     */
     public CorrectionRequest cancel(EmployeeId canceledBy, LocalDateTime at) {
-        requirePending("取下げ");
         if (!employeeId.equals(canceledBy)) {
             throw new NotTheRequesterException(workDate);
         }
+        requirePending("取下げ");
         return decided(CorrectionStatus.CANCELED, canceledBy, at, Optional.empty());
     }
 
