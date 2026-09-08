@@ -164,7 +164,7 @@
 > **労働時間制度（固定 / フレックス）はここに含めない。**
 > 含めると `employee → workrule` というコンテキスト間依存図に無い依存が生まれ、
 > ArchUnit の AR-06 に抵触する。フロントエンドは
-> [`GET /api/work-rules/effective`](../02_就業規則・カレンダー/API設計書.md) から
+> [`GET /api/work-rules/{seriesId}/effective`](../02_就業規則・カレンダー/API設計書.md) から
 > 別途取得する。**API の都合でコンテキストの境界を崩さない。**
 
 ### 3.2 `GET /api/employees`
@@ -296,7 +296,7 @@ RFC 9110 は `DELETE` の本文に意味を定めておらず、
 既に締めた月の承認者が変わる問題があり、締め処理の設計と併せて決める必要がある。
 [要件定義書 10 章 未決事項 #6](../../01_要件定義/要件定義書.md#10-未決事項) として管理する。
 
-### 3.7 `GET /api/employees/{id}/approver`
+### 3.7 `GET /api/employees/{id}/monthly-attendances/{month}/approver`
 
 | クエリパラメータ | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |

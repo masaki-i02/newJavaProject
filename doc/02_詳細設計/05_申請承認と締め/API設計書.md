@@ -286,7 +286,7 @@
 > やむを得ず締めた月を訂正する必要が生じた場合の手段は、
 > 監査ログ付きの特権操作として M1-c で別途検討する（未決事項 #2）。
 
-### 2.6 `GET /api/monthly-attendances/pending`（承認待ち一覧）
+### 2.6 `GET /api/monthly-attendances/pending-approval`（承認待ち一覧）
 
 | クエリパラメータ | 型 | 既定 | 説明 |
 | --- | --- | --- | --- |

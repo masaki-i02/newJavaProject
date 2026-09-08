@@ -43,3 +43,26 @@ Chromium を別途用意している環境では、環境変数で指定でき�
 ```bash
 PUPPETEER_EXECUTABLE_PATH=/path/to/chrome npm run render
 ```
+
+---
+
+# 設計書と実装の突き合わせ（check-endpoints.py）
+
+```bash
+cd doc/_tools
+python3 check-endpoints.py
+```
+
+設計書が定義している API の経路と、コントローラの `@…Mapping` を突き合わせ、
+どちらか一方にしか無い経路があれば **終了コード 1 で落ちる**。
+
+検査するのは 2 つある。
+
+1. **API 一覧表**（`| GET | /api/… | … |` の行）と実装が 1 対 1 であること
+2. **本文と他の表**に書いた `` `METHOD /api/…` `` が、実装に存在すること
+
+2 を入れたのは、画面設計書が経路を表の 5 列目に書いていて 1 の走査に当たらず、
+`GET /api/departments/tree` という**実装に無い経路**を参照したまま緑だったため
+（CLAUDE.md 落とし穴 160）。設計書だけを読んだ人は、存在しない API に依存した画面を作る。
+
+コメントアウトされた `@GetMapping` は実装として数えない（落とし穴 156）。
