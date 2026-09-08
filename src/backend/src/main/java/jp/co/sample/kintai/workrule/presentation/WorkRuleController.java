@@ -59,7 +59,7 @@ class WorkRuleController {
     /** 系列の一覧。版の履歴は含めない（一覧で全系列の全版を返すと重い）。 */
     @GetMapping
     List<WorkRuleResponse> list(@AuthenticationPrincipal AuthenticatedEmployee principal) {
-        return queries.系列の一覧(principal.toRequester()).stream()
+        return queries.listSeries(principal.toRequester()).stream()
                 .map(WorkRuleResponse::summaryOf).toList();
     }
 
@@ -67,7 +67,7 @@ class WorkRuleController {
     @GetMapping("/{seriesId}")
     WorkRuleResponse detail(@AuthenticationPrincipal AuthenticatedEmployee principal,
                             @PathVariable UUID seriesId) {
-        var detail = queries.系列の詳細(principal.toRequester(), new WorkRuleSeriesId(seriesId));
+        var detail = queries.findSeriesDetail(principal.toRequester(), new WorkRuleSeriesId(seriesId));
         return WorkRuleResponse.of(detail.series(), detail.revisions());
     }
 
@@ -81,7 +81,7 @@ class WorkRuleController {
     WorkRuleResponse.Revision effective(
             @AuthenticationPrincipal AuthenticatedEmployee principal,
             @PathVariable UUID seriesId, @RequestParam LocalDate date) {
-        return WorkRuleResponse.Revision.of(queries.指定日に有効な版(
+        return WorkRuleResponse.Revision.of(queries.findVersionEffectiveOn(
                 principal.toRequester(), new WorkRuleSeriesId(seriesId), date));
     }
 
@@ -91,7 +91,7 @@ class WorkRuleController {
     RegistrationResponse register(@AuthenticationPrincipal AuthenticatedEmployee principal,
                                   @Valid @RequestBody RegistrationBody body) {
         return RegistrationResponse.of(
-                master.就業規則を登録する(principal.toRequester(), body.name(), body.toSpec()));
+                master.registerWorkRule(principal.toRequester(), body.name(), body.toSpec()));
     }
 
     /**
@@ -105,7 +105,7 @@ class WorkRuleController {
     RegistrationResponse revise(@AuthenticationPrincipal AuthenticatedEmployee principal,
                                 @PathVariable UUID seriesId,
                                 @Valid @RequestBody RevisionBody body) {
-        return RegistrationResponse.of(master.就業規則を改定する(principal.toRequester(),
+        return RegistrationResponse.of(master.reviseWorkRule(principal.toRequester(),
                 new WorkRuleSeriesId(seriesId), body.version(), body.toSpec()));
     }
 

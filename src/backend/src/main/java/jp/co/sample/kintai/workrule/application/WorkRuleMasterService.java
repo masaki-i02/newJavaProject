@@ -92,7 +92,7 @@ public class WorkRuleMasterService {
      * 特定の社員が未締めでも、他の社員が締めていれば変更してはいけない。
      */
     @Transactional
-    public void 暦日区分を設定する(Requester requester, LocalDate date, DayType dayType,
+    public void setDayType(Requester requester, LocalDate date, DayType dayType,
                             String name) {
         requireHumanResources(requester);
         YearMonth month = YearMonth.from(date);
@@ -127,7 +127,7 @@ public class WorkRuleMasterService {
      * @param overrides 個別の日。曜日の規則より優先する
      */
     @Transactional
-    public CalendarRegistration 暦日区分をまとめて設定する(
+    public CalendarRegistration setDayTypesInBulk(
             Requester requester, LocalDate from, LocalDate toExclusive,
             List<CalendarDayOfWeekRule> rules, List<CalendarOverride> overrides) {
         requireHumanResources(requester);
@@ -559,7 +559,7 @@ public class WorkRuleMasterService {
      * カレンダーと同じ検査を当てる（落とし穴 130）。
      */
     @Transactional
-    public void 就業規則を適用する(Requester requester, EmployeeId employeeId,
+    public void assignWorkRule(Requester requester, EmployeeId employeeId,
                             WorkRuleSeriesId seriesId, LocalDate validFrom) {
         requireHumanResources(requester);
         YearMonth month = YearMonth.from(validFrom);
@@ -588,7 +588,7 @@ public class WorkRuleMasterService {
      * <p><strong>締め済みの月を拒まない。</strong>
      * 新しい系列はまだ誰にも適用されていないので、
      * 確定済みの勤怠を 1 件も動かさない。
-     * 拒むのは<strong>適用</strong>（{@code 就業規則を適用する}）の側であり、
+     * 拒むのは<strong>適用</strong>（{@code assignWorkRule}）の側であり、
      * そこには締めの検査がある。
      * ここで拒むと、過去に遡って規則を整備することが永久にできなくなる。
      *
@@ -597,7 +597,7 @@ public class WorkRuleMasterService {
      * 適用されていない系列は分母に入らない。
      */
     @Transactional
-    public RegisteredWorkRule 就業規則を登録する(Requester requester, String name,
+    public RegisteredWorkRule registerWorkRule(Requester requester, String name,
                                         WorkRuleSpec spec) {
         requireHumanResources(requester);
         requireName(name);
@@ -627,7 +627,7 @@ public class WorkRuleMasterService {
      * （落とし穴 73）。
      */
     @Transactional
-    public RegisteredWorkRule 就業規則を改定する(Requester requester, WorkRuleSeriesId seriesId,
+    public RegisteredWorkRule reviseWorkRule(Requester requester, WorkRuleSeriesId seriesId,
                                         long expectedVersion, WorkRuleSpec spec) {
         requireHumanResources(requester);
         WorkRuleSeries target = series.findById(seriesId)

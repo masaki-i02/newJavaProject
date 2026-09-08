@@ -64,7 +64,7 @@ public class WorkRuleQueryService {
     }
 
     /** 系列の一覧。廃止済みも含める（過去の勤怠が指しているため）。 */
-    public List<WorkRuleSeries> 系列の一覧(Requester requester) {
+    public List<WorkRuleSeries> listSeries(Requester requester) {
         requireHumanResources(requester);
         return series.findAll();
     }
@@ -74,7 +74,7 @@ public class WorkRuleQueryService {
      *
      * <p>版は<strong>開始日の順</strong>に並べる。改定の順序がそのまま読める。
      */
-    public WorkRuleDetail 系列の詳細(Requester requester, WorkRuleSeriesId seriesId) {
+    public WorkRuleDetail findSeriesDetail(Requester requester, WorkRuleSeriesId seriesId) {
         requireHumanResources(requester);
         WorkRuleSeries found = series.findById(seriesId)
                 .orElseThrow(() -> new WorkRuleMasterService
@@ -89,7 +89,7 @@ public class WorkRuleQueryService {
      * 年度の途中で新設した系列は、それ以前の日に版を持たない（落とし穴 131）。
      * だから空を返し、呼び出し側が 404 に写す。
      */
-    public WorkRule 指定日に有効な版(Requester requester, WorkRuleSeriesId seriesId,
+    public WorkRule findVersionEffectiveOn(Requester requester, WorkRuleSeriesId seriesId,
                                LocalDate date) {
         requireHumanResources(requester);
         if (series.findById(seriesId).isEmpty()) {
@@ -109,7 +109,7 @@ public class WorkRuleQueryService {
      * 判定は {@code EmployeeVisibility} に任せる。
      * ロールだけで拒むと、上長が部下の制度を確かめられない。
      */
-    public List<WorkRuleAssignment> 適用履歴(Requester requester, EmployeeId employeeId) {
+    public List<WorkRuleAssignment> listAssignmentHistory(Requester requester, EmployeeId employeeId) {
         if (!visibility.canView(requester, employeeId, LocalDate.now(clock))) {
             throw new AccessDeniedException();
         }
@@ -126,7 +126,7 @@ public class WorkRuleQueryService {
      * <p>社員番号も氏名も返さない。{@code employee} が所有する概念であり、
      * ここに混ぜると {@code workrule} が持っていない情報の提供者になる。
      */
-    public UnassignedEmployees 規則の無い在籍者(Requester requester, Optional<LocalDate> date) {
+    public UnassignedEmployees findEmployeesWithoutWorkRule(Requester requester, Optional<LocalDate> date) {
         requireHumanResources(requester);
         LocalDate on = date.orElseGet(() -> LocalDate.now(clock));
         return new UnassignedEmployees(on, series.findEmployeesWithoutRuleOn(on));
@@ -138,7 +138,7 @@ public class WorkRuleQueryService {
      * <p><strong>未登録の日も {@code WORKDAY} として配列に含める。</strong>
      * 「配列に無い日は所定労働日」という暗黙の規則を受け取る側に持たせない。
      */
-    public CalendarView カレンダー(Requester requester, LocalDate from, LocalDate toExclusive) {
+    public CalendarView findCalendar(Requester requester, LocalDate from, LocalDate toExclusive) {
         // ★ ロールで拒まない。所定労働日は全社員の労働条件である
         if (requester == null) {
             throw new AccessDeniedException();

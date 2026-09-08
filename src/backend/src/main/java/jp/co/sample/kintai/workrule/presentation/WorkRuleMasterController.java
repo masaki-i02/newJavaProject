@@ -59,7 +59,7 @@ class WorkRuleMasterController {
                                @RequestParam LocalDate from,
                                @RequestParam LocalDate toExclusive) {
         return CalendarResponse.of(
-                queries.カレンダー(principal.toRequester(), from, toExclusive));
+                queries.findCalendar(principal.toRequester(), from, toExclusive));
     }
 
     /**
@@ -72,7 +72,7 @@ class WorkRuleMasterController {
     @GetMapping("/work-rule-assignments/unassigned")
     UnassignedResponse unassigned(@AuthenticationPrincipal AuthenticatedEmployee principal,
                                   @RequestParam(required = false) LocalDate date) {
-        var found = queries.規則の無い在籍者(principal.toRequester(),
+        var found = queries.findEmployeesWithoutWorkRule(principal.toRequester(),
                 java.util.Optional.ofNullable(date));
         return new UnassignedResponse(found.date(),
                 found.employeeIds().stream().map(id -> id.value().toString()).toList());
@@ -83,7 +83,7 @@ class WorkRuleMasterController {
     List<AssignmentResponse> assignments(
             @AuthenticationPrincipal AuthenticatedEmployee principal,
             @PathVariable UUID employeeId) {
-        return queries.適用履歴(principal.toRequester(), new EmployeeId(employeeId)).stream()
+        return queries.listAssignmentHistory(principal.toRequester(), new EmployeeId(employeeId)).stream()
                 .map(AssignmentResponse::of).toList();
     }
 
@@ -138,7 +138,7 @@ class WorkRuleMasterController {
     void setDayType(@AuthenticationPrincipal AuthenticatedEmployee principal,
                     @PathVariable LocalDate date,
                     @Valid @RequestBody CalendarBody body) {
-        master.暦日区分を設定する(principal.toRequester(), date, body.dayType(),
+        master.setDayType(principal.toRequester(), date, body.dayType(),
                 body.name());
     }
 
@@ -154,7 +154,7 @@ class WorkRuleMasterController {
                              @Valid @RequestBody BulkBody body) {
         // ★ 重複や期間の逆転をここで畳まない。畳むと後勝ちになり、
         //   人事は「登録したはずの祝日が入っていない」ことに気づけない（落とし穴 105）
-        var result = master.暦日区分をまとめて設定する(principal.toRequester(),
+        var result = master.setDayTypesInBulk(principal.toRequester(),
                 body.from(), body.toExclusive(),
                 body.rules().stream()
                         .map(rule -> new WorkRuleMasterService.CalendarDayOfWeekRule(
@@ -172,7 +172,7 @@ class WorkRuleMasterController {
     void assign(@AuthenticationPrincipal AuthenticatedEmployee principal,
                 @PathVariable UUID employeeId,
                 @Valid @RequestBody AssignmentBody body) {
-        master.就業規則を適用する(principal.toRequester(), new EmployeeId(employeeId),
+        master.assignWorkRule(principal.toRequester(), new EmployeeId(employeeId),
                 new WorkRuleSeriesId(body.seriesId()), body.validFrom());
     }
 
