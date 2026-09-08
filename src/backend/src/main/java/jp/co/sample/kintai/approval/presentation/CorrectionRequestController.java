@@ -77,13 +77,20 @@ class CorrectionRequestController {
                 corrections.find(requester, new CorrectionRequestId(id)));
     }
 
-    /** 承認待ちの一覧。<strong>見てよい社員のぶんだけ返る。</strong> */
+    /**
+     * 承認待ちの一覧。<strong>見てよい社員のぶんだけ返る。</strong>
+     *
+     * <p><strong>版を返さない</strong>（決定表「一覧に版を載せるか」）。
+     * 決裁するのは詳細を開いた 1 件だけなので、版はそちらで取る。
+     * 行ごとに {@code currentVersion} を呼ぶと、その中の閲覧範囲の判定が
+     * 絞り込みに続いて 2 回目になる。月次勤怠の一覧と同じ判断にそろえる
+     * （片方だけ直すと、規約が「どちらでもよい」に退化する。落とし穴 18）。
+     */
     @GetMapping("/correction-requests/pending-approval")
     List<CorrectionRequestResponse> pendingApproval(
             @AuthenticationPrincipal AuthenticatedEmployee principal) {
-        var requester = principal.toRequester();
-        return corrections.findPendingApproval(requester).stream()
-                .map(request -> respond(requester, request)).toList();
+        return corrections.findPendingApproval(principal.toRequester()).stream()
+                .map(CorrectionRequestResponse::withoutVersion).toList();
     }
 
     /**
@@ -185,11 +192,31 @@ class CorrectionRequestController {
     record ReasonBody(@NotBlank String reason, @NotNull Long version) {
     }
 
+    /**
+     * 訂正申請。
+     *
+     * <p><strong>{@code version} は一覧では省く</strong>（項目ごと落とす）。
+     * {@code null} を残すと、画面が「版が無い」と「版が 0」を区別できない。
+     */
     record CorrectionRequestResponse(String id, String employeeId, String workDate,
-                                     String status, String reason, long version,
+                                     String status, String reason,
+                                     @com.fasterxml.jackson.annotation.JsonInclude(
+                                             com.fasterxml.jackson.annotation.JsonInclude
+                                                     .Include.NON_NULL)
+                                     Long version,
                                      List<CorrectionItemResponse> items) {
 
         static CorrectionRequestResponse from(CorrectionRequest request, long version) {
+            return build(request, version);
+        }
+
+        /** 一覧の行。 */
+        static CorrectionRequestResponse withoutVersion(CorrectionRequest request) {
+            return build(request, null);
+        }
+
+        private static CorrectionRequestResponse build(CorrectionRequest request,
+                                                       Long version) {
             return new CorrectionRequestResponse(request.id().value().toString(),
                     request.employeeId().value().toString(),
                     request.workDate().toString(), request.status().name(),

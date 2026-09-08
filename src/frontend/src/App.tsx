@@ -64,9 +64,14 @@ export function App() {
                       aria-current={screen === 'workRules' ? 'page' : undefined}>就業規則</button>
               <button onClick={() => setScreen('calendar')}
                       aria-current={screen === 'calendar' ? 'page' : undefined}>カレンダー</button>
-              <button onClick={() => setScreen('alerts')}
-                      aria-current={screen === 'alerts' ? 'page' : undefined}>36 協定</button>
             </>
+          )}
+          {/* ★ 36 協定は承認者にも出す。超過を是正できるのは、
+                業務の配分を変えられる上長だけである。
+                見える範囲は API が閲覧範囲で絞る */}
+          {(user.roles.includes('HR') || user.roles.includes('APPROVER')) && (
+            <button onClick={() => setScreen('alerts')}
+                    aria-current={screen === 'alerts' ? 'page' : undefined}>36 協定</button>
           )}
           {user.roles.includes('ADMIN') && (
             <button onClick={() => setScreen('employees')}

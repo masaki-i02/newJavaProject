@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { get, post } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type {
   AttendanceList, DailyAttendance, MonthlyAttendance, MonthlySettlement, SignedIn,
@@ -31,7 +32,11 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
   const [daysProblem, setDaysProblem] = useState<Presentation | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const begin = useFreshness();
   const reload = useCallback(async () => {
+    // ★ 月を切り替えると前の月の問い合わせがまだ飛んでいる。
+    //   遅れて届いた応答で新しい月の状態を上書きしない
+    const isFresh = begin();
     const { from, toExclusive } = monthRangeOf(month);
     // ★ 期間は半開区間で渡す（原則 3）。`atEndOfMonth` にすると月末日が漏れる
     const [daysResult, settlementResult, attendanceResult] = await Promise.allSettled([
@@ -41,6 +46,7 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
       get<MonthlyAttendance>(
         `/api/employees/${user.id}/monthly-attendances/${month}`),
     ]);
+    if (!isFresh()) return;
     if (daysResult.status === 'fulfilled') {
       setDays(daysResult.value.days);
       setDaysProblem(null);
@@ -55,7 +61,7 @@ export function MyMonth({ user, month }: { user: SignedIn; month: YearMonth }) {
     } else {
       setProblem(presentationOf(attendanceResult.reason));
     }
-  }, [user.id, month]);
+  }, [begin, user.id, month]);
 
   useEffect(() => { void reload(); }, [reload]);
 

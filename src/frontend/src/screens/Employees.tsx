@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { get, patch, post } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type {
   DepartmentNode, DepartmentTree, EmployeeList, EmployeeRow, Role,
@@ -29,16 +30,22 @@ export function Employees() {
   const [busy, setBusy] = useState(false);
   const [registering, setRegistering] = useState(false);
 
+  const begin = useFreshness();
   const reload = useCallback(async () => {
+    // ★ 絞り込みを切り替えると前の問い合わせがまだ飛んでいる
+    const isFresh = begin();
     try {
-      setRows((await get<EmployeeList>(
-        `/api/employees?includeRetired=${String(includeRetired)}`)).employees);
+      const list = await get<EmployeeList>(
+        `/api/employees?includeRetired=${String(includeRetired)}`);
+      if (!isFresh()) return;
+      setRows(list.employees);
       setProblem(null);
     } catch (error) {
+      if (!isFresh()) return;
       setRows([]);
       setProblem(presentationOf(error));
     }
-  }, [includeRetired]);
+  }, [begin, includeRetired]);
 
   useEffect(() => { void reload(); }, [reload]);
 

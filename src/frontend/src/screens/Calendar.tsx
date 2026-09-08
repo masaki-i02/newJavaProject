@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { get, post, put } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type {
   CalendarBulkResult, CalendarDay, CalendarView, CalendarWarning, DayOfWeekName, DayType,
@@ -32,17 +33,23 @@ export function Calendar({ month }: { month: YearMonth }) {
   const [busy, setBusy] = useState(false);
   const [bulk, setBulk] = useState<BulkForm>(defaultBulkForm());
 
+  const begin = useFreshness();
   const reload = useCallback(async () => {
+    // ★ 月を切り替えると前の月の問い合わせがまだ飛んでいる
+    const isFresh = begin();
     const { from, toExclusive } = monthRangeOf(month);
     try {
-      setView(await get<CalendarView>(
-        `/api/calendars?from=${from}&toExclusive=${toExclusive}`));
+      const loaded = await get<CalendarView>(
+        `/api/calendars?from=${from}&toExclusive=${toExclusive}`);
+      if (!isFresh()) return;
+      setView(loaded);
       setProblem(null);
     } catch (error) {
+      if (!isFresh()) return;
       setView(null);
       setProblem(presentationOf(error));
     }
-  }, [month]);
+  }, [begin, month]);
 
   useEffect(() => { void reload(); }, [reload]);
 

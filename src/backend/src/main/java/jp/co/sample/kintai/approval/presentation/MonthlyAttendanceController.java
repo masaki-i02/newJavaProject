@@ -67,17 +67,26 @@ class MonthlyAttendanceController {
                 new EmployeeId(employeeId), month));
     }
 
-    /** 承認待ちの一覧。<strong>見てよい社員のぶんだけ返る。</strong> */
+    /**
+     * 承認待ちの一覧。<strong>見てよい社員のぶんだけ返る。</strong>
+     *
+     * <p><strong>版を返さない</strong>（決定表「一覧に版を載せるか」）。
+     * 決裁するのは詳細を開いた 1 人だけなので、版はそちらで取る。
+     * 行ごとに {@code currentVersion} を呼ぶと、その中で
+     * {@code EmployeeVisibility.canView}（再帰 CTE ＋ 祖先ごとの問い合わせ）が
+     * <strong>2 回目</strong>走る。絞り込みでもう 1 回走っているので、
+     * 承認待ち 100 件で再帰 CTE を 200 回叩くことになる。
+     *
+     * <p><strong>労働時間を載せない。</strong> {@code attendance} が所有する概念であり、
+     * 社員番号・氏名を返さないのと同じ理由である（設計規約チェックリスト 3）。
+     * 承認者は詳細（SC-06）で月次清算と日次を引く。どちらも既に開いている。
+     */
     @GetMapping("/monthly-attendances/pending-approval")
-    List<MonthlyAttendanceResponse> pendingApproval(
+    List<PendingApprovalResponse> pendingApproval(
             @AuthenticationPrincipal AuthenticatedEmployee principal,
             @RequestParam YearMonth month) {
-        var requester = principal.toRequester();
-        return attendances.findPendingApproval(requester, month).stream()
-                .map(attendance -> MonthlyAttendanceResponse.summary(attendance,
-                        attendances.currentVersion(requester, attendance.employeeId(),
-                                month)))
-                .toList();
+        return attendances.findPendingApproval(principal.toRequester(), month).stream()
+                .map(PendingApprovalResponse::from).toList();
     }
 
     /**
@@ -236,6 +245,36 @@ class MonthlyAttendanceController {
         }
     }
 
+    /**
+     * 承認待ちの 1 行（05 API設計書 2.6）。
+     *
+     * <p><strong>詳細とは別の型にする。</strong> 同じ record を使い回して
+     * 項目を {@code null} で埋めると、「一覧では省く」という判断が
+     * 型に現れず、載せてよい項目が少しずつ増える。
+     *
+     * <p>載せるのは<strong>追加の問い合わせが 0 件で済むものだけ</strong>である。
+     * {@code submittedAt} と {@code submittedBy} は絞り込みで読んだ集約が
+     * すでに持っている。
+     *
+     * <p>{@code proxySubmitted} は<strong>サーバが導く。</strong>
+     * {@code submittedBy} だけ返して画面に比べさせると、
+     * 業務ルールが画面へ複製される。代理提出は本人が在籍していない場合に限られる
+     * ので、実務では退職者の最終月にしか立たない。
+     */
+    record PendingApprovalResponse(String employeeId, String month, String status,
+                                   LocalDateTime submittedAt, boolean proxySubmitted) {
+
+        static PendingApprovalResponse from(MonthlyAttendance attendance) {
+            MonthlyAttendanceStatus status = attendance.status();
+            EmployeeId submitter = MonthlyAttendanceResponse.submittedBy(status);
+            return new PendingApprovalResponse(
+                    attendance.employeeId().value().toString(),
+                    attendance.month().toString(), status.state().name(),
+                    MonthlyAttendanceResponse.submittedAt(status),
+                    submitter != null && !submitter.equals(attendance.employeeId()));
+        }
+    }
+
     record SkippedResponse(String employeeId, String status, String reason) {
 
         static SkippedResponse from(BulkClosureResult.Skipped skipped) {
@@ -355,16 +394,6 @@ class MonthlyAttendanceController {
                     null);
         }
 
-        /** 一覧の行。<strong>判断の項目は省く。</strong> */
-        static MonthlyAttendanceResponse summary(MonthlyAttendance attendance,
-                                                 long version) {
-            return new MonthlyAttendanceResponse(
-                    attendance.employeeId().value().toString(),
-                    attendance.month().toString(), attendance.status().state().name(),
-                    version, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null);
-        }
-
         /**
          * まだ行が無い月。
          *
@@ -392,7 +421,7 @@ class MonthlyAttendanceController {
             return employeeId == null ? null : employeeId.value().toString();
         }
 
-        private static EmployeeId submittedBy(MonthlyAttendanceStatus status) {
+        static EmployeeId submittedBy(MonthlyAttendanceStatus status) {
             return switch (status) {
                 case MonthlyAttendanceStatus.Draft ignored -> null;
                 case MonthlyAttendanceStatus.Submitted s -> s.submittedBy();
@@ -401,7 +430,7 @@ class MonthlyAttendanceController {
             };
         }
 
-        private static LocalDateTime submittedAt(MonthlyAttendanceStatus status) {
+        static LocalDateTime submittedAt(MonthlyAttendanceStatus status) {
             return switch (status) {
                 case MonthlyAttendanceStatus.Draft ignored -> null;
                 case MonthlyAttendanceStatus.Submitted s -> s.submittedAt();

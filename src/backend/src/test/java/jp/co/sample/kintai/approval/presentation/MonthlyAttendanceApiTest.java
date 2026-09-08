@@ -118,6 +118,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
     private EmployeeId yamada;
     private EmployeeId manager;
     private EmployeeId hr;
+    private DepartmentId sales;
+    private WorkRuleSeriesId standard;
 
     @BeforeEach
     void setUpOrganization() {
@@ -125,13 +127,13 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         manager = hire("E0100", "課長 次郎", Optional.empty(), Role.EMPLOYEE);
         hr = hire("E0900", "人事 花子", Optional.empty(), Role.EMPLOYEE, Role.HR);
 
-        var sales = new DepartmentId(UUID.randomUUID());
+        sales = new DepartmentId(UUID.randomUUID());
         departments.save(Department.root(sales, new DepartmentCode("SALES"), "営業部"));
         assignments.save(Assignment.startingAt(yamada, sales, HIRED));
         assignments.save(Assignment.startingAt(manager, sales, HIRED));
         managerships.save(Managership.startingAt(sales, manager, HIRED));
 
-        var standard = new WorkRuleSeriesId(UUID.randomUUID());
+        standard = new WorkRuleSeriesId(UUID.randomUUID());
         series.save(WorkRuleSeries.active(standard, "標準勤務"));
         workRules.save(WorkRules.versionOf(standard, HIRED, WorkRules.fixed(),
                 Duration.ofHours(8), NightWindow.STANDARD));
@@ -421,7 +423,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
          * 必要なのは詳細を開いた 1 人だけである。
          */
         @Test
-        @DisplayName("IT-APV-87 承認待ちの一覧は判断の項目を返さない")
+        @DisplayName("IT-APV-87 承認待ちの一覧は判断の項目も版も返さない")
         void listOmitsDecisions() throws Exception {
             transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
                     .andExpect(status().isOk());
@@ -431,9 +433,46 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                             .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].status").value("SUBMITTED"))
-                    .andExpect(jsonPath("$[0].version").exists())
+                    // ★ 版は詳細でだけ返す。行ごとに引くと閲覧範囲の判定が 2 回走り、
+                    //   一覧が版の取得経路になってしまう
+                    .andExpect(jsonPath("$[0].version").doesNotExist())
                     .andExpect(jsonPath("$[0].canApprove").doesNotExist())
-                    .andExpect(jsonPath("$[0].history").doesNotExist());
+                    .andExpect(jsonPath("$[0].history").doesNotExist())
+                    // ★ 追加の問い合わせが 0 件で済むものは載せる
+                    .andExpect(jsonPath("$[0].submittedAt").exists())
+                    .andExpect(jsonPath("$[0].proxySubmitted").value(false));
+        }
+
+        /**
+         * <strong>代理提出であることをサーバが導いて返す。</strong>
+         *
+         * <p>{@code submittedBy} だけ返して画面に比べさせると、
+         * 業務ルールが画面へ複製される。
+         *
+         * <p>本人の提出（{@code false}）と対にして確かめる。片側だけだと、
+         * 定数 {@code false} を返す変異が生き残る（落とし穴 24・43）。
+         */
+        @Test
+        @DisplayName("IT-APV-97 退職者の代理提出は proxySubmitted が真になる")
+        void proxySubmittedIsDerived() throws Exception {
+            var retired = hire("E0006", "退職 六郎",
+                    Optional.of(LocalDate.of(2026, 4, 30)), Role.EMPLOYEE);
+            assignments.save(Assignment.startingAt(retired, sales, HIRED));
+            series.assign(retired, standard, HIRED);
+
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/submission",
+                            retired.value(), "2026-04")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"comment\":\"退職者の代理提出\",\"version\":0}"))
+                    .andExpect(status().isOk());
+
+            mockMvc.perform(get("/api/monthly-attendances/pending-approval")
+                            .param("month", "2026-04")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[?(@.employeeId=='%s')].proxySubmitted"
+                            .formatted(retired.value())).value(true));
         }
 
         private org.springframework.test.web.servlet.ResultActions detail(

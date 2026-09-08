@@ -319,14 +319,25 @@ public class MonthlySettlementService {
      * 6 項 2 号・3 号という<strong>別の規制</strong>である（落とし穴 52）。
      *
      * <p>社員番号・氏名・部署は返さない。{@code employee} が所有する概念である。
+     *
+     * <p><strong>ロールで一律に拒まない。閲覧範囲で絞る</strong>
+     * （決定表「一覧を返す API のロール」）。
+     * 人事だけに開いていたが、<strong>36 協定の超過を是正できるのは
+     * 業務の配分を変えられる上長だけ</strong>である。人事は数字を見られても
+     * 仕事を配れない。要件 4.1 は承認者に「配下部署の社員の勤怠」を
+     * 既に認めており、1 人ずつなら {@link #find} で同じ値が読めるので、
+     * <strong>ここを開いても見える範囲は 1 ミリも広がらない。</strong>
+     * 面で見る経路が無いことだけが問題だった。
+     *
+     * <p>基準日は<strong>対象月の末日</strong>にそろえる（{@code find} と同じ）。
+     * 揃えないと、同じ社員が一覧に出るのに詳細を開けない月ができる。
      */
     @Transactional(readOnly = true)
     public List<AgreementAlert> agreementAlerts(Requester requester, YearMonth month,
                                                 AlertType type) {
-        if (!requester.has(Role.HR)) {
-            throw new AccessDeniedException();
-        }
         return settlements.findByMonth(month).stream()
+                .filter(settlement -> visibility.canView(requester,
+                        settlement.employeeId(), month.atEndOfMonth()))
                 .map(settlement -> new AgreementAlert(settlement.employeeId(),
                         settlement.agreementUsage()))
                 .filter(alert -> type.matches(alert.usage()))

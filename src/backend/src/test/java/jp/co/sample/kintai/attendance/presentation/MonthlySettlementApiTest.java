@@ -407,13 +407,24 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.summary.monthlyExceeded").value(0));
         }
 
+        /**
+         * <strong>ロールで一律に拒まない。閲覧範囲で絞る。</strong>
+         *
+         * <p>一般社員が呼んでも自分のぶんしか返らないので、拒む理由が無い。
+         * 拒むと、自分が 36 協定の上限に近いことを本人が確かめられなくなる。
+         * 承認者が呼べば配下だけが返る（36 協定の超過を是正できるのは、
+         * 業務の配分を変えられる上長だけである）。
+         */
         @Test
-        @DisplayName("IT-API-38 人事でなければ超過者一覧を見られない")
-        void requiresHumanResources() throws Exception {
+        @DisplayName("IT-API-38 超過者一覧は閲覧範囲で絞られる（ロールでは拒まない）")
+        void scopedByVisibility() throws Exception {
             mockMvc.perform(get("/api/settlements/agreement-alerts")
                             .with(as(taro, "E0001", Role.EMPLOYEE))
                             .param("month", "2026-05"))
-                    .andExpect(status().isForbidden());
+                    .andExpect(status().isOk())
+                    // ★ 他人の行は 1 件も返らない
+                    .andExpect(jsonPath("$.alerts[?(@.employeeId!='%s')]"
+                            .formatted(taro.value())).doesNotExist());
         }
 
         /** 日次の再計算。版が一致すれば通り、版が上がる。 */

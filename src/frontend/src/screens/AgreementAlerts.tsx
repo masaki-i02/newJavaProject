@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { get } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type { AgreementAlerts as Alerts } from '../api/types';
 import type { YearMonth } from '../api/wallClock';
@@ -23,15 +24,22 @@ export function AgreementAlertsScreen({ month }: { month: YearMonth }) {
   const [alerts, setAlerts] = useState<Alerts | null>(null);
   const [problem, setProblem] = useState<Presentation | null>(null);
 
+  const begin = useFreshness();
   const reload = useCallback(async () => {
+    // ★ 月を切り替えると前の月の問い合わせがまだ飛んでいる
+    const isFresh = begin();
     try {
-      setAlerts(await get<Alerts>(`/api/settlements/agreement-alerts?month=${month}`));
+      const loaded = await get<Alerts>(
+        `/api/settlements/agreement-alerts?month=${month}`);
+      if (!isFresh()) return;
+      setAlerts(loaded);
       setProblem(null);
     } catch (error) {
+      if (!isFresh()) return;
       setAlerts(null);
       setProblem(presentationOf(error));
     }
-  }, [month]);
+  }, [begin, month]);
 
   useEffect(() => { void reload(); }, [reload]);
 

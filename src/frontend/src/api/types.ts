@@ -146,8 +146,9 @@ export interface Warning {
  *   状態から画面で導くと、提出の条件（対象月が終わったか、未確定の日が無いか）
  *   まで画面に複製することになる。
  *
- * ★ 一覧の行では判断の項目が省かれる（`undefined`）。
- *   行ごとに承認者と履歴を引くと、社員数ぶんの問い合わせが重複するためである。
+ * ★ **一覧の行はこの型では受けない**（`PendingApproval` を使う）。
+ *   同じ型を使い回すと、一覧に無い項目を読んでも TypeScript が止めてくれず、
+ *   `undefined` が画面に出るだけになる（落とし穴 143・151）。
  */
 export interface MonthlyAttendance {
   readonly employeeId: string;
@@ -515,4 +516,23 @@ export interface RecordedPunch {
   readonly type: PunchType;
   readonly occurredAt: WallClockDateTime;
   readonly revoked?: boolean;
+}
+
+/**
+ * 承認待ちの 1 行（05 API 設計書 2.6）。
+ *
+ * ★ **`version` を持たない。** 決裁するのは詳細を開いた 1 人だけなので、
+ *   版はそちらで取る。一覧に載せると、行ごとに閲覧範囲の判定が 2 回走る。
+ *
+ * ★ **労働時間も持たない。** `attendance` が所有する概念であり、
+ *   社員番号・氏名を返さないのと同じ理由である。
+ *   承認者は詳細（SC-06）で月次清算と日次を引く。
+ */
+export interface PendingApproval {
+  readonly employeeId: string;
+  readonly month: YearMonth;
+  readonly status: AttendanceState;
+  readonly submittedAt: WallClockDateTime;
+  /** 人事による代理提出か。**サーバが導く**（画面で `submittedBy` と比べない）。 */
+  readonly proxySubmitted: boolean;
 }

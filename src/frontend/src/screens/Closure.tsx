@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { get, post } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type {
   AttendanceState, BulkClosureResult, ClosureStatus, SkippedClosure, UnassignedWorkRules,
@@ -34,7 +35,10 @@ export function Closure({ month }: { month: YearMonth }) {
   const [result, setResult] = useState<BulkClosureResult | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const begin = useFreshness();
   const reload = useCallback(async () => {
+    // ★ 月を切り替えると前の月の問い合わせがまだ飛んでいる
+    const isFresh = begin();
     // ★ 就業規則の未設定は基準日で訊く。既定（当日）のまま訊くと、
     //   5 月に 4 月分を締めるときに「5/1 入社で規則未適用の社員」が現れ、
     //   4 月とは無関係な社員を人事に見せることになる。
@@ -44,6 +48,7 @@ export function Closure({ month }: { month: YearMonth }) {
       get<readonly ClosureStatus[]>(`/api/monthly-attendances?month=${month}`),
       get<UnassignedWorkRules>(`/api/work-rule-assignments/unassigned?date=${lastDay}`),
     ]);
+    if (!isFresh()) return;
     if (statuses.status === 'fulfilled') {
       setRows(statuses.value);
       setProblem(null);
@@ -58,7 +63,7 @@ export function Closure({ month }: { month: YearMonth }) {
       setUnassigned([]);
       setUnassignedProblem(presentationOf(unassignedResult.reason));
     }
-  }, [month]);
+  }, [begin, month]);
 
   // ★ 月を切り替えたら前の月の結果を消す。残すと、別の月の結果を見ながら締めることになる
   useEffect(() => { setResult(null); void reload(); }, [reload]);

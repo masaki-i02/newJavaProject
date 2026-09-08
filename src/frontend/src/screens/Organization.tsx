@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { get } from '../api/client';
+import { useFreshness } from '../api/freshness';
 import type { Presentation } from '../api/problem';
 import type { DepartmentNode, DepartmentTree } from '../api/types';
 import { ProblemBanner } from './ProblemBanner';
@@ -23,20 +24,26 @@ export function Organization() {
   const [problem, setProblem] = useState<Presentation | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  const begin = useFreshness();
   useEffect(() => {
+    // ★ 絞り込みを切り替えると前の問い合わせがまだ飛んでいる
+    const isFresh = begin();
     void (async () => {
       try {
-        setNodes((await get<DepartmentTree>(
-          `/api/departments?includeAbolished=${String(includeAbolished)}`)).departments);
+        const tree = await get<DepartmentTree>(
+          `/api/departments?includeAbolished=${String(includeAbolished)}`);
+        if (!isFresh()) return;
+        setNodes(tree.departments);
         setProblem(null);
       } catch (error) {
+        if (!isFresh()) return;
         setNodes([]);
         setProblem(presentationOf(error));
       } finally {
-        setLoaded(true);
+        if (isFresh()) setLoaded(true);
       }
     })();
-  }, [includeAbolished]);
+  }, [begin, includeAbolished]);
 
   return (
     <main>

@@ -124,3 +124,77 @@ async function signIn(page: Page, user: { number: string; password: string }) {
   await page.getByRole('button', { name: 'ログイン' }).click();
   await expect(page.getByRole('heading', { name: '勤怠管理システム' })).toBeVisible();
 }
+
+/**
+ * 承認（SC-05 / SC-06）。
+ *
+ * ★ **承認は内容の承認である。** 労働時間を 1 つも見せずに承認ボタンを出すと、
+ *   その承認は「何を見て承認したのか」に答えられない証跡にしかならない。
+ *   一覧には載せず（`attendance` が所有する概念であり、行ごとに引くと
+ *   社員数ぶんの問い合わせが重複する）、**開いた 1 人ぶんだけ**引く。
+ */
+test.describe('承認', () => {
+  const APPROVER = { number: 'E0100', password: 'correct-horse-battery' };
+  const MEMBER = { number: 'E0001', password: 'correct-horse-battery' };
+  // 前提データのカレンダーが 2026-04 から始まり、その月は既に終わっている
+  const PAST_MONTH = '2026-04';
+
+  test('IT-SCN-40 提出すると一覧に提出日時が並び、詳細に労働時間が出る',
+    async ({ page }) => {
+      await signIn(page, MEMBER);
+      await page.getByRole('button', { name: '月次勤怠' }).click();
+      await page.getByLabel('対象月').fill(PAST_MONTH);
+      await page.getByRole('button', { name: '提出する' }).click();
+
+      await page.context().clearCookies();
+      await signIn(page, APPROVER);
+      await page.getByLabel('対象月').fill(PAST_MONTH);
+      await page.getByRole('button', { name: '承認' }).click();
+
+      // ★ 一覧は版を返さない。代わりに提出日時が並ぶ
+      await expect(page.getByRole('columnheader', { name: '版' })).toHaveCount(0);
+      await expect(page.getByRole('columnheader', { name: '提出' })).toBeVisible();
+
+      await page.getByRole('button', { name: '開く' }).first().click();
+
+      // ★ 労働時間の節が出る。承認者はこれを見て承認する
+      await expect(page.getByRole('heading', { name: '労働時間' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '承認する' })).toBeEnabled();
+    });
+});
+
+/**
+ * 古い応答が新しい状態を上書きしないこと。
+ *
+ * ★ これは実ブラウザの通しが **1 回だけ落ちて再現しなかった**欠陥である。
+ *   月を切り替えると前の月の問い合わせがまだ飛んでいて、遅れて届いた応答が
+ *   新しい月の状態を上書きしていた。画面は正しい月を表示しているのに
+ *   `canSubmit` が前の月（当月＝まだ終わっていない）の偽のまま残るので、
+ *   **終わった月を開いているのに提出ボタンが押せない。**
+ *
+ * ★ 「もう一度流したら通った」で済ませない。応答を遅らせて必ず再現させる。
+ */
+test.describe('応答の新しさ', () => {
+  test('IT-SCN-41 前の月の応答が遅れて届いても、新しい月の状態を上書きしない',
+    async ({ page }) => {
+      // 当月（まだ終わっていない＝canSubmit が偽）の応答をわざと遅らせる
+      await page.route('**/api/employees/*/monthly-attendances/2026-09',
+        async (route) => {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          await route.continue();
+        });
+
+      await signIn(page, { number: 'E0001', password: 'correct-horse-battery' });
+      await page.getByRole('button', { name: '月次勤怠' }).click();
+      // ★ IT-SCN-40 が触る 2026-04 を使わない。あちらは承認まで進めるので、
+      //   同じ月を使うと「承認済みだから提出できない」が
+      //   この観点の失敗に見える（落とし穴 12：入力は 1 つだけ変える）
+      await page.getByLabel('対象月').fill('2026-05');
+
+      // 遅れた応答が届いたあとも、終わった月として扱われ続ける
+      await expect(page.getByRole('heading', { name: '2026-05 の勤怠' })).toBeVisible();
+      await expect(page.getByRole('button', { name: '提出する' })).toBeEnabled();
+      await page.waitForTimeout(3000);
+      await expect(page.getByRole('button', { name: '提出する' })).toBeEnabled();
+    });
+});
