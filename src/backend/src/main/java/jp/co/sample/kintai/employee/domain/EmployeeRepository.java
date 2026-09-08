@@ -13,8 +13,17 @@ public interface EmployeeRepository {
 
     Optional<Employee> findById(EmployeeId id);
 
-    /** 社員番号は認証 ID を兼ねるので、ログインでも使う。 */
-    Optional<Employee> findByNumber(EmployeeNumber number);
+    /**
+     * その社員番号の社員を<strong>すべて</strong>返す。
+     *
+     * <p>社員番号は認証 ID を兼ねるので、ログインでも使う。
+     *
+     * <p><strong>1 件に絞らない。</strong> 社員番号が一意なのは在籍者のあいだだけで
+     * （部分一意インデックス・落とし穴 121）、退職者の番号は再割り当てできる。
+     * 「その日に在籍しているか」で絞るのは呼ぶ側の責務である
+     * （SQL に状態の判定を写さない・落とし穴 69）。
+     */
+    List<Employee> findByNumber(EmployeeNumber number);
 
     /**
      * 名簿に載せる社員（API設計書 3.2）。
@@ -67,13 +76,19 @@ public interface EmployeeRepository {
     long currentVersion(EmployeeId id);
 
     /**
-     * 社員番号が在籍者と重複するか。
+     * 社員番号が<strong>基準日に在籍している</strong>社員と重複するか。
      *
      * <p>DB の部分一意インデックスでも守られるが、
      * <strong>一意制約違反は利用者に説明できない。</strong>
      * どの項目が重複しているかを返せるよう、登録の時点で確かめる。
+     *
+     * <p><strong>「退職日が入っていないこと」で判定しない。</strong>
+     * 退職を先の日付で登録した社員はまだ在籍しているのに退職日を持つので、
+     * その番号を新しい社員へ渡せてしまう。**部分一意インデックスは
+     * `retired_on IS NULL` の行しか見ないので DB も止められず**、
+     * 同じ番号で在籍している社員が 2 人できる。
      */
-    boolean existsActiveNumber(EmployeeNumber number);
+    boolean existsActiveNumber(EmployeeNumber number, LocalDate asOf);
 
     /** メールアドレスが在籍者と重複するか。<strong>大文字小文字を区別しない。</strong> */
     boolean existsActiveEmail(Email email);

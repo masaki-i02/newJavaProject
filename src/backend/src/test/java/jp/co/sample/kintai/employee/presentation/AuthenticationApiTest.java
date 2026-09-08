@@ -128,6 +128,30 @@ class AuthenticationApiTest extends WebIntegrationTestBase {
                     .contains("urn:kintai:error:authentication-failed");
         }
 
+        /**
+         * <strong>社員番号は在籍中しか一意でない</strong>（落とし穴 121）。
+         *
+         * <p>`employees_employee_number_uk` は `WHERE retired_on IS NULL` の
+         * 部分一意インデックスなので、退職者の番号は再割り当てできる。
+         * 認証の問い合わせが `retired_on` で絞っていないと、
+         * <strong>同じ番号の行が 2 つ返って認証そのものが落ちる。</strong>
+         * 在籍者の側もログインできなくなる。
+         */
+        @Test
+        @DisplayName("IT-AUTH-23 退職者の社員番号を再割り当てしても在籍者はログインできる")
+        void reusedEmployeeNumberOfRetiredEmployee() throws Exception {
+            var retired = hire("E0007", "退職 次郎",
+                    Optional.of(LocalDate.of(2026, 3, 31)), Role.EMPLOYEE);
+            setPassword(retired, "old-password-of-retired");
+            var rehired = hire("E0007", "新入 花子", Optional.empty(), Role.EMPLOYEE);
+            setPassword(rehired, PASSWORD);
+
+            mockMvc.perform(post("/api/sessions").contentType(MediaType.APPLICATION_JSON)
+                            .content(signInBody("E0007", PASSWORD)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.name").value("新入 花子"));
+        }
+
         /** 退職者も同じ応答にする。在籍しているかを未認証の相手に教えない。 */
         @Test
         @DisplayName("IT-AUTH-03 退職済みの社員はログインできない")

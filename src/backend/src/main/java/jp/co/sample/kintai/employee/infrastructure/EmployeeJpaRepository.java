@@ -12,7 +12,19 @@ import org.springframework.data.repository.query.Param;
 
 interface EmployeeJpaRepository extends JpaRepository<EmployeeEntity, UUID> {
 
-    Optional<EmployeeEntity> findByEmployeeNumber(String employeeNumber);
+    /**
+     * その社員番号の行を<strong>すべて</strong>返す。
+     *
+     * <p><strong>1 件に絞らない。</strong> `employees_employee_number_uk` は
+     * `WHERE retired_on IS NULL` の部分一意インデックスなので、
+     * 退職者の社員番号は再割り当てできる（落とし穴 121）。
+     * {@code Optional} で受けると、番号を再利用した瞬間に
+     * {@code IncorrectResultSizeDataAccessException} になり、
+     * <strong>その番号では誰もログインできなくなる</strong>（理由の載らない 500）。
+     *
+     * <p>「その日に在籍しているか」の判定はドメインに任せる（落とし穴 69）。
+     */
+    List<EmployeeEntity> findAllByEmployeeNumber(String employeeNumber);
 
     /**
      * 指定日に在籍していた社員。

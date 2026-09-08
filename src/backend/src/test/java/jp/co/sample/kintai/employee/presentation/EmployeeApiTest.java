@@ -298,6 +298,33 @@ class EmployeeApiTest extends WebIntegrationTestBase {
         }
 
         /**
+         * <strong>退職を先の日付で登録しても、その社員はまだ在籍している。</strong>
+         *
+         * <p>「退職日が入っていないこと」で重複を判定すると、
+         * 在任中の社員の番号を新しい社員へ渡せてしまう。
+         * しかも `employees_employee_number_uk` は `retired_on IS NULL` の
+         * 部分一意インデックスなので、<strong>DB も止められない</strong>。
+         * 同じ番号で在籍する社員が 2 人でき、その番号では誰もログインできなくなる
+         * （IT-AUTH-23）。
+         */
+        @Test
+        @DisplayName("IT-EMP-73 退職日が未来の社員の番号は再利用できない")
+        void numberOfEmployeeRetiringInTheFuture() throws Exception {
+            employees.save(new Employee(佐藤, new EmployeeNumber("E0300"), "佐藤 花子",
+                    new Email("sato@example.com"), HIRED,
+                    Optional.of(TODAY.plusMonths(2)), Set.of(Role.EMPLOYEE)));
+
+            登録する("""
+                    {"employeeNumber":"E0300","name":"後任 七郎",
+                     "email":"successor@example.com","hiredOn":"2026-04-01",
+                     "departmentId":"%s"}
+                    """.formatted(営業部.value()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:duplicate-employee-number"));
+        }
+
+        /**
          * メールは<strong>大文字小文字を区別しない。</strong>
          *
          * <p>畳んでいるのは {@code Email} の生成時であって、重複検査ではない。

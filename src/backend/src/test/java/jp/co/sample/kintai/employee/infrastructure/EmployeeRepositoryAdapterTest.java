@@ -104,7 +104,7 @@ class EmployeeRepositoryAdapterTest extends IntegrationTestBase {
         void findByNumber() {
             hire("E0001", APR_1);
 
-            assertThat(employees.findByNumber(new EmployeeNumber("E0001"))).isPresent();
+            assertThat(employees.findByNumber(new EmployeeNumber("E0001"))).hasSize(1);
             assertThat(employees.findByNumber(new EmployeeNumber("E9999"))).isEmpty();
         }
 

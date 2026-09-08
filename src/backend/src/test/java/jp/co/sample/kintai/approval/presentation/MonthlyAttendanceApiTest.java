@@ -546,6 +546,41 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                             .andExpect(jsonPath("$.type").value("urn:kintai:error:self-approval"));
         }
 
+        /**
+         * <strong>差戻しも自分では決裁できない</strong>（BR-11 の 4）。
+         *
+         * <p>承認だけを塞いでも、<strong>人事の社員は自分の月を自分で差し戻せた。</strong>
+         * `ApproverPolicy` が本人を承認者から外した結果 `HUMAN_RESOURCES` に落ち、
+         * `requester.has(Role.HR)` が真になるからである。
+         * 差戻しは理由つきで `REJECT` として証跡に残るので、
+         * <strong>誰も見ていない差戻しが「承認者が差し戻した」証跡になる。</strong>
+         *
+         * <p>訂正申請と年休は承認・却下の両方で本人を弾いており、
+         * 月次勤怠だけが非対称だった（落とし穴 110）。
+         */
+        @Test
+        @DisplayName("IT-APV-98 本人は自分の勤怠を差し戻せない")
+        void selfRejection() throws Exception {
+            // 課長自身の月。本人が長なので承認者は上位へ遡り、根なので人事に落ちる
+            series.assign(manager, standard, HIRED);
+            var body = "{\"reason\":\"やっぱり直したい\",\"version\":%d}";
+
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/submission",
+                            manager.value(), "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\":0}"))
+                    .andExpect(status().isOk());
+
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/rejection",
+                            manager.value(), "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body.formatted(1)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:self-approval"));
+        }
+
         @Test
         @DisplayName("IT-APV-37 承認者でない社員は承認できない")
         void notTheApprover() throws Exception {

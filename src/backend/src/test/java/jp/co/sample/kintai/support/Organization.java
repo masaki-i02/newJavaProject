@@ -121,9 +121,10 @@ public final class Organization {
             }
 
             @Override
-            public Optional<Employee> findByNumber(EmployeeNumber number) {
+            public List<Employee> findByNumber(EmployeeNumber number) {
+                // ★ 1 件に絞らない。番号が一意なのは在籍者のあいだだけである
                 return employees.values().stream()
-                        .filter(e -> e.number().equals(number)).findFirst();
+                        .filter(e -> e.number().equals(number)).toList();
             }
 
             @Override
@@ -155,9 +156,11 @@ public final class Organization {
             }
 
             @Override
-            public boolean existsActiveNumber(EmployeeNumber number) {
+            public boolean existsActiveNumber(EmployeeNumber number,
+                                              java.time.LocalDate asOf) {
+                // ★ 在籍の判定は本番と同じくドメインへ委ねる（落とし穴 37）
                 return employees.values().stream()
-                        .anyMatch(e -> e.number().equals(number) && e.retiredOn().isEmpty());
+                        .anyMatch(e -> e.number().equals(number) && e.isActiveOn(asOf));
             }
 
             @Override

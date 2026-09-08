@@ -4,6 +4,7 @@ import java.io.Serial;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -83,8 +84,23 @@ public class SignInService {
     @Transactional(readOnly = true)
     public SignedIn signIn(EmployeeNumber employeeNumber, PasswordAttempt password) {
         LocalDate today = LocalDate.now(clock);
-        Optional<Employee> found = employees.findByNumber(employeeNumber)
-                .filter(employee -> employee.isActiveOn(today));
+        // ★ 社員番号が一意なのは在籍者のあいだだけである（落とし穴 121）。
+        //   退職者の番号を再割り当てすると同じ番号の行が 2 つになるので、
+        //   1 件で受けると認証そのものが落ち、その番号では誰もログインできなくなる
+        List<Employee> sameNumber = employees.findByNumber(employeeNumber).stream()
+                .filter(employee -> employee.isActiveOn(today))
+                .toList();
+
+        // ★ 在籍者が 2 人いるなら、どちらの資格情報で照合すべきか決められない。
+        //   退職日を先の日付で登録した社員の番号を新しい社員へ渡すと起きうる。
+        //   どちらかを選ぶと「別人としてログインできる」ので、認証を通さない
+        if (sameNumber.size() > 1) {
+            hasher.wasteTime();
+            AUDIT.warn("ログイン失敗 employeeNumber={} reason=AMBIGUOUS_EMPLOYEE_NUMBER",
+                    employeeNumber.value());
+            throw new AuthenticationFailedException();
+        }
+        Optional<Employee> found = sameNumber.stream().findFirst();
 
         if (found.isEmpty()) {
             // ★ 見つからなくても照合と同じだけ時間を使う。応答時間で在籍を悟らせない

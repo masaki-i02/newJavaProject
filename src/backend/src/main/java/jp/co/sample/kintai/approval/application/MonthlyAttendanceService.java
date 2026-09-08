@@ -149,8 +149,15 @@ public class MonthlyAttendanceService {
                                     YearMonth month, String reason,
                                     long expectedVersion) {
         MonthlyAttendance current = load(employeeId, month);
+        // ★ 承認と同じ順序で並べる（自己 → 承認者 → 業務）。
+        //   後ろに置くと ApproverPolicy が本人を承認者から外して not-approver が返り、
+        //   自己決裁という事実が伝わらない
+        if (requester.isSelf(employeeId)) {
+            throw new MonthlyAttendance.SelfApprovalException(employeeId, month);
+        }
         requireApprover(requester, employeeId, month);
-        return apply(current, current.reject(), ApprovalEventKind.REJECT,
+        return apply(current, current.reject(requester.employeeId()),
+                ApprovalEventKind.REJECT,
                 requester.employeeId(), Optional.ofNullable(reason),
                 OptionalLong.of(expectedVersion));
     }

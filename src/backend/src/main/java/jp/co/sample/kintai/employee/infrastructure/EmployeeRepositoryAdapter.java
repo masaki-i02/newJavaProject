@@ -36,9 +36,9 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
     }
 
     @Override
-    public Optional<Employee> findByNumber(EmployeeNumber number) {
-        return jpa.findByEmployeeNumber(number.value())
-                .map(EmployeeRepositoryAdapter::toDomain);
+    public List<Employee> findByNumber(EmployeeNumber number) {
+        return jpa.findAllByEmployeeNumber(number.value()).stream()
+                .map(EmployeeRepositoryAdapter::toDomain).toList();
     }
 
     @Override
@@ -88,9 +88,10 @@ class EmployeeRepositoryAdapter implements EmployeeRepository {
     }
 
     @Override
-    public boolean existsActiveNumber(EmployeeNumber number) {
-        return jpa.findByEmployeeNumber(number.value())
-                .filter(row -> row.getRetiredOn() == null).isPresent();
+    public boolean existsActiveNumber(EmployeeNumber number, LocalDate asOf) {
+        // ★ 在籍の判定はドメインが持つ。ここで `retired_on IS NULL` と書き直すと、
+        //   退職日を先の日付で登録した社員を「退職済み」と見なすことになる
+        return findByNumber(number).stream().anyMatch(employee -> employee.isActiveOn(asOf));
     }
 
     /**

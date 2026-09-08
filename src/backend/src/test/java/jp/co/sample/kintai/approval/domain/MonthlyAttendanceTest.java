@@ -66,7 +66,7 @@ class MonthlyAttendanceTest {
         @Test
         @DisplayName("UT-BR10-05 差戻しで下書きに戻り、打刻を受け付ける")
         void reject() {
-            var rejected = submitted().reject();
+            var rejected = submitted().reject(MANAGER);
 
             assertThat(rejected.status().state()).isEqualTo(AttendanceState.DRAFT);
             assertThat(rejected.status().acceptsTimeClock()).isTrue();
@@ -135,6 +135,18 @@ class MonthlyAttendanceTest {
          * その結果 {@code closed.reject()} は<strong>コンパイルは通る。</strong>
          * 確定値が動かないことは、この検査が守る。
          */
+        /**
+         * <strong>集約にも自己決裁の禁止を残す。</strong>
+         * アプリケーション層が先に弾くので通常はここへ来ないが、
+         * 経路の外から呼ばれたときのために置く（落とし穴 58）。
+         */
+        @Test
+        @DisplayName("UT-BR10-30 本人は自分の勤怠を差し戻せない")
+        void selfRejectionIsRejected() {
+            assertThatThrownBy(() -> submitted().reject(TARO))
+                    .isInstanceOf(MonthlyAttendance.SelfApprovalException.class);
+        }
+
         @Test
         @DisplayName("UT-BR10-08 締め済からは戻せない")
         void closedIsFinal() {
@@ -142,7 +154,7 @@ class MonthlyAttendanceTest {
 
             assertThatThrownBy(closed::revokeApproval)
                     .isInstanceOf(MonthlyAttendance.InvalidTransitionException.class);
-            assertThatThrownBy(closed::reject)
+            assertThatThrownBy(() -> closed.reject(MANAGER))
                     .isInstanceOf(MonthlyAttendance.InvalidTransitionException.class);
             assertThatThrownBy(closed::revertByCorrection)
                     .isInstanceOf(MonthlyAttendance.InvalidTransitionException.class);

@@ -150,7 +150,9 @@ public class EmployeeDirectoryService {
                                            DepartmentId departmentId,
                                            Set<Role> additionalRoles) {
         requireAdmin(requester);
-        if (employees.existsActiveNumber(number)) {
+        // ★ 基準日は今日。「退職日が入っていないこと」で見ると、
+        //   退職を先の日付で登録した社員の番号を新しい社員へ渡せてしまう
+        if (employees.existsActiveNumber(number, LocalDate.now(clock))) {
             throw new DuplicateEmployeeNumberException(number);
         }
         if (employees.existsActiveEmail(email)) {

@@ -67,9 +67,26 @@ public record MonthlyAttendance(MonthlyAttendanceId id, EmployeeId employeeId,
                 submitted.submittedBy(), submitted.submittedAt(), approvedBy, at));
     }
 
-    /** 差し戻す（承認者の判断）。理由は呼び出し側が証跡へ残す。 */
-    public MonthlyAttendance reject() {
+    /**
+     * 差し戻す（承認者の判断）。理由は呼び出し側が証跡へ残す。
+     *
+     * <p><strong>差戻しも自分では決裁できない</strong>（BR-11 の 4）。
+     * 差戻しは理由つきで {@code REJECT} として証跡に残るので、
+     * 本人に許すと<strong>誰も見ていない差戻しが
+     * 「承認者が差し戻した」証跡になる。</strong>
+     * 訂正申請と年休は承認・却下の両方で本人を弾いており、
+     * ここだけ非対称にすると同じ規則が場所によって違う振る舞いになる
+     * （落とし穴 110）。
+     *
+     * <p>アプリケーション層でも先に弾く（そちらが本来の窓口）。
+     * ここに残すのは<strong>経路の外から呼ばれたとき</strong>のためである
+     * （落とし穴 58）。
+     */
+    public MonthlyAttendance reject(EmployeeId rejectedBy) {
         requireStatus(MonthlyAttendanceStatus.Submitted.class, "差戻し");
+        if (rejectedBy.equals(employeeId)) {
+            throw new SelfApprovalException(employeeId, month);
+        }
         return withStatus(new MonthlyAttendanceStatus.Draft());
     }
 
