@@ -5,6 +5,8 @@ import { asYearMonth, type YearMonth } from './api/wallClock';
 import { AgreementAlertsScreen } from './screens/AgreementAlerts';
 import { Approvals } from './screens/Approvals';
 import { Calendar } from './screens/Calendar';
+import { CorrectionReview } from './screens/CorrectionReview';
+import { Corrections } from './screens/Corrections';
 import { Closure } from './screens/Closure';
 import { Employees } from './screens/Employees';
 import { MyMonth } from './screens/MyMonth';
@@ -23,7 +25,7 @@ import { WorkRules } from './screens/WorkRules';
  *   `APPROVER` を持たない利用者が承認の API を叩いても、サーバが 403 を返す。
  */
 type Screen =
-  | 'punch' | 'myMonth' | 'approvals'
+  | 'punch' | 'myMonth' | 'corrections' | 'approvals' | 'correctionReview'
   | 'closure' | 'workRules' | 'calendar' | 'alerts'
   | 'employees' | 'organization';
 
@@ -50,9 +52,18 @@ export function App() {
                   aria-current={screen === 'punch' ? 'page' : undefined}>打刻</button>
           <button onClick={() => setScreen('myMonth')}
                   aria-current={screen === 'myMonth' ? 'page' : undefined}>月次勤怠</button>
+          {/* ★ 訂正は本人の意思表示なので、代理申請の口を作らない */}
+          <button onClick={() => setScreen('corrections')}
+                  aria-current={screen === 'corrections' ? 'page' : undefined}>打刻訂正</button>
           {user.roles.includes('APPROVER') && (
-            <button onClick={() => setScreen('approvals')}
-                    aria-current={screen === 'approvals' ? 'page' : undefined}>承認</button>
+            <>
+              <button onClick={() => setScreen('approvals')}
+                      aria-current={screen === 'approvals' ? 'page' : undefined}>承認</button>
+              <button onClick={() => setScreen('correctionReview')}
+                      aria-current={screen === 'correctionReview' ? 'page' : undefined}>
+                訂正の審査
+              </button>
+            </>
           )}
           {/* ★ 人事の画面。出し分けは利便性であって権限ではない。
                 `HR` を持たない利用者が締めの API を叩いても、サーバが 403 を返す */}
@@ -92,7 +103,10 @@ export function App() {
       </header>
       {screen === 'punch' && <Punch user={user} />}
       {screen === 'myMonth' && <MyMonth user={user} month={month} />}
+      {/* ★ 訂正の申請と審査は月に依存しない。勤務日を直接指す */}
+      {screen === 'corrections' && <Corrections user={user} />}
       {screen === 'approvals' && <Approvals month={month} />}
+      {screen === 'correctionReview' && <CorrectionReview />}
       {screen === 'closure' && <Closure month={month} />}
       {/* ★ 就業規則は月に依存しない。系列と版の履歴を丸ごと見る画面である */}
       {screen === 'workRules' && <WorkRules />}

@@ -467,8 +467,19 @@ export interface AgreementAlerts {
 // 打刻の訂正申請（SC-04 / SC-07）
 // ---------------------------------------------------------------------------
 
-/** 訂正申請の状態。 */
-export type CorrectionStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELED';
+/**
+ * 訂正申請の状態。
+ *
+ * ★ 申請中は **`SUBMITTED`** である（`REQUESTED` ではない）。
+ *   DB の `correction_requests_status_check` がこの 4 つに限っている。
+ *   手書きの型はサーバを検査しないので、綴りを取り違えても
+ *   型検査もフロントの単体テストも通り、**状態の列が空欄になるだけ**だった
+ *   （落とし穴 143・151）。実物のバックエンドに当てて初めて出た。
+ *
+ * ★ 月次勤怠の `SUBMITTED` とは**別の状態機械**である。名前が同じだけで、
+ *   同じ型として扱わない。
+ */
+export type CorrectionStatus = 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELED';
 
 /**
  * 訂正の 1 項目。
@@ -506,16 +517,27 @@ export interface CorrectionApproval {
 }
 
 /**
- * 訂正の対象にできる打刻。
+ * 訂正の対象にできる打刻（03 API 設計書 2.3）。
  *
- * ★ 取り消された打刻も返る（BR-09 の目的が「何がどう直ったか」を示すことなので）。
+ * ★ **取り消された打刻も返る。** BR-09 の目的は「何がどう直ったか」を
+ *   利用者が確かめられることなので、有効な打刻だけを返すとその目的を果たせない。
  *   取消済みを対象にした申請は 409 になるので、画面では選ばせない。
+ *
+ * ★ `revoked` は**必ず来る**（`boolean`、省略なし）。
+ *   `?:` と書くと、画面に恒真の分岐が残り続ける。
  */
 export interface RecordedPunch {
   readonly id: string;
   readonly type: PunchType;
   readonly occurredAt: WallClockDateTime;
-  readonly revoked?: boolean;
+  readonly source: string;
+  readonly reason?: string;
+  readonly revoked: boolean;
+  readonly revocation?: {
+    readonly reason: string;
+    readonly recordedBy: string;
+    readonly recordedAt: WallClockDateTime;
+  };
 }
 
 /**

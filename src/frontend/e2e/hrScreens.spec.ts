@@ -198,3 +198,63 @@ test.describe('応答の新しさ', () => {
       await expect(page.getByRole('button', { name: '提出する' })).toBeEnabled();
     });
 });
+
+/**
+ * 打刻の訂正（SC-04 / SC-07）。
+ *
+ * ★ **「変更」という操作は無い。** 取消と追加の組み合わせで表す。
+ *   変更を許すと元の打刻の値が失われ、「何がどう直ったのか」を
+ *   利用者が確かめられなくなる（BR-09 の目的）。
+ */
+test.describe('打刻の訂正', () => {
+  const MEMBER = { number: 'E0001', password: 'correct-horse-battery' };
+  const APPROVER = { number: 'E0100', password: 'correct-horse-battery' };
+
+  /**
+   * ★ 対象の打刻は**前提データが持っている**（2026-06-01）。
+   *   ここでブラウザから打刻すると「いま」の日を消費してしまい、
+   *   当日の打刻の通し（IT-SCN-32）が「すでに退勤済み」から始まって落ちる。
+   */
+  const TARGET_DATE = '2026-06-10';
+
+  test('IT-SCN-42 打刻を取り消して入れ直す訂正を申請し、上長が承認する',
+    async ({ page }) => {
+      await signIn(page, MEMBER);
+      await page.getByRole('button', { name: '打刻訂正' }).click();
+      await page.getByLabel('勤務日').fill(TARGET_DATE);
+
+      // 退勤を取り消して 19:00 で入れ直す
+      await page.getByRole('checkbox').last().check();
+      await page.getByRole('button', { name: '打刻を追加する' }).click();
+      await page.getByLabel('追加する打刻の種別 1').selectOption('CLOCK_OUT');
+      await page.getByLabel('追加する打刻の時刻 1').fill('19:00');
+      await page.getByLabel('申請の理由（必須）').fill('退勤打刻を押し忘れました');
+      await page.getByRole('button', { name: '訂正を申請する' }).click();
+
+      await expect(page.getByText('訂正を申請しました。承認されるまで打刻は変わりません。'))
+        .toBeVisible();
+      await expect(page.getByRole('cell', { name: '申請中' })).toBeVisible();
+
+      // 上長が審査する
+      await page.context().clearCookies();
+      await signIn(page, APPROVER);
+      await page.getByRole('button', { name: '訂正の審査' }).click();
+      await page.getByRole('button', { name: '開く' }).first().click();
+
+      // ★ 承認すると月次勤怠がどうなるかを画面が伝える
+      await expect(page.getByText(/提出済みだった月は下書きへ戻ります/)).toBeVisible();
+      await page.getByRole('button', { name: '承認する' }).click();
+      await expect(page.getByText(/訂正を承認しました。/)).toBeVisible();
+    });
+
+  /** ★ 取消済みの打刻は対象に選ばせない。押せても 409 になるだけである。 */
+  test('IT-SCN-43 承認された訂正のあと、取消済みの打刻は選べないが行は残る',
+    async ({ page }) => {
+      await signIn(page, MEMBER);
+      await page.getByRole('button', { name: '打刻訂正' }).click();
+      await page.getByLabel('勤務日').fill(TARGET_DATE);
+
+      // IT-SCN-42 が取り消した打刻の行は残っており、選択できない
+      await expect(page.getByText('取消済み').first()).toBeVisible();
+    });
+});

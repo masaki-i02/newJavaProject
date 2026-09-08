@@ -27,6 +27,15 @@ const LABELS: Record<PunchType, string> = {
   CLOCK_OUT: '退勤',
 };
 
+/**
+ * 打刻の種別の表示。
+ *
+ * ★ 訂正の画面（SC-04）でも同じ言葉を使う。写すと片方だけが古くなる。
+ */
+export function punchLabel(type: PunchType): string {
+  return LABELS[type];
+}
+
 export function Punch({ user }: { user: SignedIn }) {
   const [current, setCurrent] = useState<CurrentAttendance | null>(null);
   const [problem, setProblem] = useState<Presentation | null>(null);
