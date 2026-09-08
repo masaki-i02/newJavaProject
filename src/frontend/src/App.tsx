@@ -2,10 +2,13 @@ import { useState } from 'react';
 
 import type { SignedIn } from './api/types';
 import { asYearMonth, type YearMonth } from './api/wallClock';
+import { AgreementAlertsScreen } from './screens/AgreementAlerts';
 import { Approvals } from './screens/Approvals';
 import { Calendar } from './screens/Calendar';
 import { Closure } from './screens/Closure';
+import { Employees } from './screens/Employees';
 import { MyMonth } from './screens/MyMonth';
+import { Organization } from './screens/Organization';
 import { Punch } from './screens/Punch';
 import { SignIn } from './screens/SignIn';
 import { WorkRules } from './screens/WorkRules';
@@ -19,7 +22,10 @@ import { WorkRules } from './screens/WorkRules';
  * ★ メニューの出し分けは利便性であって権限ではない（画面設計書 1.1 の原則 2）。
  *   `APPROVER` を持たない利用者が承認の API を叩いても、サーバが 403 を返す。
  */
-type Screen = 'punch' | 'myMonth' | 'approvals' | 'closure' | 'workRules' | 'calendar';
+type Screen =
+  | 'punch' | 'myMonth' | 'approvals'
+  | 'closure' | 'workRules' | 'calendar' | 'alerts'
+  | 'employees' | 'organization';
 
 export function App() {
   const [user, setUser] = useState<SignedIn | null>(null);
@@ -58,8 +64,17 @@ export function App() {
                       aria-current={screen === 'workRules' ? 'page' : undefined}>就業規則</button>
               <button onClick={() => setScreen('calendar')}
                       aria-current={screen === 'calendar' ? 'page' : undefined}>カレンダー</button>
+              <button onClick={() => setScreen('alerts')}
+                      aria-current={screen === 'alerts' ? 'page' : undefined}>36 協定</button>
             </>
           )}
+          {user.roles.includes('ADMIN') && (
+            <button onClick={() => setScreen('employees')}
+                    aria-current={screen === 'employees' ? 'page' : undefined}>社員</button>
+          )}
+          {/* ★ 組織図は誰でも開ける。見える範囲は API が絞る（画面設計書 4.7） */}
+          <button onClick={() => setScreen('organization')}
+                  aria-current={screen === 'organization' ? 'page' : undefined}>組織図</button>
           {/* ★ 空の値を検証へ渡さない。`<input type="month">` は値を消せるので、
                   そのまま渡すと同期例外で画面ごと落ちる。
                   消したときは月を変えない（前の月のまま） */}
@@ -77,6 +92,10 @@ export function App() {
       {/* ★ 就業規則は月に依存しない。系列と版の履歴を丸ごと見る画面である */}
       {screen === 'workRules' && <WorkRules />}
       {screen === 'calendar' && <Calendar month={month} />}
+      {screen === 'alerts' && <AgreementAlertsScreen month={month} />}
+      {/* ★ 社員一覧と組織図は月に依存しない */}
+      {screen === 'employees' && <Employees />}
+      {screen === 'organization' && <Organization />}
     </>
   );
 }

@@ -364,3 +364,155 @@ export interface BulkClosureResult {
   readonly closed: number;
   readonly skipped: readonly SkippedClosure[];
 }
+
+// ---------------------------------------------------------------------------
+// 社員・組織と 36 協定（SC-09 / SC-12 / SC-13 / SC-14）
+// ---------------------------------------------------------------------------
+
+/**
+ * 所属。
+ *
+ * ★ **省略ではなく `null` が来る。** `EmployeeResponse` は `version` にだけ
+ *   `@JsonInclude` を付けており、`department` と `retiredOn` の `null` は
+ *   そのまま出る（落とし穴 76）。`?:` と書くと「所属が無い」ことを
+ *   応答から読み取れなくなる。
+ */
+export interface EmployeeDepartment {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+}
+
+/**
+ * 社員（01 API 設計書 3.1）。
+ *
+ * ★ `version` は詳細だけに入る。一覧で行ごとに引くと、
+ *   社員数ぶんの問い合わせと認可判定が重複する。
+ *   更新するのは開いている 1 人だけなので、詳細を開いてから版を得る。
+ *
+ * ★ `department` が `null` なのは異常ではない。
+ *   **未来日入社の社員**は、基準日の時点でまだどこにも所属していない。
+ */
+export interface EmployeeRow {
+  readonly id: string;
+  readonly employeeNumber: string;
+  readonly name: string;
+  readonly email: string;
+  readonly hiredOn: WallClockDate;
+  readonly retiredOn: WallClockDate | null;
+  readonly roles: readonly Role[];
+  readonly department: EmployeeDepartment | null;
+  readonly version?: number;
+}
+
+export interface EmployeeList {
+  readonly employees: readonly EmployeeRow[];
+}
+
+/** 部署長。就任日を添える。 */
+export interface DepartmentManager {
+  readonly id: string;
+  readonly name: string;
+  readonly since: WallClockDate;
+}
+
+/**
+ * 部署ツリーの節（01 API 設計書 3.x）。
+ *
+ * ★ **閲覧範囲は API が絞る。** 画面は返ってきた木をそのまま描く。
+ *   画面側で絞ると、API を直接叩けば全社が見えてしまう。
+ */
+export interface DepartmentNode {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+  readonly abolishedOn: WallClockDate | null;
+  readonly manager: DepartmentManager | null;
+  readonly children: readonly DepartmentNode[];
+}
+
+export interface DepartmentTree {
+  readonly departments: readonly DepartmentNode[];
+}
+
+/**
+ * 36 協定の超過（BR-12）。
+ *
+ * ★ `subjectMinutes` に**法定休日労働は入っていない。**
+ *   限度時間（月 45 時間・年 360 時間）の対象は時間外労働だけである
+ *   （36 条 3 項・4 項。落とし穴 52）。休日労働を含めるのは 6 項 2 号・3 号という
+ *   別の規制なので、画面でも足さない。
+ */
+export interface AgreementAlert {
+  readonly employeeId: string;
+  readonly subjectMinutes: number;
+  readonly monthlyLimitMinutes: number;
+  readonly exceedsMonthly: boolean;
+  readonly annualUsedBeforeMinutes: number;
+  readonly annualLimitMinutes: number;
+  readonly exceedsAnnual: boolean;
+}
+
+export interface AgreementAlerts {
+  readonly month: YearMonth;
+  readonly alerts: readonly AgreementAlert[];
+  readonly summary: {
+    readonly monthlyExceeded: number;
+    readonly annualExceeded: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 打刻の訂正申請（SC-04 / SC-07）
+// ---------------------------------------------------------------------------
+
+/** 訂正申請の状態。 */
+export type CorrectionStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELED';
+
+/**
+ * 訂正の 1 項目。
+ *
+ * ★ **「変更」という操作は無い。** 取消（`REVOKE`）と追加（`ADD`）の
+ *   組み合わせで表す。変更を許すと元の打刻の値が失われ、
+ *   「何がどう直ったのか」を利用者が確かめられなくなる（BR-09 の目的）。
+ *
+ * ★ 判別可能ユニオンで受ける。平坦に並べると
+ *   「REVOKE なのに occurredAt がある」形を画面が作れてしまい、
+ *   サーバの検証（`correction_items_variant_check` と同じ不変条件）に弾かれる。
+ */
+export type CorrectionItem =
+  | { readonly action: 'REVOKE'; readonly targetEventId: string }
+  | {
+    readonly action: 'ADD';
+    readonly eventType: PunchType;
+    readonly occurredAt: WallClockDateTime;
+  };
+
+export interface CorrectionRequest {
+  readonly id: string;
+  readonly employeeId: string;
+  readonly workDate: WallClockDate;
+  readonly status: CorrectionStatus;
+  readonly reason: string;
+  readonly version: number;
+  readonly items: readonly CorrectionItem[];
+}
+
+/** 承認の結果。月次勤怠が下書きへ戻ったことを含む。 */
+export interface CorrectionApproval {
+  readonly request: CorrectionRequest;
+  readonly monthlyAttendanceStatus: AttendanceState;
+}
+
+/**
+ * 訂正の対象にできる打刻。
+ *
+ * ★ 取り消された打刻も返る（BR-09 の目的が「何がどう直ったか」を示すことなので）。
+ *   取消済みを対象にした申請は 409 になるので、画面では選ばせない。
+ */
+export interface RecordedPunch {
+  readonly id: string;
+  readonly type: PunchType;
+  readonly occurredAt: WallClockDateTime;
+  readonly revoked?: boolean;
+}

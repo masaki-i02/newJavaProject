@@ -47,6 +47,11 @@ export async function put<T>(path: string, body?: unknown): Promise<T> {
   return request<T>('PUT', path, body);
 }
 
+/** 一部だけを更新する（社員の氏名とメール）。 */
+export async function patch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>('PATCH', path, body);
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {
