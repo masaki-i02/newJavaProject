@@ -198,15 +198,26 @@ class CorrectionRequestController {
         }
     }
 
+    /**
+     * 訂正の 1 項目。
+     *
+     * <p><strong>{@code occurredAt} を {@code String} にしない。</strong>
+     * {@code LocalDateTime#toString} は秒が 0 のとき秒そのものを省くので、
+     * {@code 09:00:00} が {@code 09:00} になり<strong>桁数が値によって変わる</strong>
+     * （落とし穴 150）。書式は {@link jp.co.sample.kintai.config.JsonConfig} が
+     * 1 か所で決めているが、<strong>文字列で渡すとそこを通らない。</strong>
+     * フロントエンドの壁掛け時計時刻の型は秒の無い値も受けるが、
+     * 表の桁がそろわないうえ、受け取る側は必ずどちらかで取り違える。
+     */
     record CorrectionItemResponse(String action, String targetEventId, String eventType,
-                                  String occurredAt) {
+                                  LocalDateTime occurredAt) {
 
         static CorrectionItemResponse from(CorrectionItem item) {
             return switch (item) {
                 case CorrectionItem.Revoke revoke -> new CorrectionItemResponse("REVOKE",
                         revoke.targetId().value().toString(), null, null);
                 case CorrectionItem.Add add -> new CorrectionItemResponse("ADD", null,
-                        add.event().type().name(), add.occurredAt().toString());
+                        add.event().type().name(), add.occurredAt());
             };
         }
     }

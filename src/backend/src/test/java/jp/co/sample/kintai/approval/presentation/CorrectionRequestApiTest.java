@@ -683,5 +683,28 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.id").value(id))
                     .andExpect(jsonPath("$.version").value(1));
         }
+
+        /**
+         * <strong>応答の日時は秒まで返す。</strong>
+         *
+         * <p>{@code LocalDateTime#toString} は秒が 0 のとき秒そのものを省くので、
+         * {@code 19:00:00} が {@code 19:00} になり<strong>桁数が値によって変わる</strong>
+         * （落とし穴 150）。書式は {@code JsonConfig} が 1 か所で決めているが、
+         * <strong>項目を {@code String} にすると、そこを通らない。</strong>
+         *
+         * <p>この項目を読むテストが 1 件も無かったので、
+         * 変異どころか実装の誤りそのものが数か月ぶん検出されなかった（落とし穴 112）。
+         */
+        @Test
+        @DisplayName("IT-APV-96 訂正項目の日時は秒まで返る")
+        void itemTimestampHasSeconds() throws Exception {
+            var id = createRequest();
+
+            mockMvc.perform(get("/api/correction-requests/{id}", id)
+                            .with(as(yamada, "E0001", Role.EMPLOYEE)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[?(@.action=='ADD')].occurredAt")
+                            .value("2026-04-06T19:00:00"));
+        }
     }
 }
