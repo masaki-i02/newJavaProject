@@ -476,6 +476,35 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                             .formatted(retired.value())).value(true));
         }
 
+        /**
+         * <strong>代理提出の理由は DB の制約に任せない。</strong>
+         *
+         * <p>`approval_events_proxy_reason_check` が非空のコメントを要求するので、
+         * 理由なしの代理提出は制約違反になり、
+         * <strong>「他のデータと矛盾するため保存できませんでした」という
+         * 直しようのない 409</strong> が返っていた（落とし穴 66・105）。
+         *
+         * <p>本人の提出では理由が要らないので、`@NotBlank` では課せない。
+         * 代理かどうかを知っているアプリケーション層で見る。
+         */
+        @Test
+        @DisplayName("IT-APV-99 理由の無い代理提出は 422")
+        void proxySubmissionRequiresReason() throws Exception {
+            var retired = hire("E0007", "退職 七郎",
+                    Optional.of(LocalDate.of(2026, 4, 30)), Role.EMPLOYEE);
+            assignments.save(Assignment.startingAt(retired, sales, HIRED));
+            series.assign(retired, standard, HIRED);
+
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/submission",
+                            retired.value(), "2026-04")
+                            .with(as(hr, "E0900", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\":0}"))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:proxy-submission-reason-required"));
+        }
+
         private org.springframework.test.web.servlet.ResultActions detail(
                 EmployeeId target, EmployeeId viewer, String number, Role... roles)
                 throws Exception {

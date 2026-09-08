@@ -107,6 +107,19 @@ class EmployeeLifecycleApiTest extends WebIntegrationTestBase {
                 Long.class, id.value());
     }
 
+    /** その社員のその月を締め済みにする。 */
+    private void 締める(EmployeeId employeeId, String month) {
+        var at = java.time.LocalDateTime.of(2026, 5, 1, 10, 0);
+        jdbc.update("""
+                INSERT INTO monthly_attendances (id, employee_id, target_month, status,
+                        submitted_at, submitted_by, approved_by, approved_at,
+                        closed_by, closed_at)
+                VALUES (?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?)
+                """, java.util.UUID.randomUUID(), employeeId.value(),
+                java.time.YearMonth.parse(month).atDay(1),
+                at, employeeId.value(), 管理者.value(), at, 管理者.value(), at);
+    }
+
     private ResultActions 管理者として(org.springframework.test.web.servlet.request
             .MockHttpServletRequestBuilder request, String body) throws Exception {
         return mockMvc.perform(request.with(as(管理者, "E0900", Role.EMPLOYEE, Role.ADMIN))
@@ -196,6 +209,32 @@ class EmployeeLifecycleApiTest extends WebIntegrationTestBase {
         }
     }
 
+    /**
+     * <strong>期間の重複を DB の制約違反として返さない。</strong>
+     *
+     * <p>異動は「現在の所属を閉じて、新しい所属を開く」操作なので、
+     * 指定日より後に始まる所属が既にあると期間が重なる。
+     * `assignments_no_overlap` でも弾かれるが、
+     * <strong>制約違反は利用者に説明できない</strong>（落とし穴 66）。
+     * API 設計書 3.6 は `overlapping-period` を返すと書いていたのに、
+     * この型を返す実装はどこにも無かった（落とし穴 108）。
+     */
+    @Test
+    @DisplayName("IT-EMP-78 指定日以降に別の所属がある遡及異動は 409")
+    void retroactiveTransferOverlaps() throws Exception {
+        管理者として(post("/api/employees/{id}/assignments", 山田.value()), """
+                {"departmentId":"%s","validFrom":"2026-05-01"}
+                """.formatted(総務部.value()))
+                .andExpect(status().isCreated());
+
+        管理者として(post("/api/employees/{id}/assignments", 山田.value()), """
+                {"departmentId":"%s","validFrom":"2026-04-01"}
+                """.formatted(総務部.value()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type")
+                        .value("urn:kintai:error:overlapping-period"));
+    }
+
     @Nested
     @DisplayName("退職")
     class Retirement {
@@ -276,6 +315,24 @@ class EmployeeLifecycleApiTest extends WebIntegrationTestBase {
         }
 
         /** 退職していない社員の取消は 409。 */
+        /**
+         * <strong>退職と対称に守る。</strong>
+         * 取り消すと所属と部署長が退職日の翌日から開き直るので、
+         * 退職のあとに締めた月の承認者が事後的に戻る。
+         * 退職の登録だけを守っても、取消が空いていれば同じ状態を作れる。
+         */
+        @Test
+        @DisplayName("IT-EMP-76 退職月が締め済みなら退職を取り消せない")
+        void cancelRetirementIntoClosedMonth() throws Exception {
+            退職させる(山田, "2026-04-15").andExpect(status().isOk());
+            締める(山田, "2026-04");
+
+            退職を取り消す(山田)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:month-already-closed"));
+        }
+
         @Test
         @DisplayName("IT-EMP-53 退職していない社員の取消は 409")
         void notRetired() throws Exception {

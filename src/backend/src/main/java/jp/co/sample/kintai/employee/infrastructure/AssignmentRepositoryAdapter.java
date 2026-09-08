@@ -29,6 +29,12 @@ class AssignmentRepositoryAdapter implements AssignmentRepository {
     }
 
     @Override
+    public List<Assignment> findMembers(DepartmentId departmentId, LocalDate date) {
+        return jpa.findMembers(departmentId.value(), date).stream()
+                .map(AssignmentRepositoryAdapter::toDomain).toList();
+    }
+
+    @Override
     public List<Assignment> findHistory(EmployeeId employeeId) {
         return jpa.findByEmployeeIdOrderByValidFrom(employeeId.value()).stream()
                 .map(AssignmentRepositoryAdapter::toDomain).toList();

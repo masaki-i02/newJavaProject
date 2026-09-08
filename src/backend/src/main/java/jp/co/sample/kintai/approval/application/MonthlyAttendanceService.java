@@ -98,6 +98,13 @@ public class MonthlyAttendanceService {
             throw new AccessDeniedException();
         }
 
+        // ★ 代理提出は理由が必須。DB の approval_events_proxy_reason_check に
+        //   任せると、制約違反が理由の載らない応答になって人事は直しようが無い
+        //   （落とし穴 66・105）。本人の提出では要らないので @NotBlank では課せない
+        if (proxy && comment.map(String::isBlank).orElse(true)) {
+            throw new ProxySubmissionReasonRequiredException(employeeId, month);
+        }
+
         requireMonthFinished(month, today);
 
         // ★ 未計算の勤務日が残っていないかを確かめる。
@@ -546,4 +553,40 @@ public class MonthlyAttendanceService {
         }
     }
 
+
+    /**
+     * 代理提出に理由が付いていない。
+     *
+     * <p>代理提出は<strong>本人が出していない提出</strong>なので、
+     * なぜ人事が代わりに出したのかが証跡に残らなければならない
+     * （{@code approval_events_proxy_reason_check}）。
+     *
+     * <p><strong>DB の制約に任せない。</strong>
+     * 制約違反は利用者に説明できない（落とし穴 66）。
+     */
+    public static final class ProxySubmissionReasonRequiredException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        ProxySubmissionReasonRequiredException(EmployeeId employeeId, YearMonth month) {
+            super("代理提出には理由が必要です: 対象社員 %s / 対象月 %s"
+                    .formatted(employeeId.value(), month));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:proxy-submission-reason-required";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "代理提出には理由が必要です";
+        }
+    }
 }

@@ -67,6 +67,8 @@ class DepartmentApiTest extends WebIntegrationTestBase {
     private DepartmentRepository departments;
     @Autowired
     private ManagershipRepository managerships;
+    @Autowired
+    private jp.co.sample.kintai.employee.domain.AssignmentRepository assignments;
 
     private EmployeeId 山田;
     private EmployeeId 課長;
@@ -89,6 +91,19 @@ class DepartmentApiTest extends WebIntegrationTestBase {
 
         managerships.save(Managership.startingAt(本部, 本部長, HIRED));
         managerships.save(Managership.startingAt(営業部, 課長, HIRED));
+    }
+
+    /** その社員のその月を締め済みにする。承認者を動かす操作の防波堤を確かめるため。 */
+    private void 締める(EmployeeId employeeId, String month) {
+        var at = java.time.LocalDateTime.of(2026, 4, 1, 10, 0);
+        jdbc.update("""
+                INSERT INTO monthly_attendances (id, employee_id, target_month, status,
+                        submitted_at, submitted_by, approved_by, approved_at,
+                        closed_by, closed_at)
+                VALUES (?, ?, ?, 'CLOSED', ?, ?, ?, ?, ?, ?)
+                """, java.util.UUID.randomUUID(), employeeId.value(),
+                java.time.YearMonth.parse(month).atDay(1),
+                at, employeeId.value(), 管理者.value(), at, 管理者.value(), at);
     }
 
     private EmployeeId hire(String number, String name, Role... roles) {
@@ -317,6 +332,87 @@ class DepartmentApiTest extends WebIntegrationTestBase {
                     .orElseThrow().employeeId()).as("交代日の前は現任").isEqualTo(課長);
             assertThat(managerships.findEffective(営業部, LocalDate.of(2026, 5, 1))
                     .orElseThrow().employeeId()).as("交代日から新任").isEqualTo(山田);
+        }
+
+        /**
+         * <strong>所属者を残したまま廃止しない。</strong>
+         *
+         * <p>廃止しても所属行は消えないので、その社員の所属は
+         * <strong>廃止済みの部署を指したまま残る。</strong>
+         * 異動（{@code transfer}）と登録（{@code register}）は
+         * 廃止済みの部署への配属を 422 で拒むので、
+         * 「入れないのに入ったままにはできる」という非対称が残る。
+         * 先に異動させてから廃止する。
+         */
+        @Test
+        @DisplayName("IT-EMP-77 所属している社員がいる部署は廃止できない")
+        void abolishWithMembers() throws Exception {
+            // 第一課（葉）へ所属させる。営業部だと配下の部署で先に弾かれる
+            assignments.save(jp.co.sample.kintai.employee.domain.Assignment
+                    .startingAt(山田, 第一課, HIRED));
+
+            管理者として(post("/api/departments/{id}/abolition", 第一課.value()), """
+                    {"abolishedOn":"2026-05-31"}
+                    """)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:department-has-members"));
+        }
+
+        /**
+         * <strong>部署長が変われば、その部署に所属する全員の承認者が変わる。</strong>
+         *
+         * <p>異動と退職（{@code EmployeeLifecycleService}）は締め済みの月へ遡れない
+         * のに、<strong>同じ事実を動かす部署長の任命だけが素通り</strong>していた。
+         * 締め済みの月の承認者が事後的に変わると、
+         * 「誰が承認したのか」が証跡と食い違う（落とし穴 136 のクラスをまたいだ形）。
+         */
+        @Test
+        @DisplayName("IT-EMP-74 締め済みの月へ遡って部署長を任命できない")
+        void appointManagerIntoClosedMonth() throws Exception {
+            締める(山田, "2026-03");
+
+            管理者として(post("/api/departments/{id}/managerships", 営業部.value()), """
+                    {"employeeId":"%s","validFrom":"2026-03-01"}
+                    """.formatted(山田.value()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:month-already-closed"));
+        }
+
+        /** 部署の廃止は承認者の遡り（BR-11）の経路そのものを変える。 */
+        @Test
+        @DisplayName("IT-EMP-75 締め済みの月に部署を廃止できない")
+        void abolishInClosedMonth() throws Exception {
+            締める(山田, "2026-03");
+
+            管理者として(post("/api/departments/{id}/abolition", 営業部.value()), """
+                    {"abolishedOn":"2026-03-31"}
+                    """)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:month-already-closed"));
+        }
+
+        /**
+         * 任命も「現任を閉じて新しい期間を開く」操作なので、
+         * 指定日より後に始まる就任が既にあると期間が重なる。
+         * DB の排他制約に任せると、理由の載らない 409 になる（落とし穴 66）。
+         */
+        @Test
+        @DisplayName("IT-EMP-79 指定日以降に別の就任がある任命は 409")
+        void appointManagerOverlaps() throws Exception {
+            管理者として(post("/api/departments/{id}/managerships", 営業部.value()), """
+                    {"employeeId":"%s","validFrom":"2026-06-01"}
+                    """.formatted(山田.value()))
+                    .andExpect(status().isCreated());
+
+            管理者として(post("/api/departments/{id}/managerships", 営業部.value()), """
+                    {"employeeId":"%s","validFrom":"2026-05-01"}
+                    """.formatted(本部長.value()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:overlapping-period"));
         }
 
         @Test

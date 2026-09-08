@@ -177,6 +177,32 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                 """.formatted(clockOutOf(TARGET).id().value());
     }
 
+    /**
+     * <strong>追加する打刻の時刻が勤務日から離れていないかを、申請の時点で見る。</strong>
+     *
+     * <p>`time_clock_events_validate` のトリガ①は打刻時刻を
+     * 「勤務日の当日か翌日」に限っている（BR-03 の日跨ぎの幅）。
+     * 申請の時点で見ないと承認まで通り、
+     * <strong>承認者の操作が理由の載らない 500 で落ちる。</strong>
+     * PL/pgSQL の `RAISE` は制約違反ではないので Problem Details へも写らない
+     * （落とし穴 81）。しかも落ちるのは申請者ではなく承認者である。
+     */
+    @Test
+    @DisplayName("IT-APV-100 勤務日から離れた時刻を追加する申請は 422")
+    void addedPunchFarFromWorkDate() throws Exception {
+        // ★ 並びとしては正しい（退勤を取り消して、あとの時刻に退勤を足す）。
+        //   状態機械は時刻の順序しか見ないので、ここは通ってしまう
+        requestCorrection(yamada, "E0001", """
+                {"workDate":"2026-04-06","reason":"別の日の打刻を足してしまった",
+                 "items":[{"action":"REVOKE","targetEventId":"%s"},
+                          {"action":"ADD","eventType":"CLOCK_OUT",
+                           "occurredAt":"2026-04-10T19:00:00"}]}
+                """.formatted(clockOutOf(TARGET).id().value()), Role.EMPLOYEE)
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.type")
+                        .value("urn:kintai:error:punch-far-from-work-date"));
+    }
+
     private String createRequest() throws Exception {
         var response = requestCorrection(yamada, "E0001", replaceClockOutBody(),
                 Role.EMPLOYEE).andExpect(status().isCreated()).andReturn();

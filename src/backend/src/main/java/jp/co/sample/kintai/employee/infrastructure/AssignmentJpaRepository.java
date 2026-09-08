@@ -30,6 +30,21 @@ interface AssignmentJpaRepository extends JpaRepository<AssignmentEntity, UUID> 
 
     List<AssignmentEntity> findByEmployeeIdOrderByValidFrom(UUID employeeId);
 
+    /**
+     * 指定日にその部署へ所属している社員。
+     *
+     * <p>部署を廃止してよいかの判定に使う。
+     * 期間は半開区間なので、上限は {@code >} で比べる（{@link #findEffective} と同じ）。
+     */
+    @Query("""
+            select a from AssignmentEntity a
+             where a.departmentId = :departmentId
+               and a.validFrom <= :date
+               and (a.validTo is null or a.validTo > :date)
+            """)
+    List<AssignmentEntity> findMembers(@Param("departmentId") UUID departmentId,
+                                       @Param("date") LocalDate date);
+
     /** 現在開いている（上限が無い）所属。異動・退職で閉じる対象。 */
     @Query("""
             select a from AssignmentEntity a

@@ -50,4 +50,6 @@ interface ManagershipJpaRepository extends JpaRepository<ManagershipEntity, UUID
             """)
     List<ManagershipEntity> findClosedAt(@Param("employeeId") UUID employeeId,
                                          @Param("toExclusive") LocalDate toExclusive);
+
+    List<ManagershipEntity> findByDepartmentIdOrderByValidFrom(UUID departmentId);
 }

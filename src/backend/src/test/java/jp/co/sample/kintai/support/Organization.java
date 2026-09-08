@@ -251,6 +251,15 @@ public final class Organization {
             }
 
             @Override
+            public List<Assignment> findMembers(DepartmentId departmentId, LocalDate date) {
+                // ★ 判定は本番と同じく Assignment.covers に委ねる（落とし穴 37）
+                return assignments.stream()
+                        .filter(a -> a.departmentId().equals(departmentId))
+                        .filter(a -> a.covers(date))
+                        .toList();
+            }
+
+            @Override
             public List<Assignment> findHistory(EmployeeId employeeId) {
                 return assignments.stream()
                         .filter(a -> a.employeeId().equals(employeeId))
@@ -290,6 +299,14 @@ public final class Organization {
                         .filter(m -> m.departmentId().equals(departmentId))
                         .filter(m -> m.covers(date))
                         .findFirst();
+            }
+
+            @Override
+            public List<Managership> findHistory(DepartmentId departmentId) {
+                return managerships.stream()
+                        .filter(m -> m.departmentId().equals(departmentId))
+                        .sorted((x, y) -> x.period().from().compareTo(y.period().from()))
+                        .toList();
             }
 
             @Override

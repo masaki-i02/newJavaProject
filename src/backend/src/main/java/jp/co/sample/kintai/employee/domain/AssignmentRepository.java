@@ -21,6 +21,17 @@ public interface AssignmentRepository {
     /** その社員の所属の履歴。開始日の昇順。 */
     List<Assignment> findHistory(EmployeeId employeeId);
 
+    /**
+     * 指定日にその部署へ所属している社員。
+     *
+     * <p><strong>部署を廃止してよいかの判定に使う。</strong>
+     * 所属者を残したまま廃止すると、その社員の所属は
+     * <strong>廃止済みの部署を指したまま残る</strong>。
+     * 異動・登録は廃止済みの部署への配属を拒むので、
+     * 「入れないのに入ったままにはできる」という非対称が生まれる。
+     */
+    List<Assignment> findMembers(DepartmentId departmentId, LocalDate date);
+
     void save(Assignment assignment);
 
     /** 現在開いている期間を指定日で閉じる。異動・退職で使う。 */

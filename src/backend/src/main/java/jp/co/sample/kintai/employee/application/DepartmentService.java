@@ -3,6 +3,7 @@ package jp.co.sample.kintai.employee.application;
 import java.io.Serial;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +16,8 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jp.co.sample.kintai.employee.domain.Assignment;
+import jp.co.sample.kintai.employee.domain.AssignmentRepository;
 import jp.co.sample.kintai.employee.domain.Department;
 import jp.co.sample.kintai.employee.domain.DepartmentCode;
 import jp.co.sample.kintai.employee.domain.DepartmentId;
@@ -27,6 +30,7 @@ import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
 import jp.co.sample.kintai.shared.domain.DomainException;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
 import jp.co.sample.kintai.shared.domain.Requester;
 import jp.co.sample.kintai.shared.domain.Role;
 
@@ -43,14 +47,20 @@ public class DepartmentService {
     private final DepartmentRepository departments;
     private final ManagershipRepository managerships;
     private final EmployeeRepository employees;
+    private final AssignmentRepository assignments;
+    private final MonthClosureQuery monthClosure;
     private final Clock clock;
 
     public DepartmentService(DepartmentRepository departments,
                              ManagershipRepository managerships,
-                             EmployeeRepository employees, Clock clock) {
+                             EmployeeRepository employees,
+                             AssignmentRepository assignments,
+                             MonthClosureQuery monthClosure, Clock clock) {
         this.departments = departments;
         this.managerships = managerships;
         this.employees = employees;
+        this.assignments = assignments;
+        this.monthClosure = monthClosure;
         this.clock = clock;
     }
 
@@ -131,6 +141,7 @@ public class DepartmentService {
     @Transactional
     public Department abolish(Requester requester, DepartmentId id, LocalDate abolishedOn) {
         requireAdmin(requester);
+        requireMonthNotClosed(abolishedOn, "部署の廃止");
         Department current = load(id);
         List<Department> livingChildren = departments.findSelfAndDescendants(id).stream()
                 .filter(d -> !d.id().equals(id))
@@ -138,6 +149,14 @@ public class DepartmentService {
                 .toList();
         if (!livingChildren.isEmpty()) {
             throw new HasLivingChildrenException(current, livingChildren);
+        }
+        // ★ 所属者を残したまま廃止しない。所属行は廃止済みの部署を指したまま残り、
+        //   異動・登録は廃止済みの部署への配属を拒むので、
+        //   「入れないのに入ったままにはできる」という非対称が残る。
+        //   先に異動させてから廃止する
+        List<Assignment> members = assignments.findMembers(id, abolishedOn);
+        if (!members.isEmpty()) {
+            throw new HasMembersException(current, members.size());
         }
         Department abolished = current.abolish(abolishedOn);
         departments.save(abolished);
@@ -153,6 +172,7 @@ public class DepartmentService {
     public void appointManager(Requester requester, DepartmentId departmentId,
                                EmployeeId employeeId, LocalDate validFrom) {
         requireAdmin(requester);
+        requireMonthNotClosed(validFrom, "部署長の任命");
         Department department = load(departmentId);
         if (!department.isActiveOn(validFrom)) {
             throw new EmployeeDirectoryService.DepartmentAbolishedException(department);
@@ -163,6 +183,13 @@ public class DepartmentService {
         if (!employee.isActiveOn(validFrom)) {
             throw new RetiredEmployeeException(employeeId, validFrom);
         }
+        // ★ 指定日以降に既に別の就任があると、閉じてから入れても期間が重なる
+        boolean later = managerships.findHistory(departmentId).stream()
+                .anyMatch(m -> !m.period().from().isBefore(validFrom));
+        if (later) {
+            throw new EmployeeLifecycleService.OverlappingPeriodException(validFrom);
+        }
+
         managerships.close(departmentId, validFrom);
         managerships.save(Managership.startingAt(departmentId, employeeId, validFrom));
     }
@@ -378,6 +405,57 @@ public class DepartmentService {
         @Override
         public String title() {
             return "在籍していない社員は部署長にできません";
+        }
+    }
+
+    /**
+     * 締め済みの月へ遡っていないか。
+     *
+     * <p>部署長が変われば<strong>その部署に所属する全員の承認者が変わる</strong>し、
+     * 部署の廃止は承認者の遡り（BR-11）の経路そのものを変える。
+     * 確定済みの勤怠の承認者が後から変わってはいけない。
+     *
+     * <p><strong>社員 1 人の締め（{@code isClosed}）では見られない。</strong>
+     * 影響するのは呼び出し側が数え上げていない集合なので、
+     * 全社共有の表と同じ判定（{@code isClosedForAnyone}）を使う（落とし穴 72）。
+     * 異動・退職（{@code EmployeeLifecycleService}）は対象社員が 1 人に決まるので
+     * そちらは {@code isClosed} でよい。
+     *
+     * <p><strong>ここが空いていた。</strong> 異動と退職だけを守っていたので、
+     * 「部署長を過去日で交代させる」という同じ事実がもう一方の入口から素通りした
+     * （落とし穴 136 の、クラスをまたいだ形）。
+     */
+    private void requireMonthNotClosed(LocalDate date, String 操作) {
+        YearMonth month = YearMonth.from(date);
+        if (monthClosure.isClosedForAnyone(month)) {
+            throw new EmployeeLifecycleService.MonthAlreadyClosedException(month, 操作);
+        }
+    }
+
+    /** 所属者が残っている部署は廃止できない。 */
+    public static final class HasMembersException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        HasMembersException(Department department, int count) {
+            super("所属している社員がいる部署は廃止できません: %s（%d 名）"
+                    .formatted(department.name(), count));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:department-has-members";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "所属している社員がいます";
         }
     }
 }

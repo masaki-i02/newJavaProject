@@ -97,6 +97,12 @@ public class CorrectionRequestService {
             throw new PendingCorrectionExistsException(workDate);
         });
 
+        // ★ 追加する打刻が勤務日から離れていないかを、申請の時点で見る。
+        //   DB のトリガ（time_clock_events_validate ①）に任せると、承認まで通って
+        //   承認者の操作が落ちる。しかも PL/pgSQL の RAISE は制約違反ではないので
+        //   Problem Details へ写らず、理由の載らない 500 になる（落とし穴 81・66）
+        requirePunchesNearWorkDate(workDate, items);
+
         CorrectionRequest request = CorrectionRequest.submit(
                 new CorrectionRequestId(java.util.UUID.randomUUID()), employeeId,
                 workDate, items, reason, LocalDateTime.now(clock));
@@ -477,6 +483,52 @@ public class CorrectionRequestService {
         @Override
         public String title() {
             return "この訂正では打刻の順序が不正になります";
+        }
+    }
+
+    /**
+     * 追加する打刻の時刻が勤務日の当日か翌日に収まっているか（BR-03）。
+     *
+     * <p>幅が「当日か翌日」なのは、日跨ぎ勤務の退勤が翌日になるからである。
+     * それを超える時刻は、その勤務日の打刻ではない。
+     */
+    private static void requirePunchesNearWorkDate(LocalDate workDate,
+                                                   List<CorrectionItem> items) {
+        for (CorrectionItem item : items) {
+            if (!(item instanceof CorrectionItem.Add add)) {
+                continue;
+            }
+            LocalDate punchedOn = add.event().occurredAt().toLocalDate();
+            if (punchedOn.isBefore(workDate) || punchedOn.isAfter(workDate.plusDays(1))) {
+                throw new PunchFarFromWorkDateException(workDate, add.event().occurredAt());
+            }
+        }
+    }
+
+    /** 追加する打刻の時刻が勤務日から離れすぎている。 */
+    public static final class PunchFarFromWorkDateException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        PunchFarFromWorkDateException(LocalDate workDate, LocalDateTime occurredAt) {
+            super("追加する打刻の時刻が勤務日から離れています: 勤務日 %s / 打刻 %s"
+                    .formatted(workDate, occurredAt));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:punch-far-from-work-date";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "打刻の時刻が勤務日から離れています";
         }
     }
 }

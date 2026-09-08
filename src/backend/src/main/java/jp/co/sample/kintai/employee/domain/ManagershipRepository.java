@@ -20,6 +20,15 @@ public interface ManagershipRepository {
     /** その社員が指定日に長を務めている部署。兼任があるので複数返りうる。 */
     List<Managership> findByManager(EmployeeId employeeId, LocalDate date);
 
+    /**
+     * その部署の就任の履歴。
+     *
+     * <p>任命は「現任を閉じて新しい期間を開く」操作なので、
+     * <strong>指定日より後に始まる就任が既にあると期間が重なる。</strong>
+     * DB の排他制約でも弾かれるが、制約違反は利用者に説明できない（落とし穴 66）。
+     */
+    List<Managership> findHistory(DepartmentId departmentId);
+
     void save(Managership managership);
 
     void close(DepartmentId departmentId, LocalDate toExclusive);

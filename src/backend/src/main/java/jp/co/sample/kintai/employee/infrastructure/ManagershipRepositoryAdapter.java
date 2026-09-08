@@ -92,4 +92,10 @@ class ManagershipRepositoryAdapter implements ManagershipRepository {
                 new EmployeeId(entity.getEmployeeId()),
                 Periods.toRange(entity.getValidFrom(), entity.getValidTo()));
     }
+
+    @Override
+    public List<Managership> findHistory(DepartmentId departmentId) {
+        return jpa.findByDepartmentIdOrderByValidFrom(departmentId.value()).stream()
+                .map(ManagershipRepositoryAdapter::toDomain).toList();
+    }
 }

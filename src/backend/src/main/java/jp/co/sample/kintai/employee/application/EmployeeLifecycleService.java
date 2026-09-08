@@ -103,6 +103,10 @@ public class EmployeeLifecycleService {
             throw new EmployeeDirectoryService.DepartmentAbolishedException(department);
         }
         requireMonthNotClosed(id, YearMonth.from(validFrom), "異動");
+        // ★ 指定日以降に既に別の所属があると、閉じてから入れても期間が重なる。
+        //   DB の assignments_no_overlap でも弾かれるが、
+        //   制約違反は利用者に説明できない（落とし穴 66）
+        requireNoLaterAssignment(id, validFrom);
 
         assignments.close(id, validFrom);
         assignments.save(Assignment.startingAt(id, departmentId, validFrom));
@@ -158,6 +162,9 @@ public class EmployeeLifecycleService {
         Employee employee = load(id);
         LocalDate retiredOn = employee.retiredOn()
                 .orElseThrow(() -> new NotRetiredException(id));
+        // ★ 退職と対称に守る。取り消すと所属と部署長が退職日の翌日から開き直るので、
+        //   退職のあとに締めた月の承認者が事後的に戻る
+        requireMonthNotClosed(id, YearMonth.from(retiredOn), "退職の取消");
 
         var active = new Employee(employee.id(), employee.number(), employee.name(),
                 employee.email(), employee.hiredOn(), Optional.empty(), employee.roles());
@@ -208,9 +215,16 @@ public class EmployeeLifecycleService {
      *
      * <p>所属と部署長が変われば承認者が変わる。
      * <strong>確定済みの勤怠の承認者が後から変わってはいけない。</strong>
+     *
+     * <p><strong>対象社員 1 人の締めでは足りない。</strong>
+     * 異動も退職も、その社員が部署長ならば
+     * <strong>部下全員の承認者を動かす</strong>（退職は部署長の在任も閉じる・落とし穴 78）。
+     * 影響するのは呼び出し側が数え上げていない集合なので、
+     * 全社共有の表と同じ判定（{@code isClosedForAnyone}）を使う（落とし穴 72）。
+     * 部署長の任命・部署の廃止（{@code DepartmentService}）も同じ規則で守る。
      */
     private void requireMonthNotClosed(EmployeeId id, YearMonth month, String 操作) {
-        if (monthClosure.isClosed(id, month)) {
+        if (monthClosure.isClosedForAnyone(month)) {
             throw new MonthAlreadyClosedException(month, 操作);
         }
     }
@@ -364,6 +378,47 @@ public class EmployeeLifecycleService {
         @Override
         public String title() {
             return "そのロールは付与できません";
+        }
+    }
+
+    /**
+     * 指定日以降に別の所属が無いことを確かめる。
+     *
+     * <p>異動は「現在の所属を閉じて、新しい所属を開く」操作なので、
+     * <strong>指定日より後に始まる所属が既にあると期間が重なる。</strong>
+     * 遡って異動を入れ直したいときに起きる。
+     */
+    private void requireNoLaterAssignment(EmployeeId id, LocalDate validFrom) {
+        boolean later = assignments.findHistory(id).stream()
+                .anyMatch(assignment -> !assignment.period().from().isBefore(validFrom));
+        if (later) {
+            throw new OverlappingPeriodException(validFrom);
+        }
+    }
+
+    /** 指定日以降に既に別の期間がある。 */
+    public static final class OverlappingPeriodException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        OverlappingPeriodException(LocalDate validFrom) {
+            super("%s 以降に既に別の期間があります".formatted(validFrom));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:overlapping-period";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "期間が重なります";
         }
     }
 }
