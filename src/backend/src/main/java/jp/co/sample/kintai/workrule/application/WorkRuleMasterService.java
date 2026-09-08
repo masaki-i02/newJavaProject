@@ -702,6 +702,15 @@ public class WorkRuleMasterService {
      *
      * <p>固定時間制では起きない（所定は 1 日ごとに法定内へ収まる）。
      * 見るのはフレックスだけである。
+     *
+     * <p><strong>カレンダーが登録されていない月は飛ばす。</strong>
+     * 未登録の日は所定労働日として扱われる（{@code RegisteredCalendar} の既定）ので、
+     * 登録済みの範囲の先を見ると
+     * <strong>暦日すべてが所定労働日の月</strong>として数えられ、
+     * 30 日 × 8 時間 = 240 時間が総枠 171 時間を超えて<strong>必ず警告が立つ。</strong>
+     * 12 か月ぶん見る以上、登録の先へ必ず出るので、
+     * 飛ばさないと警告が雑音になって読まれなくなる（落とし穴 123 と同型で、
+     * 同じ既定値が別の式では危険側に倒れる）。
      */
     private List<ScheduleCapacityWarning> capacityWarnings(WorkRuleSpec spec,
                                                            LocalDate from) {
@@ -715,6 +724,10 @@ public class WorkRuleMasterService {
         for (int i = 0; i < 12; i++) {
             YearMonth month = first.plusMonths(i);
             DateRange whole = new DateRange(month.atDay(1), month.plusMonths(1).atDay(1));
+            if (!registered.missingDates(whole).isEmpty()) {
+                // 未登録の日を所定労働日として数えると、必ず総枠を超える
+                continue;
+            }
             int workdays = registered.workdayCountIn(whole);
             // 暦月そのものを清算期間として見る。ここは会社の規則の話であり、
             // 特定の社員の在籍期間では切らない

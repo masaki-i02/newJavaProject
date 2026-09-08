@@ -491,6 +491,6 @@ ORDER BY r.requested_at DESC, i.sequence_no;
 
 | # | 内容 | 判断の時期 |
 | --- | --- | --- |
-| 1 | 訂正申請の `work_date` と項目の `work_date` の整合を制約トリガで守るか | M1-c の実装時 |
-| 2 | 締め済みの月をやむを得ず訂正する特権操作の記録方法 | M1-c の実装時 |
-| 3 | `approval_events` と `monthly_attendances.status` の一致を制約トリガで守るか | M1-c の実装時 |
+| 1 | ~~訂正申請の `work_date` と項目の `work_date` の整合を制約トリガで守るか~~ **解決済み。トリガは置かない。型で保証されている。** 項目側の `work_date` は複合外部キーのためだけの冗長列で、ドメインの `CorrectionItem` は勤務日を持たない（勤務日は申請が持つ・落とし穴 64）。唯一の書き手が申請の `workDate` を書くので、食い違う値を作れる経路が無い | 完了 |
+| 2 | ~~締め済みの月を訂正する特権操作の記録方法~~ **解決済み。特権操作を作らないので記録も要らない**（ドメインモデル設計書 7 章 #3）| 完了 |
+| 3 | ~~`approval_events` と `monthly_attendances.status` の一致を制約トリガで守るか~~ **解決済み。トリガは置かない。** 両表の書き手はそれぞれ 1 本の INSERT で、呼ぶのは `MonthlyAttendanceService.apply` ただ 1 か所である。同じトランザクションで状態と証跡を並べて書くので構造的にずれない。DB 側は**遷移の組**だけを `approval_events_transition_check` で見る（アーキテクチャ設計書 6.5「監査証跡はアプリケーションが書く」と整合）| 完了 |

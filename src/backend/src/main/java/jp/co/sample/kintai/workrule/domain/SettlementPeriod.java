@@ -71,7 +71,17 @@ public record SettlementPeriod(YearMonth month, DateRange period) {
      * 2026-06 は所定 22 日 × 8 時間 = 10,560 分に対し、総枠は 30 ÷ 7 × 2,400 = 10,285 分である。
      *
      * <p><strong>例外にしない。</strong> 適法な状態なので登録は許し、人事に知らせるだけにする。
-     * 規則の登録・改定時とカレンダーの一括設定時に呼ぶ。
+     *
+     * <p><strong>呼ぶのは規則の登録・改定時だけである。</strong>
+     * カレンダーの一括設定でも所定労働日数は動くが、そこでは呼ばない ─
+     * 会社カレンダーは 1 つしかないので、変更は<strong>すべてのフレックス系列</strong>に
+     * 効き、全系列を舐めることになる（落とし穴 131 と同じ形）。
+     * その月に総枠を超えたことは<strong>月次清算に現れる</strong>
+     * （所定どおり働いただけで時間外が付く。IT-SCN-10）ので、
+     * 気づく経路が無くなるわけではない。
+     *
+     * <p>版 1.4 まで javadoc は「カレンダーの一括設定時にも呼ぶ」と書いていたが、
+     * <strong>呼んでいなかった</strong>（落とし穴 87）。
      */
     public Optional<ScheduleCapacityWarning> checkCapacity(
             FlextimeSystem flex, int workdayCount, Duration statutoryWeekly) {

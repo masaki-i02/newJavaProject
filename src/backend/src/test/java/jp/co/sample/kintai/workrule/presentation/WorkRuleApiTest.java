@@ -188,6 +188,29 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
          * その社員の月次清算は DDL の 2400 直書きに弾かれて
          * 永久に保存できなくなる（IT-API-46・落とし穴 126）。
          */
+        /**
+         * <strong>カレンダーが登録されていない月に警告を出さない。</strong>
+         *
+         * <p>未登録の日は所定労働日として扱われる（既定。落とし穴 123）ので、
+         * 登録の先を見ると<strong>暦日すべてが所定労働日の月</strong>として数えられ、
+         * 30 日 × 8 時間 = 240 時間が総枠 171 時間を超えて必ず警告が立つ。
+         * 12 か月ぶん見る以上、登録の先へ必ず出るので、
+         * <strong>雑音で警告そのものが読まれなくなる。</strong>
+         */
+        @Test
+        @DisplayName("IT-WR-46 カレンダー未登録の月には所定総の警告を出さない")
+        void noCapacityWarningForUnregisteredMonths() throws Exception {
+            register("""
+                    {"name": "フレックス", "validFrom": "2026-04-01",
+                     "system": {"flextime": {
+                         "flexibleStart": "07:00", "flexibleEnd": "22:00",
+                         "coreStart": "11:00", "coreEnd": "15:00",
+                         "standardDailyMinutes": 480}}}
+                    """)
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.warnings").doesNotExist());
+        }
+
         @Test
         @DisplayName("IT-WR-44 法定労働時間を送っても無視され、法定の値で登録される")
         void statutoryWorkingTimeIsNotAnInput() throws Exception {
