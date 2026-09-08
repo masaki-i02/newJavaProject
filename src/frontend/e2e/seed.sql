@@ -23,19 +23,35 @@ DELETE FROM time_clock_events
  WHERE employee_id IN ('00000000-0000-4000-8000-000000000001',
                        '00000000-0000-4000-8000-000000000100');
 
+-- ★ シナリオが作る就業規則も消す。
+--   残すと 2 回目の実行で「同じ名前の系列が 2 つ」から始まり、
+--   一覧の件数を確かめるシナリオが製品の欠陥のように見える形で落ちる
+--   （落とし穴 153 と同じ理由）。版から先に消す（外部キー）。
+DELETE FROM work_rules
+ WHERE series_id IN (SELECT id FROM work_rule_series WHERE name = 'シナリオ用規則');
+DELETE FROM work_rule_series WHERE name = 'シナリオ用規則';
+
+-- ★ シナリオが書き換える暦日を戻す。ON CONFLICT DO NOTHING では戻らない
+UPDATE company_calendars SET day_type = 'WORKDAY', name = NULL
+ WHERE calendar_date = DATE '2026-04-29';
+
 -- 一般社員と部署長
 INSERT INTO employees (id, employee_number, name, email, hired_on)
 VALUES ('00000000-0000-4000-8000-000000000001', 'E0001', '山田 太郎',
         'e0001@example.com', DATE '2026-04-01'),
        ('00000000-0000-4000-8000-000000000100', 'E0100', '佐藤 課長',
-        'e0100@example.com', DATE '2026-04-01')
+        'e0100@example.com', DATE '2026-04-01'),
+       ('00000000-0000-4000-8000-000000000900', 'E0900', '人事 花子',
+        'e0900@example.com', DATE '2026-04-01')
 ON CONFLICT DO NOTHING;
 
 -- ★ APPROVER はここに入れない。認証の時点で「その日に部署長か」から導出される。
 --   ロールとして別に持つと「部署長だがロールが無く 403」が起きる
 INSERT INTO employee_roles (employee_id, role)
 VALUES ('00000000-0000-4000-8000-000000000001', 'EMPLOYEE'),
-       ('00000000-0000-4000-8000-000000000100', 'EMPLOYEE')
+       ('00000000-0000-4000-8000-000000000100', 'EMPLOYEE'),
+       ('00000000-0000-4000-8000-000000000900', 'EMPLOYEE'),
+       ('00000000-0000-4000-8000-000000000900', 'HR')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO employee_credentials (employee_id, password_hash, password_changed_at)
@@ -43,6 +59,9 @@ VALUES ('00000000-0000-4000-8000-000000000001',
         '$2a$10$4aS6WjvHoMuNk9iAPex7uOCasl8rw.2ZJkGorqAz5BBei9O9SfTxG',
         TIMESTAMPTZ '2026-04-01 09:00:00+09'),
        ('00000000-0000-4000-8000-000000000100',
+        '$2a$10$4aS6WjvHoMuNk9iAPex7uOCasl8rw.2ZJkGorqAz5BBei9O9SfTxG',
+        TIMESTAMPTZ '2026-04-01 09:00:00+09'),
+       ('00000000-0000-4000-8000-000000000900',
         '$2a$10$4aS6WjvHoMuNk9iAPex7uOCasl8rw.2ZJkGorqAz5BBei9O9SfTxG',
         TIMESTAMPTZ '2026-04-01 09:00:00+09')
 ON CONFLICT DO NOTHING;
@@ -56,6 +75,8 @@ INSERT INTO assignments (id, employee_id, department_id, valid_from)
 VALUES (gen_random_uuid(), '00000000-0000-4000-8000-000000000001',
         '00000000-0000-4000-8000-0000000000d1', DATE '2026-04-01'),
        (gen_random_uuid(), '00000000-0000-4000-8000-000000000100',
+        '00000000-0000-4000-8000-0000000000d1', DATE '2026-04-01'),
+       (gen_random_uuid(), '00000000-0000-4000-8000-000000000900',
         '00000000-0000-4000-8000-0000000000d1', DATE '2026-04-01')
 ON CONFLICT DO NOTHING;
 
@@ -80,6 +101,8 @@ INSERT INTO work_rule_assignments (id, employee_id, work_rule_series_id, valid_f
 VALUES (gen_random_uuid(), '00000000-0000-4000-8000-000000000001',
         '00000000-0000-4000-8000-0000000000f1', DATE '2026-04-01'),
        (gen_random_uuid(), '00000000-0000-4000-8000-000000000100',
+        '00000000-0000-4000-8000-0000000000f1', DATE '2026-04-01'),
+       (gen_random_uuid(), '00000000-0000-4000-8000-000000000900',
         '00000000-0000-4000-8000-0000000000f1', DATE '2026-04-01')
 ON CONFLICT DO NOTHING;
 
