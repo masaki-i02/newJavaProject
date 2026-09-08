@@ -94,10 +94,74 @@ public class MonthlySettlementService {
      */
     @Transactional
     public MonthlySettlement settle(EmployeeId employeeId, YearMonth month) {
+        MonthlySettlement settlement = settleOnly(employeeId, month);
+        cascadeToLaterMonths(employeeId, month);
+        return settlement;
+    }
+
+    /** その月だけを清算する。<strong>後続月へ連鎖しない。</strong> */
+    private MonthlySettlement settleOnly(EmployeeId employeeId, YearMonth month) {
         SettlementPeriod period = periodOf(employeeId, month);
         MonthlySettlement settlement = calculate(employeeId, period);
         settlements.save(settlement);
         return settlement;
+    }
+
+    /**
+     * 同じ年度の後続月を計算し直す。
+     *
+     * <p><strong>年度累計は行に焼き付けてある</strong>（{@code annualUsedBefore}）。
+     * 過去月が動いたのに後続月をそのままにすると、
+     * 36 条 4 項の年 360 時間の判定が<strong>過少なまま残り続ける</strong>。
+     * 4 月が訂正で 50 時間から 80 時間に増えても、5 月以降は 50 時間として
+     * 数え続けるので、超過を取りこぼす。
+     *
+     * <p><strong>行が無い月は作らない。</strong> 行の有無は「その月に打刻があるか」を
+     * 表しており、連鎖のついでに作ると、働いていない月の行ができる。
+     *
+     * <p><strong>締め済みの月は動かさない</strong>（BR-10）。確定した値は動かせないので、
+     * 締めたあとに過去を直しても、その月の年度累計は当時のまま残る。
+     * これは締めの不可逆性から来る帰結であり、連鎖で覆してはならない。
+     */
+    private void cascadeToLaterMonths(EmployeeId employeeId, YearMonth from) {
+        YearMonth lastOfFiscalYear = YearMonth.from(
+                AgreementUsage.fiscalYearStartOf(from)).plusMonths(11);
+        for (YearMonth month = from.plusMonths(1);
+                !month.isAfter(lastOfFiscalYear); month = month.plusMonths(1)) {
+            if (settlements.find(employeeId, month).isEmpty()) {
+                continue;
+            }
+            if (monthClosure.isClosed(employeeId, month)) {
+                continue;
+            }
+            settleOnly(employeeId, month);
+        }
+    }
+
+    /**
+     * 打刻の登録を契機に計算し直す。<strong>失敗しても例外にしない。</strong>
+     *
+     * <p><strong>なぜ要るか。</strong> {@code monthly_settlements} の行は提出して初めて
+     * 作られていた。つまり<strong>進行中の月には行が無く</strong>、
+     * 36 協定の超過者一覧（BR-12）は当月について常に空を返し、
+     * 本人・上長の月次照会も 404 だった。
+     * 警告が出るのは翌月に提出したあと、すなわち
+     * <strong>45 時間・100 時間を既に超えたあと</strong>である。
+     * 「上限監視」と名のつくものが、超えるまで何も言わない状態だった。
+     *
+     * <p><strong>打刻を止めない。</strong> 就業規則の未設定・月中の制度変更などで
+     * 計算が成立しない月はある。そこで例外を投げると、働いた事実そのものが
+     * 記録されない（落とし穴 19）。打刻は成功させ、計算だけを行わない。
+     *
+     * @return 計算できたときだけ結果。できなければ空
+     */
+    @Transactional
+    public Optional<MonthlySettlement> refresh(EmployeeId employeeId, YearMonth month) {
+        try {
+            return Optional.of(settle(employeeId, month));
+        } catch (DomainException e) {
+            return Optional.empty();
+        }
     }
 
     /** 清算期間を求める。在籍していない月はここで弾く。 */

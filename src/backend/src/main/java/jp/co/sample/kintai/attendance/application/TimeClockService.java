@@ -61,6 +61,7 @@ public class TimeClockService {
     private final WorkRuleRepository workRules;
     private final CompanyCalendarRepository calendar;
     private final MonthClosureQuery monthClosure;
+    private final MonthlySettlementService settlements;
     private final Clock clock;
 
     public TimeClockService(TimeClockEventRepository timeClocks,
@@ -68,8 +69,10 @@ public class TimeClockService {
                             WorkRuleRepository workRules,
                             CompanyCalendarRepository calendar,
                             MonthClosureQuery monthClosure,
+                            MonthlySettlementService settlements,
                             Clock clock) {
         this.monthClosure = monthClosure;
+        this.settlements = settlements;
         this.timeClocks = timeClocks;
         this.dailyAttendances = dailyAttendances;
         this.workRules = workRules;
@@ -230,6 +233,11 @@ public class TimeClockService {
         DailyAttendance attendance = new DailyAttendanceCalculator(calendar)
                 .calculate(employeeId, workDate, sequence, rule.get());
         dailyAttendances.save(attendance, rule.get().id());
+        // ★ 月次も計算し直す。しないと monthly_settlements の行は提出まで作られず、
+        //   36 協定の超過者一覧（BR-12）が当月について常に空になる。
+        //   警告が出るのが「超えたあと」では監視にならない。
+        //   計算できない月（就業規則の未設定など）でも打刻は止めない（落とし穴 19）
+        settlements.refresh(employeeId, YearMonth.from(workDate));
         return PunchResult.calculated(workDate, attendance, unclosed);
     }
 

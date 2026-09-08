@@ -80,6 +80,9 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
     @Autowired
     private MonthlySettlementService settlements;
     @Autowired
+    private jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementRepository
+            settlementRepository;
+    @Autowired
     private PaidLeaveRequestService leaveRequests;
     @Autowired
     private TimeClockService timeClocks;
@@ -244,6 +247,61 @@ class MonthlySettlementServiceTest extends IntegrationTestBase {
         assertThat(counts.monthlyScheduledDays()).as("10 月の平日").isEqualTo(22);
         assertThat(counts.scheduledDays()).as("10/01〜10/15 の平日").isEqualTo(11);
         assertThat(counts.absentDays()).as("1 日も働いていない").isEqualTo(11);
+    }
+
+    /**
+     * <strong>過去月を計算し直したら、同じ年度の後続月も計算し直す。</strong>
+     *
+     * <p>年度累計は行に焼き付けてある（{@code annualUsedBefore}）。
+     * 過去月が動いたのに後続月をそのままにすると、
+     * 36 条 4 項の年 360 時間の判定が<strong>過少なまま残り続ける</strong>。
+     * 10 月が訂正で増えても 11 月は古い累計を握り続けるので、
+     * 年度の途中で上限を超えても超過として現れない。
+     *
+     * <p>設計書は「過去月を再計算したとき、同一年度の後続月 → システム（連鎖して実行）」と
+     * 書いていたが、実装も検査も無かった（落とし穴 155）。
+     */
+    @Test
+    @DisplayName("UT-BR12-12 過去月を計算し直すと、同じ年度の後続月の年度累計も追随する")
+    void recalculationCascadesToLaterMonthsInTheSameFiscalYear() {
+        YearMonth november = OCTOBER.plusMonths(1);
+        for (LocalDate date = november.atDay(1);
+                date.isBefore(november.plusMonths(1).atDay(1)); date = date.plusDays(1)) {
+            switch (date.getDayOfWeek()) {
+                case SUNDAY -> calendarRepository.save(date, DayType.LEGAL_HOLIDAY, "法定休日");
+                case SATURDAY -> calendarRepository.save(date, DayType.NON_LEGAL_HOLIDAY,
+                        "所定休日");
+                default -> calendarRepository.save(date, DayType.WORKDAY, "所定労働日");
+            }
+        }
+
+        overtimeOn(LocalDate.of(2026, 10, 5));
+        workOn(LocalDate.of(2026, 11, 4));
+
+        Duration before = settlementRepository.find(yamadaId, november).orElseThrow()
+                .agreementUsage().annualUsedBefore();
+
+        // ★ 10 月に残業をもう 1 日足す。打刻の登録が 10 月を計算し直す
+        overtimeOn(LocalDate.of(2026, 10, 6));
+
+        Duration after = settlementRepository.find(yamadaId, november).orElseThrow()
+                .agreementUsage().annualUsedBefore();
+
+        assertThat(after)
+                .as("10 月が増えたぶん、11 月が握る年度累計も増える")
+                .isGreaterThan(before);
+    }
+
+    /** 本人として 9:00–22:00（休憩 1 時間）を打刻する。時間外 4 時間。 */
+    private void overtimeOn(LocalDate date) {
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.CLOCK_IN,
+                Optional.of(date.atTime(9, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.BREAK_START,
+                Optional.of(date.atTime(12, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.BREAK_END,
+                Optional.of(date.atTime(13, 0)));
+        timeClocks.punch(yamada, yamadaId, TimeClockEvent.Type.CLOCK_OUT,
+                Optional.of(date.atTime(22, 0)));
     }
 
     /** 本人として 9:00–18:00（休憩 1 時間）を打刻する。 */

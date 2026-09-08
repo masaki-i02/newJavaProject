@@ -52,6 +52,9 @@ class TimeClockApiTest extends WebIntegrationTestBase {
     private WorkRuleSeriesRepository series;
     @Autowired
     private WorkRuleRepository workRules;
+    @Autowired
+    private jp.co.sample.kintai.attendance.domain.monthly.MonthlySettlementRepository
+            settlements;
 
     private EmployeeId taro;
 
@@ -86,6 +89,38 @@ class TimeClockApiTest extends WebIntegrationTestBase {
     @Nested
     @DisplayName("打刻")
     class Punch {
+
+        /**
+         * <strong>退勤まで打つと、その月の月次清算がその場で作られる。</strong>
+         *
+         * <p>かつては {@code monthly_settlements} の行が<strong>提出して初めて</strong>
+         * 作られていた。つまり進行中の月には行が無く、
+         * 36 協定の超過者一覧（BR-12）は当月について常に空を返し、
+         * 本人・上長の月次照会も 404 だった。
+         * <strong>警告が出るのは翌月に提出したあと</strong>、すなわち
+         * 45 時間・100 時間を既に超えたあとである。
+         * 「上限監視」と名のつくものが、超えるまで何も言わない状態だった。
+         */
+        @Test
+        @DisplayName("IT-ATT-36 退勤まで打つと、提出前でもその月の月次清算が作られる")
+        void punchRefreshesTheMonthlySettlement() throws Exception {
+            assertThat(settlements.find(taro, java.time.YearMonth.of(2026, 4)))
+                    .as("前提：まだ何も打っていないので行は無い")
+                    .isEmpty();
+
+            punch("CLOCK_IN", "2026-04-06T09:00:00").andExpect(status().isCreated());
+            assertThat(settlements.find(taro, java.time.YearMonth.of(2026, 4)))
+                    .as("出勤しただけでは日次が確定しないので、まだ作らない")
+                    .isEmpty();
+
+            punch("CLOCK_OUT", "2026-04-06T18:00:00").andExpect(status().isCreated());
+
+            assertThat(settlements.find(taro, java.time.YearMonth.of(2026, 4)))
+                    .as("提出していなくても、当月の実績が読める状態になっている")
+                    .isPresent()
+                    .hasValueSatisfying(settlement -> assertThat(
+                            settlement.workingTime()).isEqualTo(Duration.ofHours(9)));
+        }
 
         @Test
         @DisplayName("IT-API-01 出勤打刻は 201 を返し、退勤前は集計を返さない")
