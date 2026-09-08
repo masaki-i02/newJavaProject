@@ -31,6 +31,7 @@
 | `Dockerfile` のビルド | **未検証。** 開発に使っている環境からコンテナレジストリ（Docker Hub の blob 配信）へ到達できず、ベースイメージを取得できない |
 | `docker compose -f docker-compose.prod.yml up` の通し | **未検証。** 同上 |
 | バックアップ → 破棄 → リストアの実測 | **未検証。** コンテナを起動できないため |
+| **CI（`.github/workflows/verify.yml`）の実行** | **未検証。** この環境から GitHub Actions を実行できない。**各段の中身は手元で同じコマンドを流して確かめてある**（`./gradlew test` / `npm run typecheck` / `npm test` / 生成器 3 本 + 差分無し）が、ランナーの上で走ったところは見ていない。最初の 1 回は結果を見て直すこと |
 | 死活監視の口 | **検証済み**（`ActuatorAccessTest` の IT-OPS-01〜04）|
 | 本番プロファイルが既定値へ落ちないこと | **検証済み**（`ProdProfileTest` の IT-OPS-05〜07）|
 

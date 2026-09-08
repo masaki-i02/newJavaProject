@@ -1,0 +1,98 @@
+# 検証の自動化。
+#
+# ★ ここに置く手順は、開発者が手元で実行しているものと同じにする。
+#   CI だけが知っている手順を増やすと、手元で緑なのに CI で落ちる（逆も同じ）。
+#
+# ★ この定義は、この環境から GitHub Actions を実行できないため
+#   **一度も走ったところを確認できていない**（doc/08_運用/README.md の未検証の一覧）。
+#   最初の 1 回は結果を見て直すこと。
+name: verify
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# 同じブランチへ続けて push したら、古い実行は止める
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ★ ロケールを UTF-8 に固定する。POSIX / C だと ArchUnit と JUnit の
+  #   レポート書き出しが「Malformed input」で落ちる（CLAUDE.md 落とし穴 29・129）
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+
+jobs:
+  backend:
+    name: バックエンド（テスト 1000 件超・実物の PostgreSQL）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      # ★ H2 を使わない（落とし穴 6）。Testcontainers が postgres:16-alpine を起動する。
+      #   ubuntu-latest には Docker があるので、追加の service は要らない
+      - name: test
+        working-directory: src/backend
+        run: ./gradlew test --no-daemon
+      - name: テストレポートを残す
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report
+          path: src/backend/build/reports/tests/test
+          if-no-files-found: ignore
+
+  frontend:
+    name: フロントエンド（型検査と単体テスト）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - name: install
+        working-directory: src/frontend
+        run: npm ci
+      # ★ 型検査を別の段にする。テストだけだと、画面が読まない項目の
+      #   型の食い違いが素通りする（落とし穴 143）
+      - name: typecheck
+        working-directory: src/frontend
+        run: npm run typecheck
+      - name: test
+        working-directory: src/frontend
+        run: npm test
+
+  docs:
+    name: 設計書と実装の突き合わせ
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # ★ 生成物は設計書を正とする（CLAUDE.md 4.1）。
+      #   生成し直して差分が出たら、設計書だけを直して生成し忘れている
+      - name: テストケース一覧を生成して突き合わせる
+        working-directory: doc/_tools
+        run: python3 collect-tests.py
+      - name: 設計書の API 一覧と実装の経路を突き合わせる
+        working-directory: doc/_tools
+        run: python3 check-endpoints.py
+      - name: マイグレーションを生成する
+        working-directory: doc/_tools
+        run: python3 build-migrations.py
+      - name: 生成物に差分が無いことを確かめる
+        run: |
+          if ! git diff --exit-code -- doc src/backend/src/main/resources/db/migration; then
+            echo '::error::生成物が設計書と一致していません。' \
+                 'doc/_tools の生成器を実行してからコミットしてください'
+            exit 1
+          fi
