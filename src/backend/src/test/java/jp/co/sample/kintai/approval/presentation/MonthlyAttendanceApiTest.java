@@ -165,8 +165,9 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         timeClocks.append(yamada, workDate,
                 new TimeClockEvent.ClockOut(workDate.atTime(17, 0)), yamada);
         WorkRule rule = workRules.findEffective(yamada, workDate).orElseThrow();
-        dailyAttendances.save(yamada, new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, timeClocks.findByWorkDate(yamada, workDate), rule),
+        dailyAttendances.save(new DailyAttendanceCalculator(calendar)
+                .calculate(yamada, workDate, timeClocks.findByWorkDate(yamada, workDate),
+                        rule),
                 rule.id());
     }
 
@@ -685,8 +686,8 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         @Test
         @DisplayName("IT-APV-45 未計算の勤務日があると提出できず、その日付が返る")
         void incompleteDays() throws Exception {
-            dailyAttendances.save(yamada, new DailyAttendanceCalculator(calendar)
-                    .calculate(LocalDate.of(2026, 4, 1),
+            dailyAttendances.save(new DailyAttendanceCalculator(calendar)
+                    .calculate(yamada, LocalDate.of(2026, 4, 1),
                             timeClocks.findByWorkDate(yamada, LocalDate.of(2026, 4, 1)),
                             workRules.findEffective(yamada, LocalDate.of(2026, 4, 1))
                                     .orElseThrow()),

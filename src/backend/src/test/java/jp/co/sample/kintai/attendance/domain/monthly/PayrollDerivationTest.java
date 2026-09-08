@@ -39,7 +39,7 @@ class PayrollDerivationTest {
     private static final DateRange EMPLOYED = DateRange.startingAt(LocalDate.of(2020, 4, 1));
 
     private final TestCalendar calendar = TestCalendar.allWorkdays();
-    private final DailyAttendances daily = new DailyAttendances(calendar);
+    private final DailyAttendances daily = new DailyAttendances(calendar, TARO);
     private final MonthlySettlementCalculator calculator =
             new MonthlySettlementCalculator(calendar);
 

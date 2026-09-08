@@ -39,9 +39,11 @@ import jp.co.sample.kintai.support.TestCalendar;
 class AttendanceRateCalculatorTest {
 
     private static final LocalDate FROM = LocalDate.of(2026, 4, 1);
+    private static final EmployeeId ANYONE =
+            new EmployeeId(java.util.UUID.randomUUID());
 
     private final TestCalendar calendar = TestCalendar.allWorkdays();
-    private final DailyAttendances days = new DailyAttendances(calendar);
+    private final DailyAttendances days = new DailyAttendances(calendar, ANYONE);
 
     /**
      * 年休を取得した日は出勤日に数える（39 条 10 項）。

@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -40,6 +41,7 @@ import jp.co.sample.kintai.workrule.domain.RegisteredCalendar;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.SettlementPeriod;
 import jp.co.sample.kintai.workrule.domain.WorkRule;
+import jp.co.sample.kintai.workrule.domain.WorkRuleId;
 import jp.co.sample.kintai.workrule.domain.WorkRuleRepository;
 import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 
@@ -87,8 +89,8 @@ public class MonthlySettlementService {
     /**
      * 清算して保存する。
      *
-     * <p>適用する就業規則は<strong>清算期間の末日時点の版</strong>を使う。
-     * 月中に改定された場合の日ごとの切り替えは未実装である（UT-BR05-19）。
+     * <p>適用する就業規則は<strong>清算期間を通じて 1 つ</strong>である。
+     * 割れていたら計算せずに拒む（{@link #singleWorkRuleOf}）。
      */
     @Transactional
     public MonthlySettlement settle(EmployeeId employeeId, YearMonth month) {
@@ -113,9 +115,7 @@ public class MonthlySettlementService {
      * 契機ごとに計算を分けると、片方だけを直した状態が生まれる。
      */
     private MonthlySettlement calculate(EmployeeId employeeId, SettlementPeriod period) {
-        LocalDate lastDay = period.period().toExclusive().minusDays(1);
-        WorkRule workRule = workRules.findEffective(employeeId, lastDay)
-                .orElseThrow(() -> new WorkRuleNotAssignedException(employeeId, lastDay));
+        WorkRule workRule = singleWorkRuleOf(employeeId, period);
 
         DateRange scanRange = WeeklyOvertimeRule.scanRangeFor(period.period());
         List<DailyAttendance> days = dailyAttendances.findByPeriod(employeeId, scanRange);
@@ -278,11 +278,16 @@ public class MonthlySettlementService {
             return false;
         }
         // ★ 提出は月次清算を計算し直すので、それが落ちる条件も「提出できない」である。
-        //   計算が引くのは清算期間の末日の版だけ（calculate）なので、そこにそろえる。
-        //   「全日に版がある」を要求すると、実際には提出できる社員に
-        //   「規則を適用せよ」と案内することになる（落とし穴 67）
-        LocalDate lastDay = period.period().toExclusive().minusDays(1);
-        return workRules.findEffective(employeeId, lastDay).isPresent();
+        //   判定を写さず、計算が実際に呼ぶ解決をそのまま通す（落とし穴 67）。
+        //   捕まえるのは singleWorkRuleOf が投げうる 3 つだけで、
+        //   他の例外は「提出できない」ではなく本当の失敗なので伝播させる
+        try {
+            singleWorkRuleOf(employeeId, period);
+            return true;
+        } catch (WorkRuleNotAssignedException | WorkingTimeSystemChangedMidMonthException
+                | WorkRuleRevisedMidMonthException expected) {
+            return false;
+        }
     }
 
     @Transactional(readOnly = true)
@@ -411,7 +416,6 @@ public class MonthlySettlementService {
         }
         SettlementPeriod period = periodOf(employeeId, month);
         requireAllDaysCalculated(employeeId, period);
-        requireSingleWorkingTimeSystem(employeeId, period);
 
         MonthlySettlement settlement = calculate(employeeId, period);
         settlements.save(settlement, expectedVersion);
@@ -464,22 +468,52 @@ public class MonthlySettlementService {
     }
 
     /**
-     * 月の途中で労働時間制度が変わっていないか。
+     * 清算期間を通じて適用されている、ただ 1 つの版を返す。
      *
-     * <p><strong>「制度の変更」と「規則の改定」を区別する。</strong>
-     * 就業規則の版が月中で変わるのは正常な運用なので拒否しない（ADR 0003）。
-     * 拒否するのは固定時間制 ⇄ フレックスの切り替えだけで、
-     * これは適用開始日が月初日か入社日に限られる以上、起きないはずのものである。
+     * <p><strong>末日の版だけを引かない。</strong>
+     * 月次清算は所定総労働時間・不足時間・法定総枠のどれもを 1 つの版から求めるので、
+     * 期間の中で版が割れていると<strong>片方の版の値だけで 1 か月を計算する。</strong>
+     * 賃金がずれるうえ、どちらの版で計算したのかが結果から読み取れない。
+     *
+     * <p><strong>端の 2 点ではなく、期間の全日を見る</strong>（落とし穴 136）。
+     * 適用が月中で途切れて再開した月は、両端だけを見ると同じ版で一致する。
+     *
+     * <p><strong>版が割れていること自体は拒まない。</strong>
+     * 深夜帯や割増率だけを月中から変える改定は正常な運用であり（ADR 0003・IT-SCN-09）、
+     * 日次計算は日ごとに版を引いて正しく扱っている。
+     * 月次に効くのは所定労働時間・法定労働時間・労働時間制度だけなので、
+     * <strong>そこが割れている場合に限って</strong>拒む。
+     *
+     * <p>その組み合わせは {@code WorkRuleMasterService} が改定の時点で拒んでいる。
+     * ここは<strong>経路の外から作られた状態に対する最後の防波堤</strong>である
+     * （落とし穴 58）。
      */
-    private void requireSingleWorkingTimeSystem(EmployeeId employeeId,
-                                                SettlementPeriod period) {
-        Set<WorkingTimeSystemType> systems = workRules
-                .findEffectiveByPeriod(employeeId, period.period()).values().stream()
-                .map(WorkRule::systemType)
-                .collect(Collectors.toSet());
+    private WorkRule singleWorkRuleOf(EmployeeId employeeId, SettlementPeriod period) {
+        Map<LocalDate, WorkRule> byDate =
+                workRules.findEffectiveByPeriod(employeeId, period.period());
+        // 規則の引けない日はキーごと現れない。1 日でも欠けていれば計算できない
+        for (LocalDate date = period.period().from();
+                date.isBefore(period.period().toExclusive()); date = date.plusDays(1)) {
+            if (!byDate.containsKey(date)) {
+                throw new WorkRuleNotAssignedException(employeeId, date);
+            }
+        }
+        Set<WorkingTimeSystemType> systems = byDate.values().stream()
+                .map(WorkRule::systemType).collect(Collectors.toSet());
         if (systems.size() > 1) {
+            // 制度の切り替えは別のエラーにする。利用者への案内がまったく違う
             throw new WorkingTimeSystemChangedMidMonthException(period.month(), systems);
         }
+        // 月中の改定そのものは正常な運用である（ADR 0003）。
+        // 効くのは所定・法定労働時間・制度が割れているかどうかだけ
+        WorkRule first = byDate.get(period.period().from());
+        List<WorkRuleId> differing = byDate.values().stream()
+                .filter(rule -> !first.hasSameMonthlyBasisAs(rule))
+                .map(WorkRule::id).distinct().toList();
+        if (!differing.isEmpty()) {
+            throw new WorkRuleRevisedMidMonthException(period.month(), differing);
+        }
+        return first;
     }
 
     /** 社員が見つからない。 */
@@ -641,10 +675,9 @@ public class MonthlySettlementService {
     /**
      * 月の途中で労働時間制度が変わっている。
      *
-     * <p><strong>就業規則の「改定」とは違う。</strong>
-     * 版の改定は月中に起きる正常な運用であり、日ごとに版を引いて計算する。
-     * 固定時間制 ⇄ フレックスの切り替えは適用開始日が月初日か入社日に限られるので、
-     * 月中で割れているならデータが壊れている。
+     * <p><strong>版の改定（{@link WorkRuleRevisedMidMonthException}）とは別に扱う。</strong>
+     * 制度が変わると所定の数え方そのものが変わるので、
+     * 人事が直すべき対象も案内も違う。
      */
     public static final class WorkingTimeSystemChangedMidMonthException
             extends DomainException {
@@ -671,6 +704,44 @@ public class MonthlySettlementService {
         @Override
         public String title() {
             return "月の途中で労働時間制度が変わっています";
+        }
+    }
+
+    /**
+     * 月の途中で、月次清算に効く値が変わっている。
+     *
+     * <p>月次清算は<strong>1 つの版で 1 か月を計算する。</strong>
+     * 所定総労働時間も不足時間も法定総枠も、清算期間を通じた 1 つの所定から求まる。
+     * 所定の割れた月をどちらかの版で計算すると、
+     * <strong>もう片方の期間の所定が結果のどこにも現れない。</strong>
+     *
+     * <p>深夜帯や割増率だけを変えた改定では起きない。
+     * 所定を変える改定は月初日からに限っているので、通常の運用では起きない。
+     */
+    public static final class WorkRuleRevisedMidMonthException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        WorkRuleRevisedMidMonthException(YearMonth month, List<WorkRuleId> versions) {
+            super("月の途中で所定労働時間が変わっています: 対象月 %s / 版 %s"
+                    .formatted(month, versions.stream()
+                            .map(id -> id.value().toString()).toList()));
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:work-rule-revised-mid-month";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "月の途中で所定労働時間が変わっています";
         }
     }
 }

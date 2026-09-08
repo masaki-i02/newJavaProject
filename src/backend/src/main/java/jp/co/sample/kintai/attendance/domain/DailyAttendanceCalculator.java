@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
 
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.shared.domain.TimeRange;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
@@ -33,9 +34,15 @@ public final class DailyAttendanceCalculator {
         this.calendar = calendar;
     }
 
-    public DailyAttendance calculate(LocalDate workDate, TimeClockSequence punches,
-                                     WorkRule workRule) {
-        if (workDate == null || punches == null || workRule == null) {
+    /**
+     * 集計する。
+     *
+     * @param employeeId 誰の 1 日か。<strong>結果に持たせる</strong>ので引数で受け取る
+     *                   （落とし穴 42：「誰の」を受け取らない解決関数を作らない）
+     */
+    public DailyAttendance calculate(EmployeeId employeeId, LocalDate workDate,
+                                     TimeClockSequence punches, WorkRule workRule) {
+        if (employeeId == null || workDate == null || punches == null || workRule == null) {
             throw new IllegalArgumentException("日次集計の引数に null は許されません");
         }
         requireRuleCoversWorkDate(workDate, workRule);
@@ -43,7 +50,7 @@ public final class DailyAttendanceCalculator {
         DayType workDayType = calendar.dayTypeOf(workDate);
 
         if (punches.isEmpty()) {
-            return DailyAttendance.absent(workDate, workDayType, systemType);
+            return DailyAttendance.absent(employeeId, workDate, workDayType, systemType);
         }
 
         requireWorkDateMatchesPunches(workDate, punches.clockedInAt().orElseThrow());
@@ -53,7 +60,7 @@ public final class DailyAttendanceCalculator {
         if (span.isEmpty()) {
             // 出勤と退勤が同一時刻。打刻は記録されているが、働いた時間は 0 分である。
             // 集計値はすべて 0 になるので、欠勤と同じ形で返す
-            return DailyAttendance.absent(workDate, workDayType, systemType);
+            return DailyAttendance.absent(employeeId, workDate, workDayType, systemType);
         }
         List<WorkSlice> slices = worked.stream().map(WorkSlice::plain).toList();
         for (AttendanceRule rule : rulesFor(workRule, workDayType)) {
@@ -61,7 +68,7 @@ public final class DailyAttendanceCalculator {
         }
 
         Duration workingTime = sum(slices, slice -> true);
-        return new DailyAttendance(workDate, workDayType, systemType, slices,
+        return new DailyAttendance(employeeId, workDate, workDayType, systemType, slices,
                 workingTime,
                 breakTimeOf(span.orElseThrow(), worked),
                 sum(slices, slice -> slice.premiums().stream()

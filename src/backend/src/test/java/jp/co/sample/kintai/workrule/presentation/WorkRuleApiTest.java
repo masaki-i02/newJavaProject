@@ -276,6 +276,35 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:overlapping-period"));
         }
 
+        /**
+         * <strong>月の途中から所定を変えられない。</strong>
+         * 月次清算は 1 か月を 1 つの版で計算するので、所定が月中で割れると
+         * 所定総労働時間も不足時間も片方の版の値だけで求まる。
+         *
+         * <p>ここで拒まないと、その月は提出も承認も締めもできなくなり、
+         * 規則を戻す以外に出口が無くなる（落とし穴 26・93）。
+         */
+        @Test
+        @DisplayName("IT-WR-42 月中の改定で所定労働時間を変えると 422")
+        void midMonthRevisionChangingScheduledTime() throws Exception {
+            revise(0, "2026-10-15", "17:30")
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.type")
+                            .value("urn:kintai:error:monthly-basis-changed-mid-month"));
+        }
+
+        /**
+         * <strong>月中の改定そのものは禁じない。</strong>
+         * 所定を変えなければ月次の計算は変わらないので、通す。
+         * 一律に拒むと、深夜帯の誤りを月中に直せなくなる（IT-SCN-09）。
+         */
+        @Test
+        @DisplayName("IT-WR-43 所定を変えない月中の改定は通る")
+        void midMonthRevisionKeepingScheduledTime() throws Exception {
+            revise(0, "2026-10-15", "18:00")
+                    .andExpect(status().isCreated());
+        }
+
         @Test
         @DisplayName("IT-WR-35 存在しない系列の改定は 404")
         void unknownSeries() throws Exception {

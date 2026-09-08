@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceCalculator;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
@@ -34,6 +36,7 @@ class HolidayCarryOverRuleTest {
     /** 2026-05-03 は日曜（法定休日）、5-04 は月曜（所定労働日）。 */
     private static final LocalDate SUNDAY = LocalDate.of(2026, 5, 3);
     private static final LocalDate MONDAY = LocalDate.of(2026, 5, 4);
+    private static final EmployeeId TARO = new EmployeeId(UUID.randomUUID());
 
     private final TestCalendar calendar = TestCalendar.allWorkdays().legalHoliday(SUNDAY);
     private final DailyAttendanceCalculator daily = new DailyAttendanceCalculator(calendar);
@@ -43,7 +46,7 @@ class HolidayCarryOverRuleTest {
     private DailyAttendance day(LocalDate workDate, TimeClockSequence punches,
                                 WorkingTimeSystem system) {
         WorkRule workRule = WorkRules.rule(system);
-        return daily.calculate(workDate, punches, workRule);
+        return daily.calculate(TARO, workDate, punches, workRule);
     }
 
     /** 日曜（法定休日）22:00 → 月曜 06:00。0 時以降の 6 時間が持ち越される。 */

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import jp.co.sample.kintai.shared.domain.PremiumType;
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
@@ -25,6 +26,8 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
 class DailyAttendanceCalculatorTest {
 
     private static final LocalDate MON = LocalDate.of(2026, 4, 6);
+    private static final EmployeeId TARO =
+            new EmployeeId(java.util.UUID.randomUUID());
     private static final LocalDate TUE = LocalDate.of(2026, 4, 7);
     private static final LocalDate SAT = LocalDate.of(2026, 4, 4);
     private static final LocalDate SUN = LocalDate.of(2026, 4, 5);
@@ -32,7 +35,7 @@ class DailyAttendanceCalculatorTest {
     private DailyAttendance calculate(LocalDate workDate, Punches punches,
                                       WorkRule rule, TestCalendar calendar) {
         return new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, punches.build(), rule);
+                .calculate(TARO, workDate, punches.build(), rule);
     }
 
     private DailyAttendance calculate(LocalDate workDate, Punches punches, WorkRule rule) {
@@ -673,7 +676,7 @@ class DailyAttendanceCalculatorTest {
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
         // 実労働 8 時間に対して内訳の合計が 7 時間しかない
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(7), Duration.ZERO, Duration.ZERO,
@@ -699,7 +702,7 @@ class DailyAttendanceCalculatorTest {
         var slices = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(8), Duration.ZERO, Duration.ZERO,
@@ -720,7 +723,7 @@ class DailyAttendanceCalculatorTest {
         var slices = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(6), Duration.ZERO, Duration.ZERO,
@@ -735,7 +738,7 @@ class DailyAttendanceCalculatorTest {
         var slices = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
                 Duration.ofHours(6), Duration.ZERO, Duration.ofHours(2),
@@ -762,7 +765,7 @@ class DailyAttendanceCalculatorTest {
                         java.time.LocalDateTime.parse("2026-04-06T11:00"),
                         java.time.LocalDateTime.parse("2026-04-06T14:00"))));
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, overlapping,
                 Duration.ofHours(6), Duration.ZERO,
                 Duration.ofHours(6), Duration.ZERO, Duration.ZERO,
@@ -778,7 +781,7 @@ class DailyAttendanceCalculatorTest {
         var slices = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, DayType.WORKDAY,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ofMinutes(-1),
                 Duration.ofHours(8), Duration.ZERO, Duration.ZERO,
@@ -793,7 +796,7 @@ class DailyAttendanceCalculatorTest {
         var slices = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("17:00"), fixedRule()).slices();
 
-        assertThatThrownBy(() -> new DailyAttendance(MON,
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON,
                 DayType.WORKDAY,
                 WorkingTimeSystemType.FIXED, slices,
                 Duration.ofHours(8), Duration.ZERO,
@@ -803,13 +806,37 @@ class DailyAttendanceCalculatorTest {
                 .hasMessageContaining("法定内残業の集計値が内訳と一致しません");
     }
 
+    /**
+     * <strong>DB から復元する経路には暦日境界での分割の保証が無い。</strong>
+     * 内訳は追記専用の表からそのまま読み直すので、
+     * 分割前の区間が入っていても合計は一致し、他の検査はどれも通る。
+     * またぐ区間が 1 つでも混ざると、法定休日労働と通算が
+     * 8 時間まるごとを開始日のものとして数える。
+     */
+    @Test
+    @DisplayName("UT-ATT-44 暦日をまたぐ区間を含む日次勤怠は生成できない")
+    void slicesCrossingCalendarDayAreRejected() {
+        var crossing = jp.co.sample.kintai.attendance.domain.WorkSlice.plain(
+                new jp.co.sample.kintai.shared.domain.TimeRange(
+                        java.time.LocalDateTime.parse("2026-04-04T22:00"),
+                        java.time.LocalDateTime.parse("2026-04-05T06:00")));
+
+        assertThatThrownBy(() -> new DailyAttendance(TARO, SAT, DayType.WORKDAY,
+                WorkingTimeSystemType.FLEX, java.util.List.of(crossing),
+                Duration.ofHours(8), Duration.ZERO,
+                Duration.ofHours(8), Duration.ZERO, Duration.ZERO,
+                Duration.ZERO, Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("内訳の区間が暦日をまたいでいます");
+    }
+
     @Test
     @DisplayName("フレックスに日次の残業を持たせた値では生成できない")
     void flexWithDailyOvertimeIsRejected() {
         var attendance = calculate(MON, Punches.on("2026-04-06")
                 .in("09:00").out("19:00"), WorkRules.fixedRule());
 
-        assertThatThrownBy(() -> new DailyAttendance(MON, attendance.dayType(),
+        assertThatThrownBy(() -> new DailyAttendance(TARO, MON, attendance.dayType(),
                 WorkingTimeSystemType.FLEX,
                 attendance.slices(), attendance.workingTime(), attendance.breakTime(),
                 attendance.baseTime(), attendance.overtimeWithinStatutoryTime(),

@@ -63,6 +63,41 @@ public record WorkRule(WorkRuleId id, WorkRuleSeriesId seriesId, DateRange valid
     }
 
     /**
+     * <strong>月次清算に効く部分</strong>だけを取り出した、比較用の版。
+     *
+     * <p>月次清算は 1 か月を 1 つの版で計算する。
+     * 使うのは制度（所定・コアタイム）と法定労働時間だけで、
+     * <strong>深夜帯と割増率は日次と給与の側にしか効かない。</strong>
+     * だから深夜帯だけを変える改定は月中に入れてよく、
+     * 所定を変える改定は入れてはいけない。
+     *
+     * <p><strong>「効かない項目の一覧」ではなく「効かない項目を潰した版」で比べる。</strong>
+     * 項目名を並べた比較にすると、{@code WorkRule} に項目が増えたときに
+     * 月次が使い始めても気づけない。この形なら
+     * <strong>正準コンストラクタの引数が増えてコンパイルが落ちる</strong>ので、
+     * 足した人がどちらなのかを決めることになる（落とし穴 87）。
+     */
+    private WorkRule monthlyBasis() {
+        return new WorkRule(id, seriesId, validPeriod, workingTimeSystem,
+                statutoryDailyWorkingTime, statutoryWeeklyWorkingTime,
+                NightWindow.STANDARD, PremiumRates.STATUTORY);
+    }
+
+    /**
+     * 月次清算に効く部分が {@code other} と同じか。
+     *
+     * <p>識別子・系列・有効期間は<strong>版ごとに必ず違う</strong>ので比較から外す。
+     */
+    public boolean hasSameMonthlyBasisAs(WorkRule other) {
+        WorkRule mine = monthlyBasis();
+        WorkRule theirs = new WorkRule(id, seriesId, validPeriod,
+                other.workingTimeSystem, other.statutoryDailyWorkingTime,
+                other.statutoryWeeklyWorkingTime, NightWindow.STANDARD,
+                PremiumRates.STATUTORY);
+        return mine.equals(theirs);
+    }
+
+    /**
      * この規則の 1 日の所定労働時間。
      *
      * <p><strong>フレックスに「日々の所定」があるという意味ではない。</strong>

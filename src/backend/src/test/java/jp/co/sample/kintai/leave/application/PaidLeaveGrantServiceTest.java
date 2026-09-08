@@ -339,8 +339,8 @@ class PaidLeaveGrantServiceTest extends IntegrationTestBase {
             }
             // ★ 本番の計算を通して作る。行を手で書くと内訳（slices）が空になり、
             //   「内訳の合計 = 実労働時間」という不変条件に弾かれる（落とし穴 37・55）
-            dailyAttendances.save(id,
-                    new DailyAttendances(calendar).fixedDay(date, Duration.ofHours(8)),
+            dailyAttendances.save(
+                    new DailyAttendances(calendar, id).fixedDay(date, Duration.ofHours(8)),
                     workRule().id());
         }
         return id;

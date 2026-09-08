@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.shared.domain.DateRange;
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.support.DailyAttendances;
 import jp.co.sample.kintai.support.TestCalendar;
 
@@ -29,6 +30,8 @@ import jp.co.sample.kintai.support.TestCalendar;
 class WeeklyOvertimeRuleTest {
 
     private static final Duration FORTY_HOURS = Duration.ofHours(40);
+    private static final EmployeeId TARO =
+            new EmployeeId(java.util.UUID.randomUUID());
     private final WeeklyOvertimeRule rule = new WeeklyOvertimeRule(FORTY_HOURS);
 
     /**
@@ -36,7 +39,7 @@ class WeeklyOvertimeRuleTest {
      * 法定休日として扱う日はカレンダーへ登録しておく（{@code days.legalHolidayDay}）。
      */
     private final TestCalendar calendar = TestCalendar.allWorkdays();
-    private final DailyAttendances days = new DailyAttendances(calendar);
+    private final DailyAttendances days = new DailyAttendances(calendar, TARO);
 
     /** カレンダーへ法定休日として登録してから作る。 */
     private jp.co.sample.kintai.attendance.domain.DailyAttendance legalHolidayOn(

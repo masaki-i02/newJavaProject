@@ -64,7 +64,8 @@ class DailyAttendanceRepositoryAdapter implements DailyAttendanceRepository {
     }
 
     @Override
-    public void save(EmployeeId employeeId, DailyAttendance attendance, WorkRuleId workRuleId) {
+    public void save(DailyAttendance attendance, WorkRuleId workRuleId) {
+        EmployeeId employeeId = attendance.employeeId();
         // ★ 版は消す前に読む。消してから読むと必ず 0 になり、
         //   再計算のたびに版が 1 へ戻って楽観ロックが働かなくなる
         long next = currentVersion(employeeId, attendance.workDate()) + 1;
@@ -138,7 +139,8 @@ class DailyAttendanceRepositoryAdapter implements DailyAttendanceRepository {
                         Duration.ofMinutes(rs.getInt("legal_holiday_minutes"))),
                 employeeId.value(), period.from(), period.toExclusive());
 
-        return rows.stream().map(row -> new DailyAttendance(row.workDate, row.dayType,
+        return rows.stream().map(row -> new DailyAttendance(employeeId, row.workDate,
+                row.dayType,
                 row.system, slicesOf(row.id), row.working, row.breakTime, row.base,
                 row.within, row.beyond, row.night, row.legalHoliday)).toList();
     }

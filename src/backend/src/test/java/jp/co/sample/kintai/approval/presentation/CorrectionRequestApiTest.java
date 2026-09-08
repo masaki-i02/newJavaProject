@@ -147,8 +147,9 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
 
     private void recalculate(LocalDate workDate) {
         var rule = workRules.findEffective(yamada, workDate).orElseThrow();
-        dailyAttendances.save(yamada, new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, timeClocks.findByWorkDate(yamada, workDate), rule),
+        dailyAttendances.save(new DailyAttendanceCalculator(calendar)
+                .calculate(yamada, workDate, timeClocks.findByWorkDate(yamada, workDate),
+                        rule),
                 rule.id());
     }
 

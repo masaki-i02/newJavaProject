@@ -112,8 +112,8 @@ class DailyAttendanceScenarioTest extends IntegrationTestBase {
     private DailyAttendance calculateAndSave(LocalDate workDate) {
         WorkRule rule = workRules.findEffective(taro, workDate).orElseThrow();
         var attendance = new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, timeClocks.findByWorkDate(taro, workDate), rule);
-        dailyAttendances.save(taro, attendance, rule.id());
+                .calculate(taro, workDate, timeClocks.findByWorkDate(taro, workDate), rule);
+        dailyAttendances.save(attendance, rule.id());
         return attendance;
     }
 
@@ -201,8 +201,8 @@ class DailyAttendanceScenarioTest extends IntegrationTestBase {
 
             WorkRule rule = workRules.findEffective(taro, saturday).orElseThrow();
             var result = new DailyAttendanceCalculator(calendar)
-                    .calculate(saturday, timeClocks.findByWorkDate(taro, saturday), rule);
-            dailyAttendances.save(taro, result, rule.id());
+                    .calculate(taro, saturday, timeClocks.findByWorkDate(taro, saturday), rule);
+            dailyAttendances.save(result, rule.id());
 
             assertThat(result.workingTime()).isEqualTo(Duration.ofHours(8));
             assertThat(result.legalHolidayTime())
@@ -265,7 +265,7 @@ class DailyAttendanceScenarioTest extends IntegrationTestBase {
             var punches = timeClocks.findByWorkDate(taro, MON);
 
             assertThatThrownBy(() -> new DailyAttendanceCalculator(calendar)
-                    .calculate(tuesday, punches, rule))
+                    .calculate(taro, tuesday, punches, rule))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("勤務日と出勤打刻の日付が一致しません");
         }
@@ -303,7 +303,8 @@ class DailyAttendanceScenarioTest extends IntegrationTestBase {
                     "2026-07-01T17:30");
             WorkRule revised = workRules.findEffective(taro, revisedOn).orElseThrow();
             var result = new DailyAttendanceCalculator(calendar)
-                    .calculate(revisedOn, timeClocks.findByWorkDate(taro, revisedOn), revised);
+                    .calculate(taro, revisedOn, timeClocks.findByWorkDate(taro, revisedOn),
+                            revised);
 
             assertThat(result.baseTime()).isEqualTo(Duration.ofHours(7));
             assertThat(result.overtimeWithinStatutoryTime())

@@ -218,8 +218,8 @@ public class TimeClockService {
             return PunchResult.workRuleNotFound(workDate, unclosed);
         }
         DailyAttendance attendance = new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, sequence, rule.get());
-        dailyAttendances.save(employeeId, attendance, rule.get().id());
+                .calculate(employeeId, workDate, sequence, rule.get());
+        dailyAttendances.save(attendance, rule.get().id());
         return PunchResult.calculated(workDate, attendance, unclosed);
     }
 

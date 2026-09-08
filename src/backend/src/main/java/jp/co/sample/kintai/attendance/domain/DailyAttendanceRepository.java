@@ -18,9 +18,12 @@ public interface DailyAttendanceRepository {
      * 部分更新にすると、再計算で区間の数が減ったときに古い区間が残り、
      * 内訳の合計が実労働時間と食い違う。
      *
+     * <p><strong>社員は {@code attendance} が持っている。</strong>
+     * 別々に受け取ると、取り違えた組み合わせを渡せてしまう。
+     *
      * @param workRuleId 計算に使った版。あとから「なぜこの残業時間か」を説明するために残す
      */
-    void save(EmployeeId employeeId, DailyAttendance attendance, WorkRuleId workRuleId);
+    void save(DailyAttendance attendance, WorkRuleId workRuleId);
 
     Optional<DailyAttendance> find(EmployeeId employeeId, LocalDate workDate);
 

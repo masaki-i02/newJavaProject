@@ -73,6 +73,41 @@ class WorkSliceTest {
         assertThat(slice.premiums()).containsExactly(PremiumType.NIGHT);
     }
 
+    /**
+     * <strong>またぐ区間に暦日は定まらない。</strong>
+     * 開始日を黙って返すと、土曜 22:00〜日曜 6:00 の 8 時間がまるごと土曜のものになり、
+     * 日曜（法定休日）の 35% が付かない。
+     */
+    @Test
+    @DisplayName("UT-ATT-42 暦日をまたぐ区間は暦日を答えない")
+    void crossingSliceHasNoCalendarDate() {
+        var crossing = WorkSlice.plain(new TimeRange(
+                LocalDateTime.parse("2026-04-04T22:00"),
+                LocalDateTime.parse("2026-04-05T06:00")));
+
+        assertThat(crossing.crossesCalendarDay()).isTrue();
+        assertThatThrownBy(crossing::calendarDate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("暦日をまたぐ区間には暦日が定まりません");
+    }
+
+    /**
+     * 半開区間なので<strong>翌日 0:00 ちょうどで終わる区間はまたいでいない。</strong>
+     * 「終了日が違えばまたぎ」と書くと、暦日境界で分割した前半をまたぎと誤判定し、
+     * 分割した直後の区間をどれも扱えなくなる。
+     */
+    @Test
+    @DisplayName("UT-ATT-43 翌日 0:00 ちょうどで終わる区間はまたいでいない")
+    void sliceEndingAtMidnightDoesNotCross() {
+        var upToMidnight = WorkSlice.plain(new TimeRange(
+                LocalDateTime.parse("2026-04-04T22:00"),
+                LocalDateTime.parse("2026-04-05T00:00")));
+
+        assertThat(upToMidnight.crossesCalendarDay()).isFalse();
+        assertThat(upToMidnight.calendarDate())
+                .isEqualTo(java.time.LocalDate.of(2026, 4, 4));
+    }
+
     @Test
     @DisplayName("分割しても属性を引き継ぎ、合計は変わらない")
     void splitKeepsPremiumsAndTotal() {

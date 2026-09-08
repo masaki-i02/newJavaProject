@@ -51,7 +51,7 @@ class MonthlySettlementCalculatorTest {
     private final TestCalendar calendar = TestCalendar.allWorkdays();
 
     /** 日次は本番の計算を通して作る（CLAUDE.md 落とし穴 37）。 */
-    private final DailyAttendances daily = new DailyAttendances(calendar);
+    private final DailyAttendances daily = new DailyAttendances(calendar, TARO);
     private final MonthlySettlementCalculator calculator =
             new MonthlySettlementCalculator(calendar);
 
@@ -858,7 +858,7 @@ class MonthlySettlementCalculatorTest {
                                             punches,
                                     WorkingTimeSystem system) {
         return new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, punches, WorkRules.rule(system));
+                .calculate(TARO, workDate, punches, WorkRules.rule(system));
     }
 
     @Nested
@@ -920,6 +920,28 @@ class MonthlySettlementCalculatorTest {
                     calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("同じ勤務日の日次勤怠が 2 件以上あります");
+        }
+
+        /**
+         * <strong>重複の検査では代わりにならない。</strong>
+         * 勤務日の重ならない 2 人ぶんを渡すと重複の検査は通り、
+         * 他人の労働時間がこの社員の月次に合計される。
+         * 結果に載るのは引数の社員なので、誰にも気づかれない（落とし穴 42）。
+         */
+        @Test
+        @DisplayName("UT-BR05-34 他の社員の日次勤怠を混ぜると例外になる")
+        void daysOfAnotherEmployeeAreRejected() {
+            var may = period(2026, 5);
+            var 他人 = new DailyAttendances(calendar,
+                    new EmployeeId(java.util.UUID.randomUUID()));
+            var days = List.of(
+                    daily.flexDay(LocalDate.of(2026, 5, 1), Duration.ofHours(8)),
+                    他人.flexDay(LocalDate.of(2026, 5, 7), Duration.ofHours(8)));
+
+            assertThatThrownBy(() ->
+                    calculator.calculate(TARO, may, days, flexRule(), Duration.ZERO, 0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("他の社員の日次勤怠が混ざっています");
         }
 
         @Test

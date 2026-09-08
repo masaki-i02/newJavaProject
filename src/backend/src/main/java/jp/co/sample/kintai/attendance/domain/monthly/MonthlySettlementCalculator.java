@@ -59,6 +59,7 @@ public final class MonthlySettlementCalculator {
                 || annualUsedBefore == null) {
             throw new IllegalArgumentException("月次清算の引数に null は許されません");
         }
+        requireSameEmployee(employeeId, days);
         requireOnePerWorkDate(days);
         requireInsideScanRange(days, period);
 
@@ -184,12 +185,31 @@ public final class MonthlySettlementCalculator {
     }
 
     /**
+     * 渡された日次が全員この社員のものであることを確かめる。
+     *
+     * <p><strong>重複の検査では代わりにならない。</strong>
+     * 勤務日の重ならない 2 人ぶんを渡すと、重複の検査は通ってしまい、
+     * <strong>他人の労働時間がこの社員の月次に合計される。</strong>
+     * 引数の社員は結果（{@code MonthlySettlement}）にそのまま載るので、
+     * 誰にも気づかれずに実在しない残業へ割増が付く（落とし穴 42）。
+     */
+    private static void requireSameEmployee(EmployeeId employeeId,
+                                            List<DailyAttendance> days) {
+        for (DailyAttendance day : days) {
+            if (!day.employeeId().equals(employeeId)) {
+                throw new IllegalArgumentException(
+                        "他の社員の日次勤怠が混ざっています: 勤務日 %s".formatted(day.workDate()));
+            }
+        }
+    }
+
+    /**
      * 同じ勤務日の日次勤怠が 2 件以上ないことを確かめる。
      *
-     * <p>{@code DailyAttendance} は<strong>誰のものかを持たない</strong>ので、
-     * 2 人ぶんを混ぜて渡されても型では止められない。
-     * せめて重複だけは検出する。素通りさせると労働時間が二重に合計され、
+     * <p>社員がそろっていても、同じ勤務日の行が 2 つあれば労働時間が二重に合計され、
      * <strong>実在しない残業に割増が付く。</strong>
+     * 再計算で行を入れ替える経路（{@code DailyAttendanceRepository#save}）が
+     * 消し漏らした場合に効く。
      */
     private static void requireOnePerWorkDate(List<DailyAttendance> days) {
         Set<LocalDate> seen = new HashSet<>();

@@ -121,8 +121,8 @@ class MonthlySettlementScenarioTest extends IntegrationTestBase {
         }
         WorkRule rule = workRules.findEffective(taro, workDate).orElseThrow();
         var attendance = new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, timeClocks.findByWorkDate(taro, workDate), rule);
-        dailyAttendances.save(taro, attendance, rule.id());
+                .calculate(taro, workDate, timeClocks.findByWorkDate(taro, workDate), rule);
+        dailyAttendances.save(attendance, rule.id());
     }
 
     /** 9:00–18:00（休憩 1 時間）= 実労働 8 時間。 */

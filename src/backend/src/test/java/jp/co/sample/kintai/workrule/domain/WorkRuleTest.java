@@ -3,6 +3,7 @@ package jp.co.sample.kintai.workrule.domain;
 import static jp.co.sample.kintai.support.WorkRules.fixed;
 import static jp.co.sample.kintai.support.WorkRules.flex;
 import static jp.co.sample.kintai.support.WorkRules.rule;
+import static jp.co.sample.kintai.support.WorkRules.sevenHours;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -117,6 +118,44 @@ class WorkRuleTest {
                     LocalTime.of(9, 0), LocalTime.of(20, 0), Duration.ofMinutes(45)))
                     .isInstanceOf(BusinessRuleViolationException.class)
                     .hasMessageContaining("休憩は 60 分以上必要です");
+        }
+
+        /**
+         * <strong>深夜帯だけを変える改定は月中に入れてよい。</strong>
+         * 深夜帯が効くのは日次の割増区分だけで、月次は日ごとの結果を足すだけである。
+         */
+        @Test
+        @DisplayName("UT-WR-26 深夜帯だけが違う版は、月次清算に効く部分が同じ")
+        void nightWindowDoesNotAffectMonthlyBasis() {
+            assertThat(rule(fixed(), Duration.ofHours(8), NightWindow.STANDARD)
+                    .hasSameMonthlyBasisAs(
+                            rule(fixed(), Duration.ofHours(8), NightWindow.DESIGNATED_AREA)))
+                    .isTrue();
+        }
+
+        /**
+         * <strong>所定を変える改定は月中に入れてはいけない。</strong>
+         * 月次清算は 1 か月を 1 つの版で計算するので、
+         * 所定総労働時間も不足時間も片方の版の値だけで求まる。
+         */
+        @Test
+        @DisplayName("UT-WR-27 所定労働時間が違う版は、月次清算に効く部分が違う")
+        void scheduledTimeAffectsMonthlyBasis() {
+            assertThat(rule(fixed(), Duration.ofHours(8), NightWindow.STANDARD)
+                    .hasSameMonthlyBasisAs(
+                            rule(sevenHours(), Duration.ofHours(8), NightWindow.STANDARD)))
+                    .isFalse();
+        }
+
+        /** 法定労働時間も月次の総枠（{@code statutoryTotalLimit}）に効く。 */
+        @Test
+        @DisplayName("UT-WR-28 1 日の法定労働時間が違う版は、月次清算に効く部分が違う")
+        void statutoryDailyAffectsMonthlyBasis() {
+            // 所定 7 時間の制度で比べる。所定 8 時間だと法定 7 時間の版が作れない
+            assertThat(rule(sevenHours(), Duration.ofHours(8), NightWindow.STANDARD)
+                    .hasSameMonthlyBasisAs(
+                            rule(sevenHours(), Duration.ofHours(7), NightWindow.STANDARD)))
+                    .isFalse();
         }
 
         @Test

@@ -47,8 +47,36 @@ public record WorkSlice(TimeRange range, Set<PremiumType> premiums) {
         return range.duration();
     }
 
-    /** この区間が属する暦日。区間は暦日境界で分割されるので一意に決まる。 */
+    /**
+     * この区間が暦日をまたぐか。
+     *
+     * <p>半開区間なので、<strong>翌日 0:00 ちょうどで終わる区間はまたいでいない。</strong>
+     * {@code end} が翌日 0:00 より後のときだけ、区間は 2 つの暦日に属する。
+     */
+    public boolean crossesCalendarDay() {
+        return range.end().isAfter(range.start().toLocalDate().plusDays(1).atStartOfDay());
+    }
+
+    /**
+     * この区間が属する暦日。
+     *
+     * <p><strong>またぐ区間には暦日が定まらないので、開始日を返さない。</strong>
+     * 法定休日労働の割増（{@code LegalHolidayWorkRule}）も
+     * 法定休日からの通算（{@code HolidayCarryOverRule}）も、
+     * 「1 区間は 1 暦日に属する」という前提の上に立っている。
+     * 開始日を黙って返すと、土曜 22:00〜日曜 6:00 の 8 時間がまるごと土曜のものになり、
+     * <strong>日曜（法定休日）の 35% が付かない</strong>（賃金の過少払い）。
+     *
+     * <p>分割は {@code CalendarDayBoundaryRule} が計算の最初に行う。
+     * ここに来る時点でまたいでいるのは<strong>実装の不備</strong>なので、
+     * 業務エラー（{@code DomainException}）にはしない。
+     */
     public LocalDate calendarDate() {
+        if (crossesCalendarDay()) {
+            throw new IllegalStateException(
+                    "暦日をまたぐ区間には暦日が定まりません: [%s, %s)"
+                            .formatted(range.start(), range.end()));
+        }
         return range.start().toLocalDate();
     }
 

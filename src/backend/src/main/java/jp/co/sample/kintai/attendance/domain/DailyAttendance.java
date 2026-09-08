@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.function.Predicate;
 
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.PremiumType;
 import jp.co.sample.kintai.shared.domain.TimeRange;
 import jp.co.sample.kintai.workrule.domain.DayType;
@@ -17,6 +18,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * 労務の問い合わせでは「なぜこの残業時間なのか」の提示が必須であり、
  * 集計値だけでは答えられないため。
  *
+ * @param employeeId          誰の 1 日か。<strong>持たせないと他人の日次を混ぜても止められない</strong>
  * @param workDate            勤務日。労働時間の帰属先（BR-03）
  * @param dayType             勤務日の暦日区分。<strong>表示用。内訳の根拠にはしない</strong>
  * @param workingTimeSystem   労働時間制度の判別値
@@ -29,7 +31,7 @@ import jp.co.sample.kintai.workrule.domain.WorkingTimeSystemType;
  * @param nightTime           深夜。<strong>他の区分と重なる。合計には数えない</strong>
  * @param legalHolidayTime    法定休日労働
  */
-public record DailyAttendance(LocalDate workDate, DayType dayType,
+public record DailyAttendance(EmployeeId employeeId, LocalDate workDate, DayType dayType,
                               WorkingTimeSystemType workingTimeSystem,
                               List<WorkSlice> slices,
                               Duration workingTime, Duration breakTime,
@@ -39,7 +41,8 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
                               Duration nightTime, Duration legalHolidayTime) {
 
     public DailyAttendance {
-        if (workDate == null || dayType == null || workingTimeSystem == null || slices == null) {
+        if (employeeId == null || workDate == null || dayType == null
+                || workingTimeSystem == null || slices == null) {
             throw new IllegalArgumentException("日次勤怠の項目に null は許されません");
         }
         // Duration も検査する。落とすと「内訳の合計が一致しない」という
@@ -72,6 +75,9 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
 
         // ★ 内訳の区間は時系列順に並び、互いに重ならない
         requireDisjointAndOrdered(slices);
+
+        // ★ 内訳の 1 区間は 1 暦日に収まる
+        requireWithinOneCalendarDay(slices);
 
         // ★ 集計値は内訳から再集計した値と一致しなければならない
         Duration slicedWorking = total(slices, slice -> true);
@@ -128,6 +134,31 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
         }
     }
 
+    /**
+     * 内訳の区間が暦日をまたいでいないことを確かめる。
+     *
+     * <p>計算経路では {@code CalendarDayBoundaryRule} が最初に分割するので、
+     * ここへ来る区間はすでに 1 暦日に収まっている。
+     * <strong>DB から復元する経路にはその保証が無い。</strong>
+     * 内訳は追記専用の表からそのまま読み直すので、
+     * 分割前の区間が入っていても合計は一致し、上の検査はどれも通る。
+     *
+     * <p>またぐ区間が 1 つでも混ざると、法定休日労働の割増（{@code LegalHolidayWorkRule}）と
+     * 法定休日からの通算（{@code HolidayCarryOverRule}）が
+     * <strong>8 時間まるごとを開始日のものとして数える。</strong>
+     * どちらも {@link WorkSlice#calendarDate()} で暦日を引いており、
+     * 「1 区間は 1 暦日」という前提の上に立っている。
+     */
+    private static void requireWithinOneCalendarDay(List<WorkSlice> slices) {
+        for (WorkSlice slice : slices) {
+            if (slice.crossesCalendarDay()) {
+                throw new IllegalArgumentException(
+                        "内訳の区間が暦日をまたいでいます: [%s, %s)".formatted(
+                                slice.range().start(), slice.range().end()));
+            }
+        }
+    }
+
     private static void requireNonNull(Duration value, String label) {
         if (value == null) {
             throw new IllegalArgumentException("%sに null は許されません".formatted(label));
@@ -156,9 +187,9 @@ public record DailyAttendance(LocalDate workDate, DayType dayType,
     }
 
     /** 打刻が無い日（欠勤・休日）。 */
-    public static DailyAttendance absent(LocalDate workDate, DayType dayType,
-                                         WorkingTimeSystemType system) {
-        return new DailyAttendance(workDate, dayType, system, List.of(),
+    public static DailyAttendance absent(EmployeeId employeeId, LocalDate workDate,
+                                         DayType dayType, WorkingTimeSystemType system) {
+        return new DailyAttendance(employeeId, workDate, dayType, system, List.of(),
                 Duration.ZERO, Duration.ZERO, Duration.ZERO,
                 Duration.ZERO, Duration.ZERO, Duration.ZERO, Duration.ZERO);
     }

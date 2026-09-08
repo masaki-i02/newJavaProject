@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.UUID;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.support.Punches;
 import jp.co.sample.kintai.support.TestCalendar;
 import jp.co.sample.kintai.support.WorkRules;
@@ -30,11 +32,12 @@ import jp.co.sample.kintai.workrule.domain.NightWindow;
 class WorkRuleDrivenCalculationTest {
 
     private static final LocalDate MON = LocalDate.of(2026, 4, 6);
+    private static final EmployeeId TARO = new EmployeeId(UUID.randomUUID());
 
     private static DailyAttendance calculate(Punches punches,
                                              jp.co.sample.kintai.workrule.domain.WorkRule rule) {
         return new DailyAttendanceCalculator(TestCalendar.allWorkdays())
-                .calculate(MON, punches.build(), rule);
+                .calculate(TARO, MON, punches.build(), rule);
     }
 
     @Nested

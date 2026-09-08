@@ -341,8 +341,8 @@ class PaidLeaveGrantApiTest extends WebIntegrationTestBase {
         WorkRule rule = workRules.findEffective(id, HIRED).orElseThrow();
         for (int i = from; i < to; i++) {
             LocalDate date = HIRED.plusDays(i);
-            dailyAttendances.save(id,
-                    new DailyAttendances(calendar).fixedDay(date, Duration.ofHours(8)),
+            dailyAttendances.save(
+                    new DailyAttendances(calendar, id).fixedDay(date, Duration.ofHours(8)),
                     rule.id());
         }
     }

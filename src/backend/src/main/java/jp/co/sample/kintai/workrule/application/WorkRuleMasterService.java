@@ -633,6 +633,9 @@ public class WorkRuleMasterService {
         List<WorkRule> versions = workRules.findVersionsOf(seriesId);
         requireRevisable(seriesId, versions, spec.validFrom());
 
+        // ★ 月中の改定は、月次清算に効く値を変えないものに限る
+        requireMonthlyBasisUnchangedMidMonth(seriesId, versions, spec);
+
         // ★ 版を先に進める。進められなければ誰かが先に改定しているので、
         //   行を 1 つも書かずに終わる
         if (!series.bumpVersion(seriesId, expectedVersion)) {
@@ -793,6 +796,65 @@ public class WorkRuleMasterService {
         @Override
         public String title() {
             return "廃止済みの就業規則です";
+        }
+    }
+
+    /**
+     * 月の途中の改定が、月次清算に効く値を変えていないことを確かめる。
+     *
+     * <p><strong>月中の改定そのものは禁じない。</strong>
+     * 社員は系列を指しているので、版を足しても適用は切れない（ADR 0003）。
+     * 日次計算は日ごとに版を引くので、深夜帯や割増率を月中から変えるのは正しく動く。
+     *
+     * <p>禁じるのは<strong>所定労働時間・法定労働時間・労働時間制度</strong>を
+     * 月の途中から変えることである。月次清算は 1 か月を 1 つの版で計算するので、
+     * これらが月中で割れると<strong>所定総労働時間も不足時間も法定総枠も
+     * 片方の版の値だけで求まる。</strong>
+     * フレックスの清算期間は労使協定が定めた起算日から 1 か月であり（労基法 32 条の 3）、
+     * その途中で所定を差し替えること自体が制度の前提に反する。
+     *
+     * <p><strong>ここで拒まないと、月次清算の側が拒むことになる。</strong>
+     * そうなるとその月は提出も承認も締めもできず、
+     * 規則を戻す以外に出口の無い月が残る（落とし穴 26・93）。
+     */
+    private static void requireMonthlyBasisUnchangedMidMonth(
+            WorkRuleSeriesId seriesId, List<WorkRule> versions, WorkRuleSpec spec) {
+        if (spec.validFrom().getDayOfMonth() == 1) {
+            return;
+        }
+        WorkRule added = spec.toWorkRule(seriesId, DateRange.startingAt(spec.validFrom()));
+        for (WorkRule current : versions) {
+            if (current.validPeriod().contains(spec.validFrom())
+                    && !current.hasSameMonthlyBasisAs(added)) {
+                throw new MonthlyBasisChangedMidMonthException(spec.validFrom());
+            }
+        }
+    }
+
+    /** 月の途中の改定が、月次清算に効く値を変えている。 */
+    public static final class MonthlyBasisChangedMidMonthException extends DomainException {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        MonthlyBasisChangedMidMonthException(LocalDate validFrom) {
+            super("所定労働時間・法定労働時間・労働時間制度を変える改定は月初日からに限ります: "
+                    + validFrom);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:monthly-basis-changed-mid-month";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.RULE_VIOLATION;
+        }
+
+        @Override
+        public String title() {
+            return "所定を変える改定は月初日からに限ります";
         }
     }
 

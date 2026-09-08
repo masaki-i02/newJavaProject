@@ -1,5 +1,7 @@
 package jp.co.sample.kintai.attendance.presentation;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,6 +11,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -29,6 +32,7 @@ import jp.co.sample.kintai.employee.domain.Email;
 import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
+import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.shared.domain.Role;
 import jp.co.sample.kintai.support.WebIntegrationTestBase;
@@ -119,8 +123,8 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
 
     private void calculate(LocalDate workDate) {
         WorkRule rule = workRules.findEffective(taro, workDate).orElseThrow();
-        dailyAttendances.save(taro, new DailyAttendanceCalculator(calendar)
-                .calculate(workDate, timeClocks.findByWorkDate(taro, workDate), rule),
+        dailyAttendances.save(new DailyAttendanceCalculator(calendar)
+                .calculate(taro, workDate, timeClocks.findByWorkDate(taro, workDate), rule),
                 rule.id());
     }
 
@@ -196,6 +200,87 @@ class MonthlySettlementApiTest extends WebIntegrationTestBase {
             mockMvc.perform(get("/api/employees/{id}/settlements/{month}",
                             taro.value(), "2026-05").with(as(hr, "E0900", Role.EMPLOYEE)))
                     .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("清算期間を通じた 1 つの規則")
+    class SingleWorkRule {
+
+        /**
+         * <strong>月次清算は 1 か月を 1 つの版で計算する。</strong>
+         * 所定が月中で割れると、所定総労働時間も不足時間も片方の版の値だけで求まる。
+         *
+         * <p>この状態は {@code WorkRuleMasterService} が改定の時点で拒むので、
+         * <strong>API からは作れない。</strong>ここでは永続化を直接叩いて作り、
+         * 集約の側にも検査があることを確かめる（落とし穴 58）。
+         */
+        @Test
+        @DisplayName("IT-API-43 月の途中で所定が変わっている月は清算できない")
+        void scheduledTimeSplitInsideMonth() {
+            regularDay(LocalDate.of(2026, 5, 4));
+            WorkRule current = workRules.findEffective(taro, MAY.atDay(1)).orElseThrow();
+            LocalDate 改定日 = LocalDate.of(2026, 5, 16);
+            workRules.revise(
+                    List.of(new WorkRule(current.id(), current.seriesId(),
+                            new DateRange(current.validPeriod().from(), 改定日),
+                            current.workingTimeSystem(), current.statutoryDailyWorkingTime(),
+                            current.statutoryWeeklyWorkingTime(), current.nightWindow(),
+                            current.premiumRates())),
+                    WorkRules.versionOf(current.seriesId(), 改定日, WorkRules.sevenHours(),
+                            Duration.ofHours(8), NightWindow.STANDARD));
+
+            assertThatThrownBy(() -> settlements.settle(taro, MAY))
+                    .isInstanceOf(MonthlySettlementService.WorkRuleRevisedMidMonthException
+                            .class);
+        }
+
+        /**
+         * <strong>深夜帯だけを変えた改定では止めない。</strong>
+         * 深夜帯は日次の割増区分にしか効かず、月次は日ごとの結果を足すだけである。
+         * 一律に止めると、深夜帯の誤りを月中に直せなくなる。
+         */
+        @Test
+        @DisplayName("IT-API-44 月の途中で深夜帯だけが変わった月は清算できる")
+        void nightWindowSplitInsideMonthIsAllowed() {
+            regularDay(LocalDate.of(2026, 5, 4));
+            WorkRule current = workRules.findEffective(taro, MAY.atDay(1)).orElseThrow();
+            LocalDate 改定日 = LocalDate.of(2026, 5, 16);
+            workRules.revise(
+                    List.of(new WorkRule(current.id(), current.seriesId(),
+                            new DateRange(current.validPeriod().from(), 改定日),
+                            current.workingTimeSystem(), current.statutoryDailyWorkingTime(),
+                            current.statutoryWeeklyWorkingTime(), current.nightWindow(),
+                            current.premiumRates())),
+                    WorkRules.versionOf(current.seriesId(), 改定日, WorkRules.fixed(),
+                            Duration.ofHours(8), NightWindow.DESIGNATED_AREA));
+
+            assertThat(settlements.settle(taro, MAY).workingTime())
+                    .isEqualTo(Duration.ofHours(8));
+        }
+
+        /**
+         * <strong>末日の版だけを引かない。</strong>
+         * 清算期間の途中に規則の無い日があると、その日の所定が結果に現れない。
+         */
+        @Test
+        @DisplayName("IT-API-45 清算期間の途中に規則の無い日があると清算できない")
+        void gapInsideThePeriod() {
+            regularDay(LocalDate.of(2026, 5, 4));
+            WorkRule current = workRules.findEffective(taro, MAY.atDay(1)).orElseThrow();
+            LocalDate 空白の始まり = LocalDate.of(2026, 5, 10);
+            LocalDate 再開 = LocalDate.of(2026, 5, 20);
+            workRules.revise(
+                    List.of(new WorkRule(current.id(), current.seriesId(),
+                            new DateRange(current.validPeriod().from(), 空白の始まり),
+                            current.workingTimeSystem(), current.statutoryDailyWorkingTime(),
+                            current.statutoryWeeklyWorkingTime(), current.nightWindow(),
+                            current.premiumRates())),
+                    WorkRules.versionOf(current.seriesId(), 再開, WorkRules.fixed(),
+                            Duration.ofHours(8), NightWindow.STANDARD));
+
+            assertThatThrownBy(() -> settlements.settle(taro, MAY))
+                    .isInstanceOf(MonthlySettlementService.WorkRuleNotAssignedException.class);
         }
     }
 

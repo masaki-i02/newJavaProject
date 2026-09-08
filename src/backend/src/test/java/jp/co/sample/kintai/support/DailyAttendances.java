@@ -10,6 +10,7 @@ import jp.co.sample.kintai.attendance.domain.DailyAttendance;
 import jp.co.sample.kintai.attendance.domain.DailyAttendanceCalculator;
 import jp.co.sample.kintai.attendance.domain.TimeClockEvent;
 import jp.co.sample.kintai.attendance.domain.TimeClockSequence;
+import jp.co.sample.kintai.shared.domain.EmployeeId;
 import jp.co.sample.kintai.workrule.domain.CompanyCalendar;
 import jp.co.sample.kintai.workrule.domain.DayType;
 import jp.co.sample.kintai.workrule.domain.NightWindow;
@@ -42,10 +43,17 @@ public final class DailyAttendances {
 
     private final CompanyCalendar calendar;
     private final DailyAttendanceCalculator calculator;
+    private final EmployeeId employeeId;
 
-    public DailyAttendances(CompanyCalendar calendar) {
+    /**
+     * @param employeeId 作る日次の持ち主。
+     *                   月次清算は<strong>渡された日次が全員同じ社員のものか</strong>を検査するので、
+     *                   検査する側と同じ社員を渡す
+     */
+    public DailyAttendances(CompanyCalendar calendar, EmployeeId employeeId) {
         this.calendar = calendar;
         this.calculator = new DailyAttendanceCalculator(calendar);
+        this.employeeId = employeeId;
     }
 
     /** 所定労働日に 9:00 から {@code worked} だけ働いた日（固定時間制）。 */
@@ -91,7 +99,7 @@ public final class DailyAttendances {
 
     /** 打刻の無い日（欠勤）。 */
     public DailyAttendance absent(LocalDate workDate) {
-        return calculator.calculate(workDate, TimeClockSequence.of(List.of()),
+        return calculator.calculate(employeeId, workDate, TimeClockSequence.of(List.of()),
                 ruleOf(WorkRules.fixed()));
     }
 
@@ -139,13 +147,13 @@ public final class DailyAttendances {
                     "1 日の労働時間が %s を超えています: %s".formatted(MAX_PER_DAY, worked));
         }
         if (worked.isZero()) {
-            return calculator.calculate(workDate, TimeClockSequence.of(List.of()),
+            return calculator.calculate(employeeId, workDate, TimeClockSequence.of(List.of()),
                     ruleOf(system));
         }
         var punches = TimeClockSequence.of(List.of(
                 new TimeClockEvent.ClockIn(clockIn),
                 new TimeClockEvent.ClockOut(clockIn.plus(worked))));
-        return calculator.calculate(workDate, punches, ruleOf(system));
+        return calculator.calculate(employeeId, workDate, punches, ruleOf(system));
     }
 
     private static WorkRule ruleOf(WorkingTimeSystem system) {

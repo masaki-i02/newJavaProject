@@ -1224,8 +1224,8 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
     /** その日に 8 時間働いた事実を残す。本番の計算を通して作る（落とし穴 37）。 */
     private void workedOn(LocalDate date) {
         WorkRule rule = workRules.findEffective(yamada, date).orElseThrow();
-        dailyAttendances.save(yamada,
-                new DailyAttendances(calendar).fixedDay(date, Duration.ofHours(8)),
+        dailyAttendances.save(
+                new DailyAttendances(calendar, yamada).fixedDay(date, Duration.ofHours(8)),
                 rule.id());
     }
 
