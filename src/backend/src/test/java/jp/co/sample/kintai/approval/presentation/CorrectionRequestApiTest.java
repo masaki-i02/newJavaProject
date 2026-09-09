@@ -414,7 +414,17 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                     // 元の退勤（取消済み）と、訂正で追記された退勤の両方が並ぶ
                     .andExpect(jsonPath("$[?(@.id=='%s')].revoked".formatted(original))
                             .value(true))
+                    // ★ exists() では足りない。reason と recordedBy はどちらも String で
+                    //   隣り合っているので、入れ替えてもコンパイルは通り、
+                    //   画面には理由の欄に UUID が出るだけで動き続ける（落とし穴 112・151）
                     .andExpect(jsonPath("$[?(@.id=='%s')].revocation.reason"
+                            .formatted(original)).value("退勤打刻を押し忘れました"))
+                    // ★ 記録されるのは承認者である。取消を実際に起こしたのは承認の操作で、
+                    //   申請しただけでは打刻は動かない。ここを申請者にすると、
+                    //   証跡が「誰の決裁で消えたか」に答えられなくなる
+                    .andExpect(jsonPath("$[?(@.id=='%s')].revocation.recordedBy"
+                            .formatted(original)).value(manager.value().toString()))
+                    .andExpect(jsonPath("$[?(@.id=='%s')].revocation.recordedAt"
                             .formatted(original)).exists())
                     .andExpect(jsonPath("$[?(@.source=='CORRECTION')].revoked")
                             .value(false))
@@ -755,5 +765,6 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.items[?(@.action=='ADD')].occurredAt")
                             .value("2026-04-06T19:00:00"));
         }
+
     }
 }

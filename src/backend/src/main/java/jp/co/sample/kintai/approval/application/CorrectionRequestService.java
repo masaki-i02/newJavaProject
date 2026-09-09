@@ -274,11 +274,10 @@ public class CorrectionRequestService {
     }
 
     private void requireApprover(Requester requester, CorrectionRequest request) {
-        Approver approver = approverPolicy.resolve(request.employeeId(),
+        // ★ 基準月は勤務日が属する月（CLAUDE.md「訂正の承認者」）。
+        //   判定そのものは ApproverPolicy が持つ
+        approverPolicy.requireApprover(requester, request.employeeId(),
                 YearMonth.from(request.workDate()), LocalDate.now(clock));
-        if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new NotApproverException();
-        }
     }
 
     /**
@@ -289,13 +288,8 @@ public class CorrectionRequestService {
      * 利用者への案内がまったく違う。粗い型にまとめない。
      */
     private void requireMonthAcceptsCorrection(EmployeeId employeeId, LocalDate workDate) {
-        YearMonth month = YearMonth.from(workDate);
-        if (monthClosure.isClosed(employeeId, month)) {
-            throw new MonthAlreadyClosedException(month);
-        }
-        if (!monthClosure.acceptsCorrectionRequest(employeeId, month)) {
-            throw new MonthNotEditableException(month);
-        }
+        // ★ 判定はポートが持つ。年休とまったく同じ規則である
+        monthClosure.requireEditable(employeeId, YearMonth.from(workDate));
     }
 
     /** 訂正を適用したあとの打刻列が、状態機械として妥当か。 */
@@ -366,57 +360,7 @@ public class CorrectionRequestService {
         }
     }
 
-    /** 締め済みの月。<strong>戻す手段が無い。</strong> */
-    public static final class MonthAlreadyClosedException extends DomainException {
 
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        MonthAlreadyClosedException(YearMonth month) {
-            super("締め済みの月は訂正できません: " + month);
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:month-already-closed";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "締め済みの月は訂正できません";
-        }
-    }
-
-    /** 承認済みの月。<strong>締め済みとは違う。</strong> 承認を取り消せば直せる。 */
-    public static final class MonthNotEditableException extends DomainException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        MonthNotEditableException(YearMonth month) {
-            super("承認済みの月は訂正できません。承認の取消が要ります: " + month);
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:month-not-editable";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "承認済みの月は訂正できません";
-        }
-    }
 
     /** 取り消す対象の打刻が実在しない。 */
     public static final class CorrectionTargetNotFoundException extends DomainException

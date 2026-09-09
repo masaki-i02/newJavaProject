@@ -36,6 +36,7 @@ import jp.co.sample.kintai.employee.domain.EmployeeNumber;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.ManagershipRepository;
+import jp.co.sample.kintai.shared.domain.MonthClosureQuery;
 import jp.co.sample.kintai.leave.domain.AttendanceRate;
 import jp.co.sample.kintai.leave.domain.GrantDecision;
 import jp.co.sample.kintai.leave.domain.LeaveRequestStatus;
@@ -359,7 +360,7 @@ class PaidLeaveRequestServiceTest extends IntegrationTestBase {
 
             assertThatThrownBy(() -> service.cancel(yamada, approved.id(),
                     approved.version()))
-                    .isInstanceOf(MonthNotEditableException.class);
+                    .isInstanceOf(MonthClosureQuery.MonthNotEditableException.class);
         }
     }
 

@@ -10,6 +10,8 @@ import jp.co.sample.kintai.employee.domain.Department;
 import jp.co.sample.kintai.employee.domain.Managership;
 import jp.co.sample.kintai.employee.domain.OrganizationChart;
 import jp.co.sample.kintai.shared.domain.EmployeeId;
+import jp.co.sample.kintai.shared.domain.Role;
+import jp.co.sample.kintai.shared.domain.Requester;
 
 /**
  * 誰が承認者かを決める（BR-11）。
@@ -41,6 +43,27 @@ public final class ApproverPolicy {
      *
      * @param today 承認を行う時点。<strong>在籍判定にだけ使う</strong>
      */
+    /**
+     * 承認者でなければ拒む。
+     *
+     * <p><strong>「解決して・当てて・投げる」をここに 1 つだけ置く。</strong>
+     * 月次勤怠・訂正申請・年休の 3 つが同じ本文を手で書いていた。
+     * 自己決裁の禁止（BR-11 の 4）が年休だけ違うエラー型を返していたのも
+     * この 3 重化から来ている（落とし穴 110）。
+     *
+     * <p><strong>自己決裁の検査は呼び出し側に残す。</strong>
+     * 「自己 → 承認者 → 業務」の順序そのものが業務上の決定であり、
+     * ここへ畳み込むと {@code ApproverPolicy} が本人を承認者から外すぶん
+     * {@code not-approver} が返って、自己決裁という事実が伝わらなくなる。
+     */
+    public void requireApprover(Requester requester, EmployeeId target, YearMonth month,
+                                LocalDate today) {
+        if (!resolve(target, month, today)
+                .isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
+            throw new NotApproverException();
+        }
+    }
+
     public Approver resolve(EmployeeId target, YearMonth month, LocalDate today) {
         if (target == null || month == null || today == null) {
             throw new IllegalArgumentException("承認者の解決に null は許されません");

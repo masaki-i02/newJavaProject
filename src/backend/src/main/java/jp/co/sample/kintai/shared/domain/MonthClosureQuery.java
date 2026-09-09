@@ -40,6 +40,84 @@ public interface MonthClosureQuery {
     boolean acceptsCorrectionRequest(EmployeeId employeeId, YearMonth month);
 
     /**
+     * <strong>意思表示（訂正申請・年休）を受け付けてよい月か。</strong>
+     *
+     * <p>訂正申請と年休が、同じ本文を別々に書いていた。
+     * どちらも「締め済みなら {@code month-already-closed}、
+     * 承認済みなら {@code month-not-editable}」であり、
+     * <strong>順序そのものが業務上の決定</strong>である
+     * （締め済みは取り消せないが、承認済みは承認を取り消せば直せる。
+     * 逆に並べると、締め済みの月に「承認を取り消せば直せます」と案内してしまう）。
+     *
+     * <p>写すと片方だけが古くなるので、判定はここに 1 つだけ置く（落とし穴 67）。
+     */
+    default void requireEditable(EmployeeId employeeId, YearMonth month) {
+        if (isClosed(employeeId, month)) {
+            throw new MonthAlreadyClosedException(month);
+        }
+        if (!acceptsCorrectionRequest(employeeId, month)) {
+            throw new MonthNotEditableException(month);
+        }
+    }
+
+    /** 締め済みの月への意思表示。<strong>締めは取り消せない。</strong> */
+    final class MonthAlreadyClosedException extends DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        MonthAlreadyClosedException(YearMonth month) {
+            super("締め済みの月は変更できません: " + month);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:month-already-closed";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "締め済みの月です";
+        }
+    }
+
+    /**
+     * 承認済みの月への意思表示。
+     *
+     * <p><strong>締め済みと分ける。</strong> 承認済みは承認を取り消せば直せるので、
+     * 利用者への案内がまったく違う。
+     */
+    final class MonthNotEditableException extends DomainException {
+
+        @java.io.Serial
+        private static final long serialVersionUID = 1L;
+
+        MonthNotEditableException(YearMonth month) {
+            super("承認済みの月は変更できません: " + month);
+        }
+
+        @Override
+        public String errorCode() {
+            return "urn:kintai:error:month-not-editable";
+        }
+
+        @Override
+        public DomainErrorKind kind() {
+            return DomainErrorKind.CONFLICT;
+        }
+
+        @Override
+        public String title() {
+            return "承認済みの月です";
+        }
+    }
+
+    /**
      * その月を締めた社員が<strong>1 人でもいるか</strong>。
      *
      * <p><strong>会社カレンダーの変更に使う。</strong>

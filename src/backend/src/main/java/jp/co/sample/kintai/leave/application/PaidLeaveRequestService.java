@@ -395,12 +395,8 @@ public class PaidLeaveRequestService {
      * 承認済みは承認を取り消せば直せるので、利用者への案内がまったく違う。
      */
     private void requireMonthEditable(EmployeeId employeeId, YearMonth month) {
-        if (monthClosure.isClosed(employeeId, month)) {
-            throw new MonthAlreadyClosedException(month);
-        }
-        if (!monthClosure.acceptsCorrectionRequest(employeeId, month)) {
-            throw new MonthNotEditableException(month);
-        }
+        // ★ 判定はポートが持つ。訂正申請とまったく同じ規則なので、写すと片方が古くなる
+        monthClosure.requireEditable(employeeId, month);
     }
 
     /**
@@ -418,10 +414,8 @@ public class PaidLeaveRequestService {
 
     private void requireApprover(Requester requester, EmployeeId employeeId,
                                  YearMonth month) {
-        Approver approver = approverPolicy.resolve(employeeId, month, LocalDate.now(clock));
-        if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new NotApproverException();
-        }
+        approverPolicy.requireApprover(requester, employeeId, month,
+                LocalDate.now(clock));
     }
 
     /**

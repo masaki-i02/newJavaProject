@@ -507,11 +507,9 @@ public class MonthlyAttendanceService {
      */
     private void requireApprover(Requester requester, EmployeeId employeeId,
                                  YearMonth month) {
-        Approver approver = approverPolicy.resolve(employeeId, month,
+        // ★ 判定は ApproverPolicy が持つ。3 つのサービスが同じ本文を写していた
+        approverPolicy.requireApprover(requester, employeeId, month,
                 LocalDate.now(clock));
-        if (!approver.isApprovedBy(requester.employeeId(), requester.has(Role.HR))) {
-            throw new NotApproverException();
-        }
     }
 
     /** 月次勤怠が無い。 */
