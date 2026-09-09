@@ -119,7 +119,7 @@ class MonthlyCycleScenarioTest extends ScenarioTestBase {
      * どれか 1 つでも取り残されると、直したはずの数字が別の場所に古いまま残る。
      */
     @Test
-    @DisplayName("IT-SCN-03 打刻漏れ → 訂正申請 → 承認 → 再提出 → 締め")
+    @DisplayName("IT-SCN-03 / UT-BR09-09 打刻漏れ → 訂正申請 → 承認 → 再提出 → 締め")
     void correctMissingPunchThenClose() throws Exception {
         月を通して定時で働く(山田, 四月);
 

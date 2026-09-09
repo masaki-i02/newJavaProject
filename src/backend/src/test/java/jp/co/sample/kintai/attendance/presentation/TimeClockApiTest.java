@@ -635,7 +635,16 @@ class TimeClockApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isOk())
                     // ★ 秒が 0 でも省かない。toString() に任せると 09:00 になる
                     .andExpect(jsonPath("$.days[0].slices[0].startedAt")
-                            .value("2026-04-06T09:00:00"));
+                            .value("2026-04-06T09:00:00"))
+                    // ★ 終了も見る。開始と終了は同じ型が隣り合っているので、
+                    //   入れ替えてもコンパイルは通る（落とし穴 187）。
+                    //   所定 8 時間で区間が割れるので、1 つ目は 17:00 で終わる
+                    .andExpect(jsonPath("$.days[0].slices[0].endedAt")
+                            .value("2026-04-06T17:00:00"))
+                    .andExpect(jsonPath("$.days[0].slices[1].startedAt")
+                            .value("2026-04-06T17:00:00"))
+                    .andExpect(jsonPath("$.days[0].slices[1].endedAt")
+                            .value("2026-04-06T18:00:00"));
         }
 
         /** ちょうど 366 日は通る。境界の内側だけを試すと上限そのものを検査しない。 */

@@ -117,19 +117,22 @@ class MonthlySettlementResponseTest {
                 Duration.ofMinutes(8520), Duration.ofMinutes(8400),
                 Duration.ofMinutes(10628),
                 Duration.ZERO, Duration.ZERO, Duration.ZERO,
-                Duration.ofMinutes(420),   // 時間外
+                Duration.ofMinutes(3660),  // 時間外（60 時間 + 60 分）
                 Duration.ZERO,             // 不足（フレックスは同時に正にならない）
                 Duration.ofMinutes(90),
                 Duration.ofMinutes(35),    // コアタイム不在
                 0, List.of(),
-                AgreementUsage.of(Duration.ofMinutes(420), Duration.ofMinutes(480),
+                AgreementUsage.of(Duration.ofMinutes(3660), Duration.ofMinutes(480),
                         Duration.ofMinutes(1500)));
 
         var response = MonthlySettlementResponse.from(settlement, 1L);
 
         assertThat(response.coreTimeAbsenceMinutes()).as("コアタイム不在").isEqualTo(35);
+        // ★ 60 時間超は「時間外 − 3600 分」。他の項目とはっきり違う数にする
+        assertThat(response.overtimeOver60Minutes())
+                .as("60 時間を超えたぶん（割増 +50%）").isEqualTo(60);
         assertThat(response.agreement().combinedMinutes())
-                .as("6 項 2 号の対象（時間外 + 法定休日）").isEqualTo(900);
+                .as("6 項 2 号の対象（時間外 + 法定休日）").isEqualTo(4140);
         assertThat(response.agreement().monthlyLimitMinutes())
                 .as("限度時間（月 45 時間）").isEqualTo(2700);
         assertThat(response.agreement().annualLimitMinutes())

@@ -42,7 +42,7 @@ class LifecycleScenarioTest extends ScenarioTestBase {
      * 日次も月次も個別には動くのに<strong>初月を締めようとして初めて止まる。</strong>
      */
     @Test
-    @DisplayName("IT-SCN-06 月中入社（4/15）の初月を締められる")
+    @DisplayName("IT-SCN-06 / UT-BR10-18 月中入社（4/15）の初月を締められる")
     void closeFirstMonthOfMidMonthHire() throws Exception {
         var 四月 = YearMonth.of(2026, 4);
         var 入社 = LocalDate.of(2026, 4, 15);
@@ -79,7 +79,7 @@ class LifecycleScenarioTest extends ScenarioTestBase {
      * 本人だけに提出を許すと<strong>提出済に到達できず、承認も締めもできない。</strong>
      */
     @Test
-    @DisplayName("IT-SCN-07 月中退職（9/20）の最終月を人事が代理提出して締められる")
+    @DisplayName("IT-SCN-07 / UT-BR10-15 月中退職（9/20）の最終月を人事が代理提出して締められる")
     void closeFinalMonthOfRetiredEmployee() throws Exception {
         var 九月 = YearMonth.of(2026, 9);
         var 退職日 = LocalDate.of(2026, 9, 20);

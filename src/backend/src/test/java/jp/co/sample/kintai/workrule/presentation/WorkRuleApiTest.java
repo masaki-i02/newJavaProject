@@ -576,6 +576,51 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.days[1].name").doesNotExist());
         }
 
+        /**
+         * <strong>一括設定の応答が、実際に登録した日を数えている。</strong>
+         *
+         * <p>一括設定を叩くテストは 4 件あったが<strong>すべて拒否の側</strong>で、
+         * 成功したときの {@code registeredCount} と {@code byDayType} を
+         * <strong>1 件も読んでいなかった</strong>（落とし穴 187）。
+         * 年度の全日が登録されていることは割増賃金の基礎額の分母の前提なので
+         * （落とし穴 127）、人事はこの数だけを見て「登録できた」と判断する。
+         *
+         * <p><strong>区分ごとの件数をすべて違う数にする。</strong>
+         * 同じ数だと入れ替わっても気づけない（落とし穴 24）。
+         * あわせて、曜日の規則より {@code overrides} が後に効くことも確かめる
+         * （6/2 は水曜なので、規則だけなら所定労働日になる）。
+         */
+        @Test
+        @DisplayName("IT-CAL-17 一括設定は登録件数と区分ごとの内訳を返す")
+        void bulkRegistrationCountsWhatItWrote() throws Exception {
+            mockMvc.perform(post("/api/calendars/bulk").with(asHr())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"from":"2027-06-01","toExclusive":"2027-06-08",
+                                     "rules":[
+                                       {"dayOfWeek":"SUNDAY","dayType":"LEGAL_HOLIDAY",
+                                        "name":"法定休日"},
+                                       {"dayOfWeek":"SATURDAY","dayType":"NON_LEGAL_HOLIDAY",
+                                        "name":"所定休日"}],
+                                     "overrides":[
+                                       {"date":"2027-06-02","dayType":"NON_LEGAL_HOLIDAY",
+                                        "name":"創立記念日"}]}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.registeredCount").value(7))
+                    .andExpect(jsonPath("$.byDayType.WORKDAY").value(4))
+                    .andExpect(jsonPath("$.byDayType.NON_LEGAL_HOLIDAY").value(2))
+                    .andExpect(jsonPath("$.byDayType.LEGAL_HOLIDAY").value(1));
+
+            mockMvc.perform(get("/api/calendars").with(asTaro())
+                            .param("from", "2027-06-01").param("toExclusive", "2027-06-08"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.days[1].dayType")
+                            .value("NON_LEGAL_HOLIDAY"))
+                    .andExpect(jsonPath("$.days[1].name").value("創立記念日"))
+                    .andExpect(jsonPath("$.workdayCount").value(4));
+        }
+
         /** 期間の逆転を 500 にしない（落とし穴 105）。 */
         @Test
         @DisplayName("IT-CAL-15 期間が逆転していると 422")

@@ -592,3 +592,4 @@ if (!monthClosureQuery.acceptsChanges(employeeId, month)) { ... }
 | `IT-CAL-14` | 登録した暦日区分 | 反映され、`workdayCount` から外れる |
 | `IT-CAL-15` | 期間の逆転 | 422 `invalid-period`（500 にしない）|
 | `IT-CAL-16` | **名称の無い日** | `name` の項目そのものが無い。空文字だと「名前が無い」と「名前が空」が同じ値になる |
+| `IT-CAL-17` | **一括設定の応答** | `registeredCount` と `byDayType` が実際に登録した日を数えている。曜日の規則より `overrides` が後に効く |

@@ -1183,8 +1183,8 @@ public class WorkRuleMasterService {
         @Serial
         private static final long serialVersionUID = 1L;
 
-        MonthAlreadyClosedException(YearMonth month, String 対象) {
-            super("締め済みの月に影響するため%sを変更できません: %s".formatted(対象, month));
+        MonthAlreadyClosedException(YearMonth month, String subject) {
+            super("締め済みの月に影響するため%sを変更できません: %s".formatted(subject, month));
         }
 
         @Override

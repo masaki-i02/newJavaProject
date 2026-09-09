@@ -225,9 +225,9 @@ public class EmployeeLifecycleService {
      * 全社共有の表と同じ判定（{@code isClosedForAnyone}）を使う（落とし穴 72）。
      * 部署長の任命・部署の廃止（{@code DepartmentService}）も同じ規則で守る。
      */
-    private void requireMonthNotClosed(EmployeeId id, YearMonth month, String 操作) {
+    private void requireMonthNotClosed(EmployeeId id, YearMonth month, String operation) {
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new MonthAlreadyClosedException(month, 操作);
+            throw new MonthAlreadyClosedException(month, operation);
         }
     }
 
@@ -336,8 +336,8 @@ public class EmployeeLifecycleService {
         @Serial
         private static final long serialVersionUID = 1L;
 
-        MonthAlreadyClosedException(YearMonth month, String 操作) {
-            super("締め済みの月に遡るため%sできません: %s".formatted(操作, month));
+        MonthAlreadyClosedException(YearMonth month, String operation) {
+            super("締め済みの月に遡るため%sできません: %s".formatted(operation, month));
         }
 
         @Override

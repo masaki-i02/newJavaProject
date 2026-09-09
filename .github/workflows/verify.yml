@@ -103,6 +103,11 @@ jobs:
       - name: エラーの型を設計書と突き合わせる
         working-directory: doc/_tools
         run: python3 check-error-codes.py
+      # ★ 日本語の識別子は Java の仕様としては合法なので、コンパイラは何も言わない。
+      #   引数名は ArchUnit（バイトコード）からも見えないので、源泉を読む（落とし穴 29・74・129）
+      - name: 本番コードの識別子が ASCII であることを確かめる
+        working-directory: doc/_tools
+        run: python3 check-identifiers.py
       - name: マイグレーションを生成する
         working-directory: doc/_tools
         run: python3 build-migrations.py

@@ -425,10 +425,10 @@ public class DepartmentService {
      * 「部署長を過去日で交代させる」という同じ事実がもう一方の入口から素通りした
      * （落とし穴 136 の、クラスをまたいだ形）。
      */
-    private void requireMonthNotClosed(LocalDate date, String 操作) {
+    private void requireMonthNotClosed(LocalDate date, String operation) {
         YearMonth month = YearMonth.from(date);
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new EmployeeLifecycleService.MonthAlreadyClosedException(month, 操作);
+            throw new EmployeeLifecycleService.MonthAlreadyClosedException(month, operation);
         }
     }
 

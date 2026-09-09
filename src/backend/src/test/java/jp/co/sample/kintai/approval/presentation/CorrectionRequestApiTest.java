@@ -466,7 +466,7 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
          * 戻さないと、承認者が確認した内容と実際に確定される内容が食い違う。
          */
         @Test
-        @DisplayName("IT-APV-66 提出済みの月の訂正を承認すると、月次勤怠が下書きに戻る")
+        @DisplayName("IT-APV-66 / UT-BR09-04 / UT-AUD-02 提出済みの月の訂正を承認すると、月次勤怠が下書きに戻る")
         void revertsMonthlyAttendance() throws Exception {
             mockMvc.perform(post(
                             "/api/employees/{id}/monthly-attendances/{month}/submission",
@@ -522,6 +522,46 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
                                     .value("urn:kintai:error:self-correction-decision"));
 
             assertThat(workedMinutesOf(TARGET)).isEqualTo(8 * 60);
+        }
+
+        /**
+         * <strong>訂正申請の承認者は {@code workDate} が属する月の承認者である</strong>
+         *（ドメインモデル設計書 4.1.2）。
+         *
+         * <p>月次勤怠の承認者と食い違うと、
+         * <strong>「月次は承認できるが訂正は承認できない」上長</strong>が生まれる。
+         *
+         * <p>この配線を固定するには<strong>月をまたぐ異動</strong>が要る。
+         * 部署が 1 つで所属も開いたままだと、どの月で解決しても同じ人が返るので、
+         * {@code YearMonth.from(request.workDate())} を
+         * 「今日の月」や「決裁日の月」に書き換えても 1 件も落ちない。
+         */
+        @Test
+        @DisplayName("UT-BR09-07 訂正の承認者は勤務日が属する月の承認者である")
+        void approverIsResolvedForTheWorkDateMonth() throws Exception {
+            // 5/1 付で開発部へ異動する。訂正の対象は 4/6（異動前の月）
+            var dev = new DepartmentId(UUID.randomUUID());
+            departments.save(Department.root(dev, new DepartmentCode("DEV"), "開発部"));
+            var devManager = hire("E0200", "開発 三郎", Role.EMPLOYEE);
+            var transferOn = LocalDate.of(2026, 5, 1);
+            assignments.save(Assignment.startingAt(devManager, dev, HIRED));
+            managerships.save(Managership.startingAt(dev, devManager, HIRED));
+            assignments.transfer(Assignment.startingAt(yamada, dev, transferOn));
+
+            String id = createRequest();
+
+            // 5 月の承認者（異動先の長）は、4 月の訂正を承認できない
+            decide(id, "approval", devManager, "E0200",
+                    "{\"version\":%d}".formatted(versionOf(id)),
+                    Role.EMPLOYEE, Role.APPROVER)
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:not-approver"));
+
+            // 4 月の承認者（異動前の長）は承認できる
+            decide(id, "approval", manager, "E0100",
+                    "{\"version\":%d}".formatted(versionOf(id)),
+                    Role.EMPLOYEE, Role.APPROVER)
+                    .andExpect(status().isOk());
         }
 
         @Test
@@ -646,7 +686,7 @@ class CorrectionRequestApiTest extends WebIntegrationTestBase {
         }
 
         @Test
-        @DisplayName("IT-APV-76 締め済みの月は month-already-closed で拒否される")
+        @DisplayName("IT-APV-76 / UT-BR09-05 締め済みの月は month-already-closed で拒否される")
         void closedMonth() throws Exception {
             submitAndApprove();
             transition("closure", hr, "E0900", Role.EMPLOYEE, Role.HR);

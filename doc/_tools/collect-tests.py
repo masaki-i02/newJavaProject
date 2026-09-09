@@ -170,9 +170,16 @@ def render_by_requirement(rows):
 # ★ フロントエンドも見る。見ないと、画面のテストだけが突き合わせの外に置かれ、
 #   「一覧に無い ID がコードにだけある」状態を検出できない（落とし穴 107）。
 #   置き場所ごとに ID の書き方が違うので、正規表現も一緒に持つ。
-DISPLAY_NAME = re.compile(r'@DisplayName\("\s*((?:UT|IT)-[A-Z0-9]+-\d+)\b')
+# ★ <strong>1 つのテストが複数の ID を名乗れる。</strong>
+#   設計書は同じ規則を層ごとに書くので（ドメインモデル設計書の `UT-BR10-02` と
+#   API設計書の `IT-APV-45` は同じ観点）、確かめるテストは 1 本でよい。
+#   先頭の ID を 1 つだけ拾うと、もう一方が「どのテストも名乗っていない」ままになる。
+#   区切りは ` / `。`@DisplayName("IT-APV-45 / UT-BR10-02 …")` と書く
+ID = r'(?:UT|IT)-[A-Z0-9]+-\d+'
+IDS = r'(%s(?:\s*/\s*%s)*)' % (ID, ID)
+DISPLAY_NAME = re.compile(r'@DisplayName\("\s*' + IDS)
 JS_TEST_NAME = re.compile(
-    r"""\b(?:it|test)\(\s*['"`]\s*((?:UT|IT)-[A-Z0-9]+-\d+)\b""")
+    r"""\b(?:it|test)\(\s*['"`]\s*""" + IDS)
 
 TEST_SOURCES = [
     (os.path.normpath(os.path.join(ROOT, '..', 'src', 'backend', 'src', 'test', 'java')),
@@ -201,19 +208,25 @@ def collect_from_code():
                     m = pattern.search(line)
                     if m:
                         rel = '%s/%s' % (label, os.path.relpath(path, source))
-                        found.setdefault(m.group(1), []).append(f'{rel}:{number}')
+                        for tid in re.split(r'\s*/\s*', m.group(1)):
+                            found.setdefault(tid, []).append(f'{rel}:{number}')
     return found
 
 
 def check_code(defined):
-    """設計書とテストコードの ID を突き合わせる。
+    """設計書とテストコードの ID を<strong>両方向に</strong>突き合わせる。
 
     **警告では見過ごされる。落として気づかせる**（落とし穴 89）。
-    落とすのは、次の 2 つだけである。
+    落とすのは、次の 3 つである。
 
     - 設計書に無い ID をコードが名乗っている … 一覧に現れないので
       要件 → 設計 → テスト → 実装 の追跡が切れる（落とし穴 45・62）。
       廃止した ID を消し忘れたコードもここで出る
+    - <strong>設計書にある ID をどのテストも名乗っていない</strong> …
+      観点を書いただけで確かめていない。**テストは存在するテストしか
+      検査しないので、この向きの欠落はテスト数では絶対に検出できない**
+      （落とし穴 155 が経路について言っていることを、観点について言う）。
+      実際この向きの検査が無かったあいだに 21 件が溜まっていた
     - 1 つの ID を<strong>別々のテストクラス</strong>が名乗っている …
       無関係な観点が同じ ID を借りている印である
       （`UT-LV-17` が「法定の範囲外の付与日数」と「連番が負」の両方を指していた）
@@ -222,23 +235,33 @@ def check_code(defined):
     1 つの観点を閾値の両側から見るとき、テストを 2 つに分けるのは
     むしろ正しい（落とし穴 24）。ここで落とすと、
     「1 行にまとめる」方向に圧力がかかって逆効果になる。
+
+    <strong>「まだ実装していない」ための除外口は設けない。</strong>
+    設けると、そこへ入れたまま忘れる（落とし穴 166：行き先の
+    milestone が閉じた瞬間に迷子になる）。観点を書くのは
+    確かめると決めたときであり、確かめないなら設計書から消す。
     """
     problems = []
-    for tid, places in sorted(collect_from_code().items()):
+    claimed = collect_from_code()
+    for tid, places in sorted(claimed.items()):
         classes = {place.split(':')[0] for place in places}
         if len(classes) > 1:
             problems.append(f'{tid} を {len(classes)} 個のテストクラスが名乗っている: '
                             + ', '.join(sorted(places)))
         if tid not in defined:
             problems.append(f'{tid} は設計書に無い（{places[0]}）')
+    for tid in sorted(defined, key=lambda t: (t.split('-')[1], int(t.split('-')[2]))):
+        if tid not in claimed:
+            problems.append(f'{tid} を名乗るテストが 1 つも無い'
+                            f'（{defined[tid]}）')
     return problems
 
 
 def main():
-    defined = set()
+    defined = {}
     for prefix, path, title in TARGETS:
         rows = collect(prefix)
-        defined |= {r['id'] for r in rows}
+        defined.update({r['id']: r['source'] for r in rows})
         os.makedirs(os.path.dirname(path), exist_ok=True)
         io.open(path, 'w', encoding='utf-8').write(render(prefix, title, rows))
         print(f'{prefix}: {len(rows)} 件 → {os.path.relpath(path, ROOT)}')

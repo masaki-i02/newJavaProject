@@ -299,10 +299,33 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     leaveDate.minusDays(6).atTime(9, 0)), request.version());
         }
 
-        /** 遷移はすべて証跡に残る。<strong>どの遷移だったかも残す。</strong> */
+        /**
+         * 遷移はすべて証跡に残る。<strong>どの遷移だったかも、誰がしたかも残す。</strong>
+         *
+         * <p><strong>差戻しと承認の取消まで通す。</strong>
+         * 提出 → 承認 → 締めだけを流していたので、
+         * {@code REVOKE_APPROVAL} を書いている 1 行を {@code REJECT} に変えても
+         * <strong>1 件も落ちなかった</strong>。DB の遷移制約は
+         * {@code ('APPROVED','DRAFT')} を種別に関係なく許すので、
+         * 人事による承認の取消が「承認者が差し戻した」記録として 5 年残る
+         * （要件 7 章）。
+         *
+         * <p><strong>{@code actor_id} まで見る。</strong>
+         * 種別と実行者は別々の列で、取り違えても行は入る。
+         * 「誰が差し戻したのか」に答えられない証跡は証跡ではない
+         * （落とし穴 188 と同型）。
+         */
         @Test
-        @DisplayName("IT-APV-31 遷移が監査証跡に残る")
+        @DisplayName("IT-APV-31 / UT-AUD-01 遷移が監査証跡に残る")
         void auditTrail() throws Exception {
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk());
+            transition("rejection", manager, "E0100", "{\"reason\":\"打刻漏れです\"}",
+                    Role.EMPLOYEE, Role.APPROVER).andExpect(status().isOk());
+            submitAndApprove();
+            transition("approval-revocation", hr, "E0900",
+                    "{\"reason\":\"集計に誤りがありました\"}", Role.EMPLOYEE, Role.HR)
+                    .andExpect(status().isOk());
             submitAndApprove();
             transition("closure", hr, "E0900", null, Role.EMPLOYEE, Role.HR)
                     .andExpect(status().isOk());
@@ -310,7 +333,23 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
             assertThat(jdbc.queryForList("""
                     SELECT event_kind FROM approval_events ORDER BY occurred_at, created_at
                     """, String.class))
-                    .containsExactly("SUBMIT", "APPROVE", "CLOSE");
+                    .containsExactly("SUBMIT", "REJECT", "SUBMIT", "APPROVE",
+                            "REVOKE_APPROVAL", "SUBMIT", "APPROVE", "CLOSE");
+
+            // ★ 種別ごとに実行者が違う。同じ人で流すと取り違えても気づけない
+            assertThat(actorOf("REJECT")).as("差し戻したのは承認者").isEqualTo(manager.value());
+            assertThat(actorOf("REVOKE_APPROVAL")).as("取り消したのは人事")
+                    .isEqualTo(hr.value());
+            assertThat(actorOf("CLOSE")).as("締めたのは人事").isEqualTo(hr.value());
+            assertThat(jdbc.queryForObject("""
+                    SELECT comment FROM approval_events WHERE event_kind = 'REVOKE_APPROVAL'
+                    """, String.class)).isEqualTo("集計に誤りがありました");
+        }
+
+        private UUID actorOf(String kind) {
+            return jdbc.queryForObject(
+                    "SELECT actor_id FROM approval_events WHERE event_kind = ?",
+                    UUID.class, kind);
         }
 
         @Test
@@ -645,8 +684,46 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.type").value("urn:kintai:error:self-approval"));
         }
 
+        /**
+         * <strong>人事へ到達した月を、対象社員本人が `HR` として承認することはできない。</strong>
+         *
+         * <p>`HR` がその社員 1 人しかいない構成がこれにあたる。
+         * ドメインモデル設計書 3.2 は「その月は決裁できない。
+         * 人事担当を 2 名以上置くことで避ける」と定め、
+         * <strong>`ADMIN` へはエスカレーションしない</strong>と明記している
+         * （無条件の承認権を与えると BR-11 の 1〜4 をすべて迂回できる）。
+         *
+         * <p>{@code IT-APV-98} は差戻しの側だけを見ていた。
+         * 同じ規則を遷移ごとに当て忘れるのが落とし穴 171 である。
+         */
         @Test
-        @DisplayName("IT-APV-37 承認者でない社員は承認できない")
+        @DisplayName("UT-BR11-13 人事へ到達した月を本人が HR として承認できない")
+        void humanResourcesCannotApproveOwnMonth() throws Exception {
+            // 課長自身の月。本人が長なので承認者は上位へ遡り、根なので人事に落ちる
+            series.assign(manager, standard, HIRED);
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/submission",
+                            manager.value(), "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\":0}"))
+                    .andExpect(status().isOk());
+
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/approval",
+                            manager.value(), "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.HR))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"version\":1}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:self-approval"));
+
+            assertThat(jdbc.queryForObject("""
+                    SELECT status FROM monthly_attendances WHERE employee_id = ?
+                    """, String.class, manager.value()))
+                    .as("承認されていない").isEqualTo("SUBMITTED");
+        }
+
+        @Test
+        @DisplayName("IT-APV-37 / UT-BR10-03 承認者でない社員は承認できない")
         void notTheApprover() throws Exception {
             var other = hire("E0002", "無関係 三郎", Optional.empty(), Role.EMPLOYEE);
             transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
@@ -676,7 +753,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
         }
 
         @Test
-        @DisplayName("IT-APV-39 人事でなければ締められない")
+        @DisplayName("IT-APV-39 / UT-BR10-09 人事でなければ締められない")
         void onlyHumanResourcesCanClose() throws Exception {
             submitAndApprove();
 
@@ -697,6 +774,38 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
                     .andExpect(status().isForbidden())
                             .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
         }
+
+        /**
+         * <strong>代理提出できるのは `HR` だけである</strong>（API設計書 未決 5）。
+         *
+         * <p>403 の条件は「本人でない」かつ「`HR` でない、または対象が在籍中」の 2 つで、
+         * 検査があったのは後者（{@code IT-APV-40}）だけだった。
+         * <strong>{@code requester.has(Role.HR)} を消しても 1 件も落ちなかった。</strong>
+         * この条件が消えると一般社員が退職した同僚の最終月を勝手に提出でき、
+         * しかも代理理由の検査を通るので {@code PROXY_SUBMIT} として 5 年残る。
+         */
+        @Test
+        @DisplayName("UT-BR10-16 退職者の最終月でも、人事でなければ提出できない")
+        void proxySubmissionRequiresHumanResources() throws Exception {
+            var retired = hire("E0007", "退職 七郎",
+                    Optional.of(LocalDate.of(2026, 4, 30)), Role.EMPLOYEE);
+            assignments.save(Assignment.startingAt(retired, sales, HIRED));
+            series.assign(retired, standard, HIRED);
+
+            // ★ 実行者は承認者（課長）。ロールは持っているが `HR` ではない
+            mockMvc.perform(post("/api/employees/{id}/monthly-attendances/{month}/submission",
+                            retired.value(), "2026-04")
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"comment\":\"代わりに出しておきます\",\"version\":0}"))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.type").value("urn:kintai:error:forbidden"));
+
+            assertThat(jdbc.queryForObject("""
+                    SELECT count(*) FROM monthly_attendances WHERE employee_id = ?
+                    """, Integer.class, retired.value()))
+                    .as("提出されていない").isZero();
+        }
     }
 
     @Nested
@@ -704,7 +813,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
     class ReasonRequired {
 
         @Test
-        @DisplayName("IT-APV-41 差戻しは理由が必須")
+        @DisplayName("IT-APV-41 / UT-BR10-04 差戻しは理由が必須")
         void rejectionRequiresReason() throws Exception {
             transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
                     .andExpect(status().isOk());
@@ -768,7 +877,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
          * 締めてしまうと戻す手段が無い。
          */
         @Test
-        @DisplayName("IT-APV-44 まだ終わっていない月は提出できない")
+        @DisplayName("IT-APV-44 / UT-BR10-14 まだ終わっていない月は提出できない")
         void monthNotFinished() throws Exception {
             mockMvc.perform(post(
                             "/api/employees/{id}/monthly-attendances/{month}/submission",
@@ -783,7 +892,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
 
         /** 未確定の日があると提出できない。<strong>どの日かを返す。</strong> */
         @Test
-        @DisplayName("IT-APV-45 未計算の勤務日があると提出できず、その日付が返る")
+        @DisplayName("IT-APV-45 / UT-BR10-02 未計算の勤務日があると提出できず、その日付が返る")
         void incompleteDays() throws Exception {
             dailyAttendances.save(new DailyAttendanceCalculator(calendar)
                     .calculate(yamada, LocalDate.of(2026, 4, 1),
@@ -822,6 +931,51 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
             transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("SUBMITTED"));
+        }
+
+        /**
+         * <strong>休憩不足は警告であって、提出を止めない</strong>（BR-08）。
+         *
+         * <p>止めると、労基法 34 条に足りない休憩で働いてしまった月を
+         * <strong>永久に締められない</strong>。休憩を後から足す手段は無く、
+         * 足せば働いていない時間が一次証拠として残る（落とし穴 19・90）。
+         *
+         * <p><strong>承認者が見る経路まで確かめる。</strong>
+         * 提出が通るだけでは、警告はどこにも現れない。
+         * BR-08 の出口は日次の {@code breakRequirementSatisfied} 1 つしかないのに、
+         * <strong>この項目を読むテストが 1 件も無かった</strong>（落とし穴 187）。
+         * 足りている日と足りていない日を対で見る。片側だけだと、
+         * 定数を返す変異が生き残る（落とし穴 24・43）。
+         */
+        @Test
+        @DisplayName("UT-BR10-17 休憩不足でも提出でき、警告は日次から読める")
+        void shortBreakDoesNotBlockSubmission() throws Exception {
+            // 4/2 を 9:00–14:00（実労働 5 時間）に作り直す。6 時間以下なので休憩は要らない
+            jdbc.update("DELETE FROM daily_attendances WHERE work_date = '2026-04-02'");
+            jdbc.update("DELETE FROM time_clock_events WHERE work_date = '2026-04-02'");
+            var shortDay = LocalDate.of(2026, 4, 2);
+            timeClocks.append(yamada, shortDay,
+                    new TimeClockEvent.ClockIn(shortDay.atTime(9, 0)), yamada);
+            timeClocks.append(yamada, shortDay,
+                    new TimeClockEvent.ClockOut(shortDay.atTime(14, 0)), yamada);
+            WorkRule rule = workRules.findEffective(yamada, shortDay).orElseThrow();
+            dailyAttendances.save(new DailyAttendanceCalculator(calendar).calculate(
+                    yamada, shortDay, timeClocks.findByWorkDate(yamada, shortDay), rule),
+                    rule.id());
+
+            // 4/1 は 9:00–17:00・休憩 0 分。実労働 8 時間には 45 分の休憩が要る
+            transition("submission", yamada, "E0001", null, Role.EMPLOYEE)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("SUBMITTED"));
+
+            mockMvc.perform(get("/api/employees/{id}/attendances", yamada.value())
+                            .with(as(manager, "E0100", Role.EMPLOYEE, Role.APPROVER))
+                            .param("from", "2026-04-01").param("toExclusive", "2026-04-03"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.days[?(@.workDate=='2026-04-01')]"
+                            + ".breakRequirementSatisfied").value(false))
+                    .andExpect(jsonPath("$.days[?(@.workDate=='2026-04-02')]"
+                            + ".breakRequirementSatisfied").value(true));
         }
     }
 
@@ -953,7 +1107,7 @@ class MonthlyAttendanceApiTest extends WebIntegrationTestBase {
          * 未承認の 1 人を例外にすると、承認済みの社員の締めまで巻き戻る。
          */
         @Test
-        @DisplayName("IT-APV-51 未承認の社員が混ざっても、承認済みの社員は締まる")
+        @DisplayName("IT-APV-51 / UT-BR10-11 未承認の社員が混ざっても、承認済みの社員は締まる")
         void partialSuccess() throws Exception {
             submitAndApprove();
 

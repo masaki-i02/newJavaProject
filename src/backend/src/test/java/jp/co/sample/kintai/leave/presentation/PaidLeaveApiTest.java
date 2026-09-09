@@ -991,6 +991,13 @@ class PaidLeaveApiTest extends WebIntegrationTestBase {
                     .andExpect(jsonPath("$.asOf").value("2026-11-10"))
                     .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].shortfallDays"
                             .formatted(yamada.value())).value(5))
+                    // ★ 年 5 日は法が決めた定数（労基法 39 条 7 項）。
+                    //   takenDays・shortfallDays と同じ int が隣り合っており、
+                    //   入れ替えてもコンパイルは通る（落とし穴 187）
+                    .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].requiredDays"
+                            .formatted(yamada.value())).value(5))
+                    .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].takenDays"
+                            .formatted(yamada.value())).value(0))
                     .andExpect(jsonPath("$.items[?(@.employeeId=='%s')].deadline"
                             .formatted(yamada.value())).value("2027-09-30"))
                     // ★ 数える先は deadline（閉区間の最終日）。
