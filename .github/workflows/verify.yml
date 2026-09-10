@@ -108,6 +108,11 @@ jobs:
       - name: 本番コードの識別子が ASCII であることを確かめる
         working-directory: doc/_tools
         run: python3 check-identifiers.py
+      # ★ 画面だけが手で数えられていた。テストは存在する画面しか検査しないので、
+      #   設計書にあって実装が無い画面は実ブラウザの通しが 12 件あっても落ちない（落とし穴 155）
+      - name: 画面設計書の一覧と実装を突き合わせる
+        working-directory: doc/_tools
+        run: python3 check-screens.py
       - name: マイグレーションを生成する
         working-directory: doc/_tools
         run: python3 build-migrations.py

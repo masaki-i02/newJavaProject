@@ -175,13 +175,34 @@ public interface MonthClosureQuery {
     /**
      * その月を締めた社員が<strong>1 人でもいるか</strong>。
      *
-     * <p><strong>会社カレンダーの変更に使う。</strong>
-     * 暦日区分は全社で共有する 1 つの表なので、社員ごとの判定では足りない。
+     * <p><strong>判定の基準は「表が全社共有か」ではなく、
+     * 「影響する社員を呼び出し側が数え上げているか」である。</strong>
+     *
+     * <p>会社カレンダーは全社で共有する 1 つの表なので、社員ごとの判定では足りない。
      * 誰か 1 人でも締めた月の暦日区分を変えると、
      * 休日割増の計算が変わり<strong>確定済みの勤怠と矛盾する。</strong>
      *
-     * <p>社員を指定できる変更（就業規則の適用）は
-     * {@link #isClosed(EmployeeId, YearMonth)} で判定すればよい。
+     * <p><strong>社員を 1 人だけ指定する操作でも、こちらを使うことがある。</strong>
+     * 異動・退職・退職の取消は対象社員が 1 人に決まるが、
+     * <strong>その社員が部署長なら部下全員の承認者が動く</strong>ので、
+     * 呼び出し側は影響する社員を数え上げられない
+     * （CLAUDE.md 落とし穴 172）。部署長の任命と部署の廃止も同じ。
+     *
+     * <p>この 5 経路とカレンダーの変更が、いまこのメソッドを呼ぶ側である。
+     *
+     * <table>
+     *   <caption>どちらを使うか</caption>
+     *   <tr><th>操作</th><th>判定</th><th>理由</th></tr>
+     *   <tr><td>打刻・日次と月次の再計算</td><td>{@link #isClosed}</td>
+     *       <td>影響するのはその社員のその月だけ</td></tr>
+     *   <tr><td>就業規則の<em>適用</em></td><td>{@link #isClosed}</td>
+     *       <td>適用は社員ごとに閉じている</td></tr>
+     *   <tr><td>会社カレンダー・就業規則の<em>改定</em></td><td>{@code isClosedForAnyone}</td>
+     *       <td>全社で共有する表である</td></tr>
+     *   <tr><td>異動・退職・退職の取消・部署長の任命・部署の廃止</td>
+     *       <td>{@code isClosedForAnyone}</td>
+     *       <td>承認者が動く範囲を呼び出し側が数え上げていない</td></tr>
+     * </table>
      */
     boolean isClosedForAnyone(YearMonth month);
 }
