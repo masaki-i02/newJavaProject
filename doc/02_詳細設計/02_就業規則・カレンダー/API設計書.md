@@ -373,6 +373,21 @@ type WorkRuleRevision =
 **DB では「在籍者全員に規則が適用されている」ことを守れない**ため、
 画面で検知できるようにする（[DB設計書 5.1](DB設計書.md)）。
 
+**差は 2 つの問いから取る。1 本の SQL にまとめない。**
+
+| 問い | 持っているコンテキスト |
+| --- | --- |
+| その日に在籍しているか | `employee`（`EmployeeDirectoryService.employedDuring`）|
+| その日に規則が適用されているか | `workrule`（`WorkRuleSeriesRepository.findEmployeesWithRuleOn`）|
+
+まとめると `workrule` が `employees` を直接読み、
+`hired_on <= :date AND (retired_on IS NULL OR retired_on >= :date)` という
+**`employee` が所有する在籍の判定を書き写す**ことになる（落とし穴 69・170）。
+退職日は最終在籍日（閉区間）なので、この述語を片方だけ直すと
+**退職日当日の 1 日が一方からだけ消える**（落とし穴 10）。
+しかも **SQL の中の写しは ArchUnit にも `check-identifiers.py` にも見えない**ので、
+食い違っても誰も気づけない。
+
 版に隙間がある場合（系列は適用されているが、その日に有効な版が無い）も
 ここに現れる。呼び出し側から見れば、どちらも「規則が引けない」状態で区別する意味がない。
 
@@ -586,6 +601,7 @@ if (!monthClosureQuery.acceptsChanges(employeeId, month)) { ... }
 | `IT-WR-37` | 指定日に有効な版 | その日を含む版が返る |
 | `IT-WR-38` | **版が始まる前の日付** | 404 `work-rule-version-not-effective`。**系列が無い場合とは別の型** |
 | `IT-WR-39` | 規則の無い在籍者 | 適用済みの社員は現れない。社員番号も氏名も返さない |
+| `IT-WR-49` | **退職者と未来日入社の社員** | 現れない。在籍の判定は `employee` に問う（`workrule` に写さない）|
 | `IT-WR-40` | 本人が自分の適用履歴を見る | 見られる。自分の労働条件そのものである |
 | `IT-WR-41` | 一般社員が他人の適用履歴を見る | 403 |
 | `IT-CAL-13` | **未登録の日** | `WORKDAY` として配列に含まれる。「配列に無い日は所定労働日」を持たせない |

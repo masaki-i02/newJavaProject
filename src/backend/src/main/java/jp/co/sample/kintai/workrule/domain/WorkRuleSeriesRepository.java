@@ -40,12 +40,20 @@ public interface WorkRuleSeriesRepository {
     List<WorkRuleAssignment> findAssignments(EmployeeId employeeId);
 
     /**
-     * 指定日に規則が適用されていない在籍者。
+     * 指定日に規則が<strong>適用されている</strong>社員。
      *
-     * <p>「在籍者全員に規則が適用されている」ことは DB では守れない。
-     * 画面で検知するために置く。
+     * <p><strong>「適用されていない在籍者」を返さない。</strong>
+     * それを 1 本の SQL で書くと、`workrule` が `employees` を直接読み、
+     * 「その日に在籍しているか」という<strong>`employee` が所有する判定</strong>を
+     * ここに書き写すことになる（CLAUDE.md 落とし穴 69・170）。
+     * SQL の中の写しは ArchUnit にも見えないので、
+     * 片方だけが古くなっても誰も気づけない。
+     *
+     * <p>在籍者との差は {@code application} で取る。
+     * 「在籍者全員に規則が適用されている」ことは DB では守れないので、
+     * 人事が気づく経路そのものは必要である。
      */
-    List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date);
+    List<EmployeeId> findEmployeesWithRuleOn(LocalDate date);
 
     /**
      * 期間に<strong>実際に適用されている</strong>系列と、その適用範囲（BR-18）。

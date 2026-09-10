@@ -106,6 +106,17 @@ public final class Organization {
         return this;
     }
 
+    /**
+     * 本番の規則を使った「承認者が見てよい範囲」。
+     *
+     * <p>上向き（1 人を見てよいか）と下向き（見てよい部署はどれか）の
+     * 両方を持つので、2 つが食い違わないことを 1 つのテストで確かめられる。
+     */
+    public jp.co.sample.kintai.employee.domain.ApproverScope approverScope() {
+        return new jp.co.sample.kintai.employee.domain.ApproverScope(
+                chart(), managershipRepository(), departmentRepository());
+    }
+
     /** 本番の導出ロジックを使った組織図。 */
     public OrganizationChart chart() {
         return new RepositoryBackedOrganizationChart(

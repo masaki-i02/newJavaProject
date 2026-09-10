@@ -95,8 +95,8 @@ class WorkRuleSeriesRepositoryAdapter implements WorkRuleSeriesRepository {
     }
 
     @Override
-    public List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date) {
-        return assignments.findEmployeesWithoutRuleOn(date).stream()
+    public List<EmployeeId> findEmployeesWithRuleOn(LocalDate date) {
+        return assignments.findEmployeesWithRuleOn(date).stream()
                 .map(EmployeeId::new).toList();
     }
 

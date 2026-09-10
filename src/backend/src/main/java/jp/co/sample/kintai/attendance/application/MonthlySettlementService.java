@@ -496,7 +496,7 @@ public class MonthlySettlementService {
             throw new AccessDeniedException();
         }
         if (monthClosure.isClosed(employeeId, month)) {
-            throw new MonthAlreadyClosedException(month);
+            throw MonthClosureQuery.MonthAlreadyClosedException.recalculating(month);
         }
         SettlementPeriod period = periodOf(employeeId, month);
         requireAllDaysCalculated(employeeId, period);
@@ -678,32 +678,6 @@ public class MonthlySettlementService {
         @Override
         public String title() {
             return "就業規則が適用されていません";
-        }
-    }
-
-    /** 締め済みの月は再計算しない（BR-10）。 */
-    public static final class MonthAlreadyClosedException extends DomainException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        MonthAlreadyClosedException(YearMonth month) {
-            super("締め済みの月は再計算できません: " + month);
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:month-already-closed";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "締め済みの月です";
         }
     }
 

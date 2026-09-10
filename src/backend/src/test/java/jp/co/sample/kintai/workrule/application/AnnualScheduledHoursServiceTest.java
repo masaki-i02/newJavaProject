@@ -365,7 +365,7 @@ class AnnualScheduledHoursServiceTest {
             }
 
             @Override
-            public List<EmployeeId> findEmployeesWithoutRuleOn(LocalDate date) {
+            public List<EmployeeId> findEmployeesWithRuleOn(LocalDate date) {
                 return List.of();
             }
 

@@ -3,6 +3,7 @@ package jp.co.sample.kintai.employee.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +64,7 @@ class EmployeeVisibilityTest {
         org.appoint(sales, sectionManager, HIRED);
         org.appoint(hq, divisionManager, HIRED);
 
-        visibility = new OrganizationBackedEmployeeVisibility(org.chart());
+        visibility = new OrganizationBackedEmployeeVisibility(org.approverScope());
     }
 
     private Requester requester(EmployeeId id, Role... roles) {
@@ -193,6 +194,72 @@ class EmployeeVisibilityTest {
             assertThat(visibility.canView(
                     requester(divisionManager, Role.EMPLOYEE, Role.HR), unassigned, TODAY))
                     .as("人事は所属に関わらず見られる").isTrue();
+        }
+    }
+
+    /**
+     * 上向きと下向きが同じ答えを返すか。
+     *
+     * <p>同じ規則に<strong>向きの違う 2 つの問い方</strong>がある。
+     * 一覧は 1 人ずつ問い（上向き・O(階層の深さ)）、
+     * 組織図は見てよい部署をまとめて問う（下向き・O(配下の部署数)）。
+     * どちらも要るので 1 つに畳めない（{@link ApproverScope} の javadoc）。
+     *
+     * <p><strong>畳めないなら、食い違わないことを縛る。</strong>
+     * 別々に持ったままだと、規則を変えたときに片方だけ直せてしまい、
+     * 「一覧には出るのに組織図に出ない部署」（あるいはその逆）が生まれる。
+     * 同じ検査が 2 か所にある状態を「守られている」と読まない（落とし穴 137）。
+     */
+    @Nested
+    @DisplayName("2 つの向きが一致する")
+    class BothDirectionsAgree {
+
+        /**
+         * <strong>全組み合わせを回す。</strong> 代表を 1 つ選ぶと、
+         * その 1 つで偶然そろっているだけの実装を通してしまう（落とし穴 24）。
+         */
+        @Test
+        @DisplayName("UT-AUTH-10 どの承認者とどの社員の組でも、上向きと下向きが一致する")
+        void upwardMatchesDownward() {
+            var scope = org.approverScope();
+            var unassigned = org.hire("E0400", HIRED);
+            List<EmployeeId> managers = List.of(sectionManager, divisionManager,
+                    yamada, suzuki);
+            List<EmployeeId> targets = List.of(yamada, suzuki, sectionManager,
+                    divisionManager, unassigned);
+
+            for (EmployeeId manager : managers) {
+                Set<DepartmentId> visibleDepartments = scope.departmentsOf(manager, TODAY);
+                for (EmployeeId target : targets) {
+                    boolean upward = scope.covers(manager, target, TODAY);
+                    boolean downward = org.chart().departmentOf(target, TODAY)
+                            .map(department -> visibleDepartments.contains(department.id()))
+                            .orElse(false);
+                    assertThat(upward)
+                            .as("上向き %s → %s".formatted(manager.value(), target.value()))
+                            .isEqualTo(downward);
+                }
+            }
+        }
+
+        /**
+         * <strong>恒真でないことを確かめる。</strong>
+         * 上の検査は「どちらも常に false」でも通る。
+         * 真になる組と偽になる組が実際にあることを、ここで固定する（落とし穴 36）。
+         */
+        @Test
+        @DisplayName("UT-AUTH-11 一致の検査が恒真でない")
+        void bothDirectionsAreExercised() {
+            var scope = org.approverScope();
+
+            assertThat(scope.covers(divisionManager, yamada, TODAY))
+                    .as("本部長は営業部の山田を配下に持つ").isTrue();
+            assertThat(scope.covers(sectionManager, suzuki, TODAY))
+                    .as("営業部長は総務部の鈴木を配下に持たない").isFalse();
+            assertThat(scope.departmentsOf(divisionManager, TODAY))
+                    .as("本部長は本部・営業部・総務部の 3 つ").hasSize(3);
+            assertThat(scope.departmentsOf(yamada, TODAY))
+                    .as("長を務めていない社員は空").isEmpty();
         }
     }
 }

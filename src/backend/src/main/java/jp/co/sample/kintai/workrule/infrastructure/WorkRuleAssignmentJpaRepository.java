@@ -20,24 +20,24 @@ interface WorkRuleAssignmentJpaRepository extends JpaRepository<WorkRuleAssignme
     List<WorkRuleAssignmentEntity> findByEmployeeIdOrderByValidFrom(UUID employeeId);
 
     /**
-     * 指定日に規則が適用されていない在籍者。
+     * 指定日に規則が適用されている社員。
      *
-     * <p>「在籍者全員に規則が適用されている」ことは DB では守れないので、
-     * ここで検知する。退職日は最終在籍日なので {@code >=} で比べる。
+     * <p><strong>{@code employees} を読まない。</strong>
+     * 以前はここが 1 本のネイティブ SQL で「規則の無い在籍者」を返しており、
+     * {@code e.hired_on <= :date AND (e.retired_on IS NULL OR e.retired_on >= :date)}
+     * という<strong>`employee` が所有する在籍の判定</strong>を書き写していた。
+     * SQL の中の写しは ArchUnit からも `check-identifiers.py` からも見えないので、
+     * 退職日の扱い（最終在籍日・落とし穴 10）を片方だけ直しても誰も気づけない。
+     *
+     * <p>在籍者との差を取るのは {@code application} の役目である
+     * （{@code WorkRuleQueryService.findEmployeesWithoutWorkRule}）。
      */
-    @Query(value = """
-            SELECT e.id
-              FROM employees e
-             WHERE e.hired_on <= :date
-               AND (e.retired_on IS NULL OR e.retired_on >= :date)
-               AND NOT EXISTS (
-                   SELECT 1 FROM work_rule_assignments a
-                    WHERE a.employee_id = e.id
-                      AND a.valid_from <= :date
-                      AND (a.valid_to IS NULL OR a.valid_to > :date))
-             ORDER BY e.employee_number
-            """, nativeQuery = true)
-    List<UUID> findEmployeesWithoutRuleOn(@Param("date") LocalDate date);
+    @Query("""
+            SELECT DISTINCT a.employeeId FROM WorkRuleAssignmentEntity a
+             WHERE a.validFrom <= :date
+               AND (a.validTo IS NULL OR a.validTo > :date)
+            """)
+    List<UUID> findEmployeesWithRuleOn(@Param("date") LocalDate date);
 
     /**
      * 期間に<strong>実際に適用されている</strong>就業規則の適用。

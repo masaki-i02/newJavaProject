@@ -496,6 +496,54 @@ class WorkRuleApiTest extends WebIntegrationTestBase {
                                     org.hamcrest.Matchers.hasItem(hr.value().toString()))));
         }
 
+        /**
+         * <strong>在籍していない社員は現れない。</strong>
+         *
+         * <p>この一覧は「規則を適用しなければならない社員」を人事に示すものなので、
+         * 退職者や未来日入社の社員が混ざると、
+         * <strong>適用のしようがない社員がいつまでも残り続ける。</strong>
+         *
+         * <p>在籍の判定を持つのは {@code employee} である。
+         * かつては {@code workrule} のネイティブ SQL が {@code employees} を直接読み、
+         * {@code hired_on <= :date AND (retired_on IS NULL OR retired_on >= :date)} を
+         * <strong>書き写していた</strong>（落とし穴 69・170）。
+         * 写しは SQL の文字列の中にあるので ArchUnit にも見えない。
+         *
+         * <p><strong>境界を月中に置く。</strong> 退職日を基準日と同じ日にすると
+         * 「最終在籍日」の扱い（落とし穴 10）を通らず、
+         * 退職者を一律に除く実装でも通ってしまう。
+         */
+        @Test
+        @DisplayName("IT-WR-49 退職者と未来日入社の社員は規則の無い在籍者に現れない")
+        void unassignedExcludesNonEmployed() throws Exception {
+            var retired = new EmployeeId(UUID.randomUUID());
+            employees.save(new Employee(retired, new EmployeeNumber("E0002"), "退職 次郎",
+                    new Email("e0002@example.com"), HIRED,
+                    Optional.of(LocalDate.of(2026, 4, 30)), Set.of(Role.EMPLOYEE)));
+            var future = new EmployeeId(UUID.randomUUID());
+            employees.save(new Employee(future, new EmployeeNumber("E0003"), "入社 三郎",
+                    new Email("e0003@example.com"), LocalDate.of(2026, 6, 1),
+                    Optional.empty(), Set.of(Role.EMPLOYEE)));
+            var leavingMidMonth = new EmployeeId(UUID.randomUUID());
+            employees.save(new Employee(leavingMidMonth, new EmployeeNumber("E0004"),
+                    "月中 四郎", new Email("e0004@example.com"), HIRED,
+                    Optional.of(LocalDate.of(2026, 5, 1)), Set.of(Role.EMPLOYEE)));
+
+            mockMvc.perform(get("/api/work-rule-assignments/unassigned").with(asHr())
+                            .param("date", "2026-05-01"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.employeeIds")
+                            .value(org.hamcrest.Matchers.not(
+                                    org.hamcrest.Matchers.hasItem(retired.value().toString()))))
+                    .andExpect(jsonPath("$.employeeIds")
+                            .value(org.hamcrest.Matchers.not(
+                                    org.hamcrest.Matchers.hasItem(future.value().toString()))))
+                    // ★ 退職日当日はまだ在籍している（最終在籍日）ので現れる
+                    .andExpect(jsonPath("$.employeeIds")
+                            .value(org.hamcrest.Matchers.hasItem(
+                                    leavingMidMonth.value().toString())));
+        }
+
         /** 適用履歴は本人も見られる。自分の労働条件そのものである。 */
         @Test
         @DisplayName("IT-WR-40 本人は自分の適用履歴を見られる")

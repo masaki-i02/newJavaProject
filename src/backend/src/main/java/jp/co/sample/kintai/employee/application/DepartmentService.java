@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import jp.co.sample.kintai.employee.domain.Assignment;
+import jp.co.sample.kintai.employee.domain.ApproverScope;
 import jp.co.sample.kintai.employee.domain.AssignmentRepository;
 import jp.co.sample.kintai.employee.domain.Department;
 import jp.co.sample.kintai.employee.domain.DepartmentCode;
@@ -46,6 +47,14 @@ public class DepartmentService {
 
     private final DepartmentRepository departments;
     private final ManagershipRepository managerships;
+    /**
+     * 承認者が見てよい範囲。
+     *
+     * <p><strong>ここで組み立て直さない。</strong>
+     * 1 人ずつの判定（{@code EmployeeVisibility}）と同じ規則なので、
+     * 写すと片方だけが古くなる（落とし穴 137）。
+     */
+    private final ApproverScope approverScope;
     private final EmployeeRepository employees;
     private final AssignmentRepository assignments;
     private final MonthClosureQuery monthClosure;
@@ -53,11 +62,13 @@ public class DepartmentService {
 
     public DepartmentService(DepartmentRepository departments,
                              ManagershipRepository managerships,
+                             ApproverScope approverScope,
                              EmployeeRepository employees,
                              AssignmentRepository assignments,
                              MonthClosureQuery monthClosure, Clock clock) {
         this.departments = departments;
         this.managerships = managerships;
+        this.approverScope = approverScope;
         this.employees = employees;
         this.assignments = assignments;
         this.monthClosure = monthClosure;
@@ -204,16 +215,12 @@ public class DepartmentService {
         if (requester.canReachEveryone()) {
             return Set.of();
         }
-        // ★ ロール（APPROVER）ではなく、その日に長を務めている事実で判定する。
-        //   APPROVER は認証時に managerships から導出される値なので、
-        //   ロールを先に見ても同じことを二度訊くだけになる（落とし穴 77）。
-        //   一般社員はここで 0 件になり、組織図を見られない
-        Set<DepartmentId> scope = managerships
-                .findByManager(requester.employeeId(), today).stream()
-                .flatMap(m -> departments.findSelfAndDescendants(m.departmentId()).stream())
-                .map(Department::id)
-                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+        // ★ 規則そのものは ApproverScope が持つ。ここに書き写すと、
+        //   1 人ずつの判定（EmployeeVisibility）と食い違っても誰も気づけない。
+        //   ロールではなく「その日に長を務めている事実」で決まるのもあちら側の判断である
+        Set<DepartmentId> scope = approverScope.departmentsOf(requester.employeeId(), today);
         if (scope.isEmpty()) {
+            // 一般社員はここで 0 件になり、組織図を見られない
             throw new AccessDeniedException();
         }
         return scope;
@@ -428,7 +435,8 @@ public class DepartmentService {
     private void requireMonthNotClosed(LocalDate date, String operation) {
         YearMonth month = YearMonth.from(date);
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new EmployeeLifecycleService.MonthAlreadyClosedException(month, operation);
+            throw MonthClosureQuery.MonthAlreadyClosedException
+                    .goingBackTo(month, operation);
         }
     }
 

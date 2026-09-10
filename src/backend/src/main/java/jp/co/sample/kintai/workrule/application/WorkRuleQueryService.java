@@ -9,6 +9,8 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jp.co.sample.kintai.employee.application.EmployeeDirectoryService;
+import jp.co.sample.kintai.employee.domain.Employee;
 import jp.co.sample.kintai.shared.application.AccessDeniedException;
 import jp.co.sample.kintai.shared.domain.DateRange;
 import jp.co.sample.kintai.shared.domain.DomainErrorKind;
@@ -51,15 +53,25 @@ public class WorkRuleQueryService {
     private final WorkRuleRepository workRules;
     private final CompanyCalendarRepository calendar;
     private final EmployeeVisibility visibility;
+    /**
+     * 在籍者を数え上げるために {@code employee} を呼ぶ。
+     *
+     * <p><strong>図にある辺（{@code workrule → employee}）に沿っている</strong>ので
+     * {@code application} から呼んでよい（アーキテクチャ設計書 4）。
+     * 逆向きならポートを {@code shared.domain} に置く。
+     */
+    private final EmployeeDirectoryService employees;
     private final Clock clock;
 
     public WorkRuleQueryService(WorkRuleSeriesRepository series, WorkRuleRepository workRules,
                                 CompanyCalendarRepository calendar,
-                                EmployeeVisibility visibility, Clock clock) {
+                                EmployeeVisibility visibility,
+                                EmployeeDirectoryService employees, Clock clock) {
         this.series = series;
         this.workRules = workRules;
         this.calendar = calendar;
         this.visibility = visibility;
+        this.employees = employees;
         this.clock = clock;
     }
 
@@ -125,11 +137,31 @@ public class WorkRuleQueryService {
      *
      * <p>社員番号も氏名も返さない。{@code employee} が所有する概念であり、
      * ここに混ぜると {@code workrule} が持っていない情報の提供者になる。
+     *
+     * <p><strong>差は 2 つの問いから取る。</strong>
+     * 「その日に在籍しているか」を持つのは {@code employee}、
+     * 「その日に規則が適用されているか」を持つのは {@code workrule} である。
+     * 1 本の SQL にまとめると {@code workrule} が {@code employees} を直接読み、
+     * 退職日の扱い（最終在籍日）を<strong>2 か所で保つ</strong>ことになる
+     * （落とし穴 69・170）。SQL の中の写しはどの検査からも見えない。
+     *
+     * <p>在籍者の問い合わせは {@code canReachEveryone}（人事・管理者）を要求する。
+     * この経路は先に {@link #requireHumanResources} を通っているので、
+     * 認可が緩むことはない。
      */
     public UnassignedEmployees findEmployeesWithoutWorkRule(Requester requester, Optional<LocalDate> date) {
         requireHumanResources(requester);
         LocalDate on = date.orElseGet(() -> LocalDate.now(clock));
-        return new UnassignedEmployees(on, series.findEmployeesWithoutRuleOn(on));
+        // ★ 「その 1 日」を半開区間で問う。findEmployedDuring は
+        //   `hiredOn < toExclusive AND (retiredOn IS NULL OR retiredOn >= from)` なので、
+        //   [on, on+1) は「その日に在籍している」と等しい
+        var assigned = java.util.Set.copyOf(series.findEmployeesWithRuleOn(on));
+        List<EmployeeId> unassigned = employees
+                .employedDuring(requester, DateRange.closed(on, on)).stream()
+                .map(Employee::id)
+                .filter(id -> !assigned.contains(id))
+                .toList();
+        return new UnassignedEmployees(on, unassigned);
     }
 
     /**

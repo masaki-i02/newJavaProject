@@ -247,9 +247,12 @@ class DailyAttendanceScenarioTest extends IntegrationTestBase {
             var jiro = hire("E0003");
 
             assertThat(workRules.findEffective(jiro, MON)).isEmpty();
-            assertThat(series.findEmployeesWithoutRuleOn(MON)).contains(jiro);
-            assertThat(series.findEmployeesWithoutRuleOn(MON))
-                    .as("規則が適用されている社員は現れない").doesNotContain(taro);
+            // ★ ポートが答えるのは「規則が適用されている社員」までである。
+            //   在籍者との差は application が取る（IT-WR-39 が API から通す）
+            assertThat(series.findEmployeesWithRuleOn(MON))
+                    .as("規則を適用していない社員は現れない").doesNotContain(jiro);
+            assertThat(series.findEmployeesWithRuleOn(MON))
+                    .as("規則が適用されている社員は現れる").contains(taro);
         }
 
         /**

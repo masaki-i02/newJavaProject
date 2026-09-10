@@ -53,21 +53,76 @@ public interface MonthClosureQuery {
      */
     default void requireEditable(EmployeeId employeeId, YearMonth month) {
         if (isClosed(employeeId, month)) {
-            throw new MonthAlreadyClosedException(month);
+            throw MonthAlreadyClosedException.of(month);
         }
         if (!acceptsCorrectionRequest(employeeId, month)) {
             throw new MonthNotEditableException(month);
         }
     }
 
-    /** 締め済みの月への意思表示。<strong>締めは取り消せない。</strong> */
+    /**
+     * 締め済みの月を動かそうとした。<strong>締めは取り消せない。</strong>
+     *
+     * <p><strong>この型は 1 つだけである。</strong>
+     * 以前は {@code attendance}・{@code workrule}・{@code employee} が
+     * 同じ {@code errorCode} と {@code kind} を返すクラスをそれぞれ持っており、
+     * <strong>契約（型と HTTP）が 4 か所で定義されていた</strong>。
+     * 画面は {@code type} で分岐する（落とし穴 182）ので、
+     * どれか 1 つの {@code kind()} を {@code RULE_VIOLATION} に変えれば、
+     * その経路だけが 422 を返すようになる。
+     * `check-error-codes.py` は型の一覧を突き合わせるが、
+     * <strong>同じ型に別の HTTP が割り当たったことは検出できない</strong>（落とし穴 124）。
+     *
+     * <p>利用者への説明（{@code title} と本文）は操作ごとに違ってよいので、
+     * 静的ファクトリで分ける。<strong>2 つの {@code String} を並べた
+     * コンストラクタは公開しない</strong> — 入れ替えてもコンパイルが通り、
+     * 見出しと本文が入れ替わるだけで画面は動き続ける（落とし穴 187）。
+     */
     final class MonthAlreadyClosedException extends DomainException {
 
         @java.io.Serial
         private static final long serialVersionUID = 1L;
 
-        MonthAlreadyClosedException(YearMonth month) {
-            super("締め済みの月は変更できません: " + month);
+        private final String title;
+
+        private MonthAlreadyClosedException(String detail, String title) {
+            super(detail);
+            this.title = title;
+        }
+
+        /** 意思表示（訂正申請・年休）を締め済みの月へ出した。 */
+        static MonthAlreadyClosedException of(YearMonth month) {
+            return new MonthAlreadyClosedException(
+                    "締め済みの月は変更できません: " + month, "締め済みの月です");
+        }
+
+        /** 締め済みの月の勤怠を計算し直そうとした。 */
+        public static MonthAlreadyClosedException recalculating(YearMonth month) {
+            return new MonthAlreadyClosedException(
+                    "締め済みの月は再計算できません: " + month, "締め済みの月です");
+        }
+
+        /**
+         * 全社で共有する表（会社カレンダー・就業規則）を変えようとした。
+         *
+         * @param subject 変更しようとした対象（「会社カレンダー」など）
+         */
+        public static MonthAlreadyClosedException affecting(YearMonth month, String subject) {
+            return new MonthAlreadyClosedException(
+                    "締め済みの月に影響するため%sを変更できません: %s".formatted(subject, month),
+                    "締め済みの月に影響する変更はできません");
+        }
+
+        /**
+         * 締め済みの月へ遡る変更（異動・退職・部署長の任命など）。
+         *
+         * @param operation 行おうとした操作（「異動」など）
+         */
+        public static MonthAlreadyClosedException goingBackTo(YearMonth month,
+                                                              String operation) {
+            return new MonthAlreadyClosedException(
+                    "締め済みの月に遡るため%sできません: %s".formatted(operation, month),
+                    "締め済みの月に遡る変更はできません");
         }
 
         @Override
@@ -82,7 +137,7 @@ public interface MonthClosureQuery {
 
         @Override
         public String title() {
-            return "締め済みの月です";
+            return title;
         }
     }
 

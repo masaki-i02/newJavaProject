@@ -27,23 +27,11 @@ interface EmployeeJpaRepository extends JpaRepository<EmployeeEntity, UUID> {
     List<EmployeeEntity> findAllByEmployeeNumber(String employeeNumber);
 
     /**
-     * 指定日に在籍していた社員。
-     *
-     * <p>退職日は<strong>最終在籍日</strong>なので {@code >=} で比べる。
-     * {@code >} にすると退職日当日が漏れる（CLAUDE.md 落とし穴 10）。
-     */
-    @Query("""
-            select e from EmployeeEntity e
-             where e.hiredOn <= :asOf
-               and (e.retiredOn is null or e.retiredOn >= :asOf)
-             order by e.employeeNumber
-            """)
-    List<EmployeeEntity> findActiveOn(@Param("asOf") LocalDate asOf);
-
-    /**
      * 指定日に退職していない社員。<strong>未来日入社の社員も含む。</strong>
      *
-     * <p>{@link #findActiveOn} と違い、入社日で絞らない。名簿の用途である。
+     * <p>{@link #findEmployedDuring} と違い、<strong>入社日で絞らない。</strong>
+     * 名簿の用途である。絞ると未来日入社の社員が一覧に現れず、
+     * 管理者が登録の成否を確かめられない（落とし穴 75）。
      */
     @Query("""
             select e from EmployeeEntity e
@@ -55,9 +43,15 @@ interface EmployeeJpaRepository extends JpaRepository<EmployeeEntity, UUID> {
     /**
      * 期間と在籍期間が<strong>重なる</strong>社員。
      *
-     * <p>{@link #findActiveOn} は基準日 1 点なので、月中入社か月中退職のどちらかが必ず落ちる。
-     * 給与連携（BR-18）は<strong>その月に 1 日でも在籍した社員</strong>を数え上げるので、
+     * <p>給与連携（BR-18）は<strong>その月に 1 日でも在籍した社員</strong>を数え上げるので、
      * 重なりで絞る。除くと退職者の最終給与が出ない。
+     *
+     * <p><strong>「その 1 日に在籍しているか」もこの問いで答える。</strong>
+     * 期間へ {@code [その日, 翌日)} を渡せば
+     * {@code hiredOn <= その日 かつ (未退職 または 退職日 >= その日)} と等しい。
+     * かつて {@code findActiveOn} という 1 日専用の問い合わせを別に持っていたが、
+     * <strong>同じ述語が 2 か所にある</strong>ぶん、退職日の扱い（最終在籍日）を
+     * 片方だけ直せる状態だった。しかも誰も呼んでいなかった（落とし穴 87）。
      *
      * <p>{@code retiredOn} は<strong>最終在籍日</strong>（閉区間）なので {@code >=} で比べる。
      * {@code >} にすると退職日当日が漏れる（CLAUDE.md 落とし穴 10）。

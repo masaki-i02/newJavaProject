@@ -97,7 +97,7 @@ public class WorkRuleMasterService {
         requireHumanResources(requester);
         YearMonth month = YearMonth.from(date);
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new MonthAlreadyClosedException(month, "会社カレンダー");
+            throw MonthClosureQuery.MonthAlreadyClosedException.affecting(month, "会社カレンダー");
         }
         calendar.save(date, dayType, name);
         requireDivisorUnchanged(date);
@@ -227,7 +227,7 @@ public class WorkRuleMasterService {
         YearMonth last = YearMonth.from(period.toExclusive().minusDays(1));
         while (!month.isAfter(last)) {
             if (monthClosure.isClosedForAnyone(month)) {
-                throw new MonthAlreadyClosedException(month, "会社カレンダー");
+                throw MonthClosureQuery.MonthAlreadyClosedException.affecting(month, "会社カレンダー");
             }
             month = month.plusMonths(1);
         }
@@ -564,7 +564,7 @@ public class WorkRuleMasterService {
         requireHumanResources(requester);
         YearMonth month = YearMonth.from(validFrom);
         if (monthClosure.isClosed(employeeId, month)) {
-            throw new MonthAlreadyClosedException(month, "就業規則の適用");
+            throw MonthClosureQuery.MonthAlreadyClosedException.affecting(month, "就業規則の適用");
         }
         // ★ その日に有効な版を持たない系列へは適用しない。
         //   適用だけがあって版が無い日は「規則が引けない日」になり、
@@ -638,7 +638,7 @@ public class WorkRuleMasterService {
         // ★ 締め済みの月を拒む。所定が変われば確定済みの月次清算と矛盾する
         YearMonth month = YearMonth.from(spec.validFrom());
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new MonthAlreadyClosedException(month, "就業規則");
+            throw MonthClosureQuery.MonthAlreadyClosedException.affecting(month, "就業規則");
         }
 
         List<WorkRule> versions = workRules.findVersionsOf(seriesId);
@@ -1169,37 +1169,6 @@ public class WorkRuleMasterService {
         @Override
         public String title() {
             return "年度に版の無い日がある就業規則があります";
-        }
-    }
-
-    /**
-     * 締め済みの月に影響する変更。
-     *
-     * <p><strong>状態が変われば通るので {@code CONFLICT}（409）。</strong>
-     * ただし締めを戻す手段は用意していないので、実際には通らない。
-     */
-    public static final class MonthAlreadyClosedException extends DomainException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        MonthAlreadyClosedException(YearMonth month, String subject) {
-            super("締め済みの月に影響するため%sを変更できません: %s".formatted(subject, month));
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:month-already-closed";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "締め済みの月に影響する変更はできません";
         }
     }
 

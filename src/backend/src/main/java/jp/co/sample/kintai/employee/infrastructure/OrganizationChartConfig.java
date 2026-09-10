@@ -3,6 +3,7 @@ package jp.co.sample.kintai.employee.infrastructure;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import jp.co.sample.kintai.employee.domain.ApproverScope;
 import jp.co.sample.kintai.employee.domain.AssignmentRepository;
 import jp.co.sample.kintai.employee.domain.DepartmentRepository;
 import jp.co.sample.kintai.employee.domain.EmployeeRepository;
@@ -31,13 +32,25 @@ class OrganizationChartConfig {
     }
 
     /**
+     * 承認者が見てよい範囲。
+     *
+     * <p>上向き（1 人を見てよいか）と下向き（見てよい部署はどれか）の
+     * <strong>両方をここが持つ</strong>。規則が 1 つだからである。
+     */
+    @Bean
+    ApproverScope approverScope(OrganizationChart chart, ManagershipRepository managerships,
+                                DepartmentRepository departments) {
+        return new ApproverScope(chart, managerships, departments);
+    }
+
+    /**
      * 閲覧範囲の判定。
      *
      * <p>ポートは {@code shared.domain} にあり、実装は組織を持つ側（ここ）が提供する。
      * 勤怠の各コンテキストは {@code EmployeeVisibility} だけを見る（ADR 0004）。
      */
     @Bean
-    EmployeeVisibility employeeVisibility(OrganizationChart chart) {
-        return new OrganizationBackedEmployeeVisibility(chart);
+    EmployeeVisibility employeeVisibility(ApproverScope scope) {
+        return new OrganizationBackedEmployeeVisibility(scope);
     }
 }

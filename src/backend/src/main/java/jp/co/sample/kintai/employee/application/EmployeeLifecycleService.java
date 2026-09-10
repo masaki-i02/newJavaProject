@@ -227,7 +227,7 @@ public class EmployeeLifecycleService {
      */
     private void requireMonthNotClosed(EmployeeId id, YearMonth month, String operation) {
         if (monthClosure.isClosedForAnyone(month)) {
-            throw new MonthAlreadyClosedException(month, operation);
+            throw MonthClosureQuery.MonthAlreadyClosedException.goingBackTo(month, operation);
         }
     }
 
@@ -327,32 +327,6 @@ public class EmployeeLifecycleService {
         @Override
         public String title() {
             return "入社日より前には所属できません";
-        }
-    }
-
-    /** 締め済みの月へ遡る変更。<strong>確定済みの勤怠の承認者が変わってしまう。</strong> */
-    public static final class MonthAlreadyClosedException extends DomainException {
-
-        @Serial
-        private static final long serialVersionUID = 1L;
-
-        MonthAlreadyClosedException(YearMonth month, String operation) {
-            super("締め済みの月に遡るため%sできません: %s".formatted(operation, month));
-        }
-
-        @Override
-        public String errorCode() {
-            return "urn:kintai:error:month-already-closed";
-        }
-
-        @Override
-        public DomainErrorKind kind() {
-            return DomainErrorKind.CONFLICT;
-        }
-
-        @Override
-        public String title() {
-            return "締め済みの月に遡る変更はできません";
         }
     }
 
